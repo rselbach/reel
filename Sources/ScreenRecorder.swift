@@ -24,6 +24,7 @@ class ScreenRecorder: NSObject, ObservableObject {
     @Published var selectedWindow: SCWindow?
     @Published var recordingMode: RecordingMode = .display
     @Published var errorMessage: String?
+    @Published var lastRecordedURL: URL?
 
     private var stream: SCStream?
     private var assetWriter: AVAssetWriter?
@@ -197,7 +198,9 @@ class ScreenRecorder: NSObject, ObservableObject {
         }
 
         print("Recording saved to: \(finalURL.path)")
-        if settings.openFinderAfterRecording {
+        lastRecordedURL = finalURL
+
+        if settings.openFinderAfterRecording && !settings.showPreviewAfterRecording {
             NSWorkspace.shared.selectFile(finalURL.path, inFileViewerRootedAtPath: "")
         }
     }
@@ -237,13 +240,16 @@ extension ScreenRecorder: SCStreamOutput {
 
         let presentationTime = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
         nonisolated(unsafe) let buffer = sampleBuffer
-        
-        MainActor.assumeIsolated {
-            guard let assetWriter, let videoInput else { return }
 
-            if startTime == nil {
-                startTime = presentationTime
-                assetWriter.startSession(atSourceTime: startTime!)
+        Task { @MainActor [weak self] in
+            guard let self,
+                  let assetWriter = self.assetWriter,
+                  let videoInput = self.videoInput
+            else { return }
+
+            if self.startTime == nil {
+                self.startTime = presentationTime
+                assetWriter.startSession(atSourceTime: presentationTime)
             }
 
             if videoInput.isReadyForMoreMediaData {

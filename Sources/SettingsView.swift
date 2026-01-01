@@ -54,6 +54,7 @@ struct GeneralTab: View {
             }
 
             Toggle("Open Finder after recording", isOn: $settings.openFinderAfterRecording)
+            Toggle("Show preview after recording", isOn: $settings.showPreviewAfterRecording)
         }
         .padding()
     }

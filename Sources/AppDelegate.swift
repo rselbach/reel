@@ -7,6 +7,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var screenRecorder: ScreenRecorder!
     private var settingsWindow: NSWindow?
     private var recordingDialogWindow: NSWindow?
+    private var previewWindow: NSWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         screenRecorder = ScreenRecorder()
@@ -32,10 +33,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 guard let self else { return }
                 if self.screenRecorder.isRecording {
                     await self.screenRecorder.stopRecording()
+                    self.rebuildMenu()
+                    if AppSettings.shared.showPreviewAfterRecording,
+                       let url = self.screenRecorder.lastRecordedURL {
+                        self.showPreview(for: url)
+                    }
                 } else {
                     await self.screenRecorder.startRecording()
+                    self.rebuildMenu()
                 }
-                self.rebuildMenu()
             }
         }
 
@@ -102,7 +108,40 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         Task { @MainActor in
             await screenRecorder.stopRecording()
             rebuildMenu()
+            if AppSettings.shared.showPreviewAfterRecording,
+               let url = screenRecorder.lastRecordedURL {
+                showPreview(for: url)
+            }
         }
+    }
+
+    private func showPreview(for url: URL) {
+        let previewView = PostRecordingView(
+            videoURL: url,
+            onDismiss: { [weak self] in
+                self?.previewWindow?.close()
+                self?.previewWindow = nil
+            },
+            onRevealInFinder: {
+                NSWorkspace.shared.selectFile(url.path, inFileViewerRootedAtPath: "")
+            },
+            onDelete: { [weak self] in
+                try? FileManager.default.removeItem(at: url)
+                self?.previewWindow?.close()
+                self?.previewWindow = nil
+            }
+        )
+
+        let hostingController = NSHostingController(rootView: previewView)
+        let window = NSWindow(contentViewController: hostingController)
+        window.title = "Recording Preview"
+        window.styleMask = [.titled, .closable, .resizable]
+        window.center()
+        window.isReleasedWhenClosed = false
+
+        previewWindow = window
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     @objc private func showRecordingDialog() {

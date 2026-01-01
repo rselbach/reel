@@ -39,6 +39,10 @@ class AppSettings: ObservableObject {
         didSet { UserDefaults.standard.set(openFinderAfterRecording, forKey: "openFinderAfterRecording") }
     }
 
+    @Published var showPreviewAfterRecording: Bool {
+        didSet { UserDefaults.standard.set(showPreviewAfterRecording, forKey: "showPreviewAfterRecording") }
+    }
+
     @Published var recordingHotkey: HotkeyCombo {
         didSet {
             if let data = try? JSONEncoder().encode(recordingHotkey) {
@@ -100,6 +104,7 @@ class AppSettings: ObservableObject {
         self.frameRate = defaults.object(forKey: "frameRate") as? Int ?? 60
         self.videoQuality = VideoQuality(rawValue: defaults.string(forKey: "videoQuality") ?? "") ?? .medium
         self.openFinderAfterRecording = defaults.object(forKey: "openFinderAfterRecording") as? Bool ?? true
+        self.showPreviewAfterRecording = defaults.object(forKey: "showPreviewAfterRecording") as? Bool ?? true
 
         if let path = defaults.string(forKey: "outputDirectory") {
             self.outputDirectory = URL(fileURLWithPath: path)
