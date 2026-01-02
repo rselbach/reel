@@ -37,7 +37,9 @@ cat > "$APP_DIR/Contents/Info.plist" << EOF
     <key>LSUIElement</key>
     <true/>
     <key>NSScreenCaptureUsageDescription</key>
-    <string>Mili needs screen recording permission to capture your screen.</string>
+    <string>Reel needs screen recording permission to capture your screen.</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Reel needs microphone access to record audio with your screen recordings.</string>
 </dict>
 </plist>
 EOF

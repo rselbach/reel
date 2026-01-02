@@ -90,6 +90,19 @@ struct RecordingTab: View {
                     Text(quality.rawValue).tag(quality)
                 }
             }
+
+            Divider()
+
+            Toggle("Record audio from microphone", isOn: $settings.recordAudio)
+
+            if settings.recordAudio {
+                Picker("Audio input:", selection: $settings.audioDeviceID) {
+                    Text("Default").tag(nil as String?)
+                    ForEach(settings.availableAudioDevices, id: \.uniqueID) { device in
+                        Text(device.localizedName).tag(device.uniqueID as String?)
+                    }
+                }
+            }
         }
         .padding()
     }

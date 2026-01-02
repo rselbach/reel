@@ -1,3 +1,4 @@
+import AVFoundation
 import CoreGraphics
 import Foundation
 import ServiceManagement
@@ -49,6 +50,30 @@ class AppSettings: ObservableObject {
                 UserDefaults.standard.set(data, forKey: "recordingHotkey")
             }
         }
+    }
+
+    @Published var recordAudio: Bool {
+        didSet { UserDefaults.standard.set(recordAudio, forKey: "recordAudio") }
+    }
+
+    @Published var audioDeviceID: String? {
+        didSet { UserDefaults.standard.set(audioDeviceID, forKey: "audioDeviceID") }
+    }
+
+    var availableAudioDevices: [AVCaptureDevice] {
+        AVCaptureDevice.DiscoverySession(
+            deviceTypes: [.microphone, .external],
+            mediaType: .audio,
+            position: .unspecified
+        ).devices
+    }
+
+    var selectedAudioDevice: AVCaptureDevice? {
+        guard let id = audioDeviceID else {
+            return AVCaptureDevice.default(for: .audio)
+        }
+        return availableAudioDevices.first { $0.uniqueID == id }
+            ?? AVCaptureDevice.default(for: .audio)
     }
 
     enum VideoQuality: String, CaseIterable {
@@ -120,6 +145,9 @@ class AppSettings: ObservableObject {
         } else {
             self.recordingHotkey = .default
         }
+
+        self.recordAudio = defaults.bool(forKey: "recordAudio")
+        self.audioDeviceID = defaults.string(forKey: "audioDeviceID")
     }
 
     private func updateLaunchAtLogin() {

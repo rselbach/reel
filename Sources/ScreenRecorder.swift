@@ -29,6 +29,9 @@ class ScreenRecorder: NSObject, ObservableObject {
     private var stream: SCStream?
     private var assetWriter: AVAssetWriter?
     private var videoInput: AVAssetWriterInput?
+    private var audioInput: AVAssetWriterInput?
+    private var audioCaptureSession: AVCaptureSession?
+    private var audioOutput: AVCaptureAudioDataOutput?
     private var startTime: CMTime?
     private var outputURL: URL?
 
@@ -112,11 +115,16 @@ class ScreenRecorder: NSObject, ObservableObject {
 
             try setupAssetWriter(width: config.width, height: config.height)
 
+            if settings.recordAudio {
+                try setupAudioCapture()
+            }
+
             stream = SCStream(filter: filter, configuration: config, delegate: self)
 
             try stream?.addStreamOutput(self, type: .screen, sampleHandlerQueue: .global())
 
             try await stream?.startCapture()
+            audioCaptureSession?.startRunning()
             isRecording = true
             errorMessage = nil
         } catch {
@@ -127,6 +135,8 @@ class ScreenRecorder: NSObject, ObservableObject {
 
     func stopRecording() async {
         guard isRecording else { return }
+
+        audioCaptureSession?.stopRunning()
 
         do {
             try await stream?.stopCapture()
@@ -164,12 +174,53 @@ class ScreenRecorder: NSObject, ObservableObject {
             assetWriter?.add(videoInput)
         }
 
+        if settings.recordAudio {
+            let audioSettings: [String: Any] = [
+                AVFormatIDKey: kAudioFormatMPEG4AAC,
+                AVSampleRateKey: 44100,
+                AVNumberOfChannelsKey: 2,
+                AVEncoderBitRateKey: 128000
+            ]
+            audioInput = AVAssetWriterInput(mediaType: .audio, outputSettings: audioSettings)
+            audioInput?.expectsMediaDataInRealTime = true
+
+            if let audioInput, assetWriter?.canAdd(audioInput) == true {
+                assetWriter?.add(audioInput)
+            }
+        }
+
         assetWriter?.startWriting()
         startTime = nil
     }
 
+    private func setupAudioCapture() throws {
+        guard let device = settings.selectedAudioDevice else {
+            throw NSError(domain: "ScreenRecorder", code: 1, userInfo: [NSLocalizedDescriptionKey: "No audio device available"])
+        }
+
+        let session = AVCaptureSession()
+        session.beginConfiguration()
+
+        let input = try AVCaptureDeviceInput(device: device)
+        if session.canAddInput(input) {
+            session.addInput(input)
+        }
+
+        let output = AVCaptureAudioDataOutput()
+        output.setSampleBufferDelegate(self, queue: DispatchQueue(label: "audio.capture.queue"))
+        if session.canAddOutput(output) {
+            session.addOutput(output)
+        }
+
+        session.commitConfiguration()
+
+        audioCaptureSession = session
+        audioOutput = output
+    }
+
     private func finalizeRecording() async {
         videoInput?.markAsFinished()
+        audioInput?.markAsFinished()
         await assetWriter?.finishWriting()
 
         guard let tempURL = outputURL else { return }
@@ -209,6 +260,9 @@ class ScreenRecorder: NSObject, ObservableObject {
         stream = nil
         assetWriter = nil
         videoInput = nil
+        audioInput = nil
+        audioCaptureSession = nil
+        audioOutput = nil
         startTime = nil
     }
 }
@@ -254,6 +308,29 @@ extension ScreenRecorder: SCStreamOutput {
 
             if videoInput.isReadyForMoreMediaData {
                 videoInput.append(buffer)
+            }
+        }
+    }
+}
+
+extension ScreenRecorder: AVCaptureAudioDataOutputSampleBufferDelegate {
+    nonisolated func captureOutput(
+        _ output: AVCaptureOutput,
+        didOutput sampleBuffer: CMSampleBuffer,
+        from connection: AVCaptureConnection
+    ) {
+        guard sampleBuffer.isValid else { return }
+
+        nonisolated(unsafe) let buffer = sampleBuffer
+
+        Task { @MainActor [weak self] in
+            guard let self,
+                  let audioInput = self.audioInput,
+                  self.startTime != nil
+            else { return }
+
+            if audioInput.isReadyForMoreMediaData {
+                audioInput.append(buffer)
             }
         }
     }
