@@ -8,6 +8,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var settingsWindow: NSWindow?
     private var recordingDialogWindow: NSWindow?
     private var previewWindow: NSWindow?
+    private var isCountdownActive = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         screenRecorder = ScreenRecorder()
@@ -46,6 +47,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                         self.showRecordingDialog()
                         return
                     }
+                    // Prevent multiple overlapping countdowns
+                    guard !self.isCountdownActive else { return }
+                    self.isCountdownActive = true
+                    defer { self.isCountdownActive = false }
+                    
                     // Show countdown before starting (same as menu flow)
                     guard await CountdownOverlay().show() else { return }
                     await self.screenRecorder.startRecording()

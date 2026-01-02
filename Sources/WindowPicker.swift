@@ -12,6 +12,12 @@ class WindowPicker: NSObject {
     var onWindowSelected: ((SCWindow) -> Void)?
     var onCancelled: (() -> Void)?
     
+    private var globalBounds: CGRect {
+        NSScreen.screens.reduce(into: .null) { result, screen in
+            result = result.union(screen.frame)
+        }
+    }
+    
     func start(with windows: [SCWindow]) {
         availableWindows = windows
         windowIDSet = Set(windows.map { $0.windowID })
@@ -99,14 +105,13 @@ class WindowPicker: NSObject {
     }
     
     private func handleMouseMoved(to point: NSPoint) {
-        // Find the primary screen (origin of global coordinate system)
-        guard let primaryScreen = NSScreen.screens.first else { return }
-
-        // Convert from NSScreen coordinates (origin bottom-left of primary)
-        // to CGWindow coordinates (origin top-left of primary)
+        let bounds = globalBounds
+        
+        // Convert from NSScreen coordinates (origin bottom-left of global bounds)
+        // to CGWindow coordinates (origin top-left of global bounds)
         let flippedPoint = CGPoint(
             x: point.x,
-            y: primaryScreen.frame.height - point.y
+            y: bounds.maxY - point.y
         )
 
         let foundWindow = findTopmostWindow(at: flippedPoint)
@@ -145,14 +150,13 @@ class WindowPicker: NSObject {
     }
     
     private func showHighlight(for window: SCWindow) {
-        // Use primary screen for coordinate conversion (same as CGWindow coordinate system)
-        guard let primaryScreen = NSScreen.screens.first else { return }
-
+        let bounds = globalBounds
         let frame = window.frame
+        
         // Convert from CGWindow coords (origin top-left) to NSScreen coords (origin bottom-left)
         let flippedFrame = CGRect(
             x: frame.origin.x,
-            y: primaryScreen.frame.height - frame.origin.y - frame.height,
+            y: bounds.maxY - frame.origin.y - frame.height,
             width: frame.width,
             height: frame.height
         )

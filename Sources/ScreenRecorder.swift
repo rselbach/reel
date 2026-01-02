@@ -18,13 +18,15 @@ private enum RecordingConstants {
 
 @MainActor
 class ScreenRecorder: NSObject, ObservableObject {
-    @Published var isRecording = false {
+    @Published private(set) var isRecording = false {
         didSet {
             if let appDelegate = NSApplication.shared.delegate as? AppDelegate {
                 appDelegate.updateIcon(isRecording: isRecording)
             }
         }
     }
+    private var isStarting = false
+    private var isStopping = false
     @Published var hasPermission = false
     @Published var availableDisplays: [SCDisplay] = []
     @Published var availableWindows: [SCWindow] = []
@@ -53,6 +55,7 @@ class ScreenRecorder: NSObject, ObservableObject {
     private struct FrameWriter {
         let adaptor: AVAssetWriterInputPixelBufferAdaptor
         let videoInput: AVAssetWriterInput
+        let audioInput: AVAssetWriterInput?
         let assetWriter: AVAssetWriter
         let ciContext: CIContext
         let bufferPool: CVPixelBufferPool?
@@ -105,7 +108,9 @@ class ScreenRecorder: NSObject, ObservableObject {
     }
 
     func startRecording() async {
-        guard !isRecording else { return }
+        guard !isRecording, !isStarting else { return }
+        isStarting = true
+        defer { isStarting = false }
 
         let filter: SCContentFilter
         let captureWidth: Int
@@ -167,7 +172,9 @@ class ScreenRecorder: NSObject, ObservableObject {
     }
 
     func stopRecording() async {
-        guard isRecording else { return }
+        guard isRecording, !isStopping else { return }
+        isStopping = true
+        defer { isStopping = false }
 
         audioCaptureSession?.stopRunning()
         cameraCaptureSession?.stopRunning()
@@ -237,11 +244,28 @@ class ScreenRecorder: NSObject, ObservableObject {
                 &bufferPool
             )
 
+            // Set up audio input before creating FrameWriter so it can be included
+            if settings.recordAudio {
+                let audioSettings: [String: Any] = [
+                    AVFormatIDKey: kAudioFormatMPEG4AAC,
+                    AVSampleRateKey: 44100,
+                    AVNumberOfChannelsKey: 2,
+                    AVEncoderBitRateKey: 128000
+                ]
+                audioInput = AVAssetWriterInput(mediaType: .audio, outputSettings: audioSettings)
+                audioInput?.expectsMediaDataInRealTime = true
+
+                if let audioInput, assetWriter.canAdd(audioInput) {
+                    assetWriter.add(audioInput)
+                }
+            }
+
             // Create frame writer with captured settings for thread-safe access
             frameLock.lock()
             frameWriter = FrameWriter(
                 adaptor: adaptor,
                 videoInput: videoInput,
+                audioInput: audioInput,
                 assetWriter: assetWriter,
                 ciContext: context,
                 bufferPool: bufferPool,
@@ -252,21 +276,6 @@ class ScreenRecorder: NSObject, ObservableObject {
                 cameraShape: settings.cameraShape
             )
             frameLock.unlock()
-        }
-
-        if settings.recordAudio {
-            let audioSettings: [String: Any] = [
-                AVFormatIDKey: kAudioFormatMPEG4AAC,
-                AVSampleRateKey: 44100,
-                AVNumberOfChannelsKey: 2,
-                AVEncoderBitRateKey: 128000
-            ]
-            audioInput = AVAssetWriterInput(mediaType: .audio, outputSettings: audioSettings)
-            audioInput?.expectsMediaDataInRealTime = true
-
-            if let audioInput, assetWriter?.canAdd(audioInput) == true {
-                assetWriter?.add(audioInput)
-            }
         }
 
         assetWriter?.startWriting()
@@ -339,7 +348,12 @@ class ScreenRecorder: NSObject, ObservableObject {
             panel.nameFieldStringValue = tempURL.lastPathComponent
             panel.directoryURL = settings.outputDirectory
 
-            let response = await panel.beginSheetModal(for: NSApp.keyWindow ?? NSWindow())
+            let response: NSApplication.ModalResponse
+            if let keyWindow = NSApp.keyWindow {
+                response = await panel.beginSheetModal(for: keyWindow)
+            } else {
+                response = panel.runModal()
+            }
             if response == .OK, let url = panel.url {
                 finalURL = url
                 do {
@@ -614,22 +628,18 @@ extension ScreenRecorder: AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptur
             frameLock.lock()
             latestCameraPixelBuffer = copiedBuffer
             frameLock.unlock()
-        } else {
-            // Audio: check if recording has started
+        } else if output is AVCaptureAudioDataOutput {
             frameLock.lock()
             let writer = frameWriter
             frameLock.unlock()
 
-            guard writer?.startTime != nil else { return }
+            guard let writer,
+                  writer.startTime != nil,
+                  let audio = writer.audioInput,
+                  audio.isReadyForMoreMediaData
+            else { return }
 
-            nonisolated(unsafe) let buffer = sampleBuffer
-            Task { @MainActor [weak self] in
-                guard let self,
-                      let audioInput = self.audioInput,
-                      audioInput.isReadyForMoreMediaData
-                else { return }
-                audioInput.append(buffer)
-            }
+            audio.append(sampleBuffer)
         }
     }
 }

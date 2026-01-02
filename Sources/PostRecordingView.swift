@@ -147,7 +147,12 @@ struct PostRecordingView: View {
         panel.nameFieldStringValue = "\(originalName)-trimmed.mp4"
         panel.directoryURL = videoURL.deletingLastPathComponent()
 
-        let response = await panel.beginSheetModal(for: NSApp.keyWindow ?? NSWindow())
+        let response: NSApplication.ModalResponse
+        if let keyWindow = NSApp.keyWindow {
+            response = await panel.beginSheetModal(for: keyWindow)
+        } else {
+            response = panel.runModal()
+        }
         guard response == .OK, let outputURL = panel.url else {
             isExporting = false
             return

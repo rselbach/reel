@@ -76,7 +76,7 @@ class HotkeyManager {
         event: CGEvent
     ) -> Unmanaged<CGEvent>? {
         guard type == .keyDown else {
-            return Unmanaged.passRetained(event)
+            return Unmanaged.passUnretained(event)
         }
 
         let keyCode = UInt16(event.getIntegerValueField(.keyboardEventKeycode))
@@ -96,7 +96,7 @@ class HotkeyManager {
             return nil  // Consume the event so it doesn't reach other apps
         }
 
-        return Unmanaged.passRetained(event)
+        return Unmanaged.passUnretained(event)
     }
 
     func hasAccessibilityPermission() -> Bool {
