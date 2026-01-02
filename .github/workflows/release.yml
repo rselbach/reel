@@ -74,13 +74,15 @@ jobs:
           
           # Staple
           xcrun stapler staple .build/Reel.app
-          
-          # Recreate zip with stapled app
-          rm .build/Reel.zip
-          ditto -c -k --keepParent .build/Reel.app .build/Reel.zip
+      
+      - name: Create DMG
+        env:
+          SIGNING_IDENTITY: "Developer ID Application: Roberto Teixeira (LS8YD2TR79)"
+        run: |
+          ./build-app.sh --dmg --sign
       
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          files: .build/Reel.zip
+          files: .build/Reel.dmg
           generate_release_notes: true

@@ -14,11 +14,12 @@ SIGNING_IDENTITY="${SIGNING_IDENTITY:-}"
 NOTARIZE_PROFILE="${NOTARIZE_PROFILE:-NOTARIZE_PROFILE}"
 
 usage() {
-    echo "Usage: $0 [--sign] [--notarize] [--help]"
+    echo "Usage: $0 [--sign] [--notarize] [--dmg] [--help]"
     echo ""
     echo "Options:"
     echo "  --sign       Code sign the app (requires SIGNING_IDENTITY env var)"
     echo "  --notarize   Sign and notarize (requires --sign, NOTARIZE_PROFILE env var)"
+    echo "  --dmg        Create a .dmg installer image"
     echo "  --help       Show this help"
     echo ""
     echo "Environment variables:"
@@ -29,6 +30,7 @@ usage() {
 
 DO_SIGN=false
 DO_NOTARIZE=false
+DO_DMG=false
 
 for arg in "$@"; do
     case $arg in
@@ -38,6 +40,9 @@ for arg in "$@"; do
         --notarize)
             DO_SIGN=true
             DO_NOTARIZE=true
+            ;;
+        --dmg)
+            DO_DMG=true
             ;;
         --help)
             usage
@@ -54,6 +59,7 @@ mkdir -p "$APP_DIR/Contents/Resources"
 
 cp .build/release/Reel "$APP_DIR/Contents/MacOS/"
 cp Sources/Info.plist "$APP_DIR/Contents/Info.plist"
+cp Sources/AppIcon.icns "$APP_DIR/Contents/Resources/"
 
 echo "Built: $APP_DIR"
 
@@ -95,6 +101,27 @@ if [ "$DO_NOTARIZE" = true ]; then
     
     rm "$ZIP_PATH"
     echo "Notarization complete!"
+fi
+
+if [ "$DO_DMG" = true ]; then
+    DMG_PATH=".build/${APP_NAME}.dmg"
+    DMG_STAGING=".build/dmg"
+    
+    echo "Creating DMG..."
+    rm -rf "$DMG_STAGING" "$DMG_PATH"
+    mkdir -p "$DMG_STAGING"
+    cp -R "$APP_DIR" "$DMG_STAGING/"
+    ln -s /Applications "$DMG_STAGING/Applications"
+    
+    hdiutil create -volname "$APP_NAME" -srcfolder "$DMG_STAGING" -ov -format UDZO "$DMG_PATH"
+    rm -rf "$DMG_STAGING"
+    
+    if [ "$DO_SIGN" = true ]; then
+        echo "Signing DMG..."
+        codesign --force --sign "$SIGNING_IDENTITY" "$DMG_PATH"
+    fi
+    
+    echo "Created: $DMG_PATH"
 fi
 
 echo ""
