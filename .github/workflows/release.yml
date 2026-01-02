@@ -81,8 +81,17 @@ jobs:
         run: |
           ./build-app.sh --dmg --sign
       
+      - name: Generate changelog
+        run: |
+          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
+          if [ -n "$PREV_TAG" ]; then
+            git log --pretty=format:"- %s" "$PREV_TAG"..HEAD > release_notes.md
+          else
+            git log --pretty=format:"- %s" > release_notes.md
+          fi
+      
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           files: .build/Reel.dmg
-          generate_release_notes: true
+          body_path: release_notes.md
