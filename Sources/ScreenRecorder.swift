@@ -1,4 +1,5 @@
 import AVFoundation
+import CoreImage
 import ScreenCaptureKit
 import SwiftUI
 import UniformTypeIdentifiers
@@ -32,6 +33,12 @@ class ScreenRecorder: NSObject, ObservableObject {
     private var audioInput: AVAssetWriterInput?
     private var audioCaptureSession: AVCaptureSession?
     private var audioOutput: AVCaptureAudioDataOutput?
+    private var cameraCaptureSession: AVCaptureSession?
+    private var cameraOutput: AVCaptureVideoDataOutput?
+    private nonisolated(unsafe) var latestCameraPixelBuffer: CVPixelBuffer?
+    private let cameraBufferLock = NSLock()
+    private var pixelBufferAdaptor: AVAssetWriterInputPixelBufferAdaptor?
+    private var ciContext: CIContext?
     private var startTime: CMTime?
     private var outputURL: URL?
 
@@ -119,12 +126,17 @@ class ScreenRecorder: NSObject, ObservableObject {
                 try setupAudioCapture()
             }
 
+            if settings.recordCamera {
+                try setupCameraCapture()
+            }
+
             stream = SCStream(filter: filter, configuration: config, delegate: self)
 
             try stream?.addStreamOutput(self, type: .screen, sampleHandlerQueue: .global())
 
             try await stream?.startCapture()
             audioCaptureSession?.startRunning()
+            cameraCaptureSession?.startRunning()
             isRecording = true
             errorMessage = nil
         } catch {
@@ -137,6 +149,7 @@ class ScreenRecorder: NSObject, ObservableObject {
         guard isRecording else { return }
 
         audioCaptureSession?.stopRunning()
+        cameraCaptureSession?.stopRunning()
 
         do {
             try await stream?.stopCapture()
@@ -172,6 +185,17 @@ class ScreenRecorder: NSObject, ObservableObject {
 
         if let videoInput, assetWriter?.canAdd(videoInput) == true {
             assetWriter?.add(videoInput)
+
+            let pixelBufferAttributes: [String: Any] = [
+                kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
+                kCVPixelBufferWidthKey as String: width,
+                kCVPixelBufferHeightKey as String: height
+            ]
+            pixelBufferAdaptor = AVAssetWriterInputPixelBufferAdaptor(
+                assetWriterInput: videoInput,
+                sourcePixelBufferAttributes: pixelBufferAttributes
+            )
+            ciContext = CIContext()
         }
 
         if settings.recordAudio {
@@ -216,6 +240,33 @@ class ScreenRecorder: NSObject, ObservableObject {
 
         audioCaptureSession = session
         audioOutput = output
+    }
+
+    private func setupCameraCapture() throws {
+        guard let device = settings.selectedCamera else {
+            throw NSError(domain: "ScreenRecorder", code: 2, userInfo: [NSLocalizedDescriptionKey: "No camera available"])
+        }
+
+        let session = AVCaptureSession()
+        session.beginConfiguration()
+        session.sessionPreset = .high
+
+        let input = try AVCaptureDeviceInput(device: device)
+        if session.canAddInput(input) {
+            session.addInput(input)
+        }
+
+        let output = AVCaptureVideoDataOutput()
+        output.videoSettings = [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA]
+        output.setSampleBufferDelegate(self, queue: DispatchQueue(label: "camera.capture.queue"))
+        if session.canAddOutput(output) {
+            session.addOutput(output)
+        }
+
+        session.commitConfiguration()
+
+        cameraCaptureSession = session
+        cameraOutput = output
     }
 
     private func finalizeRecording() async {
@@ -263,7 +314,80 @@ class ScreenRecorder: NSObject, ObservableObject {
         audioInput = nil
         audioCaptureSession = nil
         audioOutput = nil
+        cameraCaptureSession = nil
+        cameraOutput = nil
+        pixelBufferAdaptor = nil
+        ciContext = nil
+        cameraBufferLock.lock()
+        latestCameraPixelBuffer = nil
+        cameraBufferLock.unlock()
         startTime = nil
+    }
+
+    nonisolated func compositeFrame(
+        screenBuffer: CVPixelBuffer,
+        cameraBuffer: CVPixelBuffer?,
+        context: CIContext,
+        position: AppSettings.CameraOverlayPosition,
+        sizeFraction: CGFloat
+    ) -> CVPixelBuffer? {
+        let screenImage = CIImage(cvPixelBuffer: screenBuffer)
+        let screenWidth = CGFloat(CVPixelBufferGetWidth(screenBuffer))
+        let screenHeight = CGFloat(CVPixelBufferGetHeight(screenBuffer))
+
+        guard let cameraBuffer else { return nil }
+
+        var cameraImage = CIImage(cvPixelBuffer: cameraBuffer)
+        let cameraWidth = CGFloat(CVPixelBufferGetWidth(cameraBuffer))
+        let cameraHeight = CGFloat(CVPixelBufferGetHeight(cameraBuffer))
+
+        let overlayWidth = screenWidth * sizeFraction
+        let scale = overlayWidth / cameraWidth
+        let overlayHeight = cameraHeight * scale
+
+        cameraImage = cameraImage.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+
+        let padding: CGFloat = 20 * 2
+        let xOffset: CGFloat
+        let yOffset: CGFloat
+
+        switch position {
+        case .bottomLeft:
+            xOffset = padding
+            yOffset = padding
+        case .bottomRight:
+            xOffset = screenWidth - overlayWidth - padding
+            yOffset = padding
+        case .topLeft:
+            xOffset = padding
+            yOffset = screenHeight - overlayHeight - padding
+        case .topRight:
+            xOffset = screenWidth - overlayWidth - padding
+            yOffset = screenHeight - overlayHeight - padding
+        }
+
+        cameraImage = cameraImage.transformed(by: CGAffineTransform(translationX: xOffset, y: yOffset))
+
+        let composited = cameraImage.composited(over: screenImage)
+
+        var outputBuffer: CVPixelBuffer?
+        let attrs: [CFString: Any] = [
+            kCVPixelBufferCGImageCompatibilityKey: true,
+            kCVPixelBufferCGBitmapContextCompatibilityKey: true
+        ]
+        CVPixelBufferCreate(
+            kCFAllocatorDefault,
+            Int(screenWidth),
+            Int(screenHeight),
+            kCVPixelFormatType_32BGRA,
+            attrs as CFDictionary,
+            &outputBuffer
+        )
+
+        guard let outputBuffer else { return nil }
+        context.render(composited, to: outputBuffer)
+
+        return outputBuffer
     }
 }
 
@@ -292,13 +416,23 @@ extension ScreenRecorder: SCStreamOutput {
               status == .complete
         else { return }
 
+        guard let screenBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+
         let presentationTime = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
-        nonisolated(unsafe) let buffer = sampleBuffer
+
+        cameraBufferLock.lock()
+        let cameraBuffer = latestCameraPixelBuffer
+        cameraBufferLock.unlock()
+
+        nonisolated(unsafe) let capturedScreenBuffer = screenBuffer
+        nonisolated(unsafe) let capturedCameraBuffer = cameraBuffer
 
         Task { @MainActor [weak self] in
             guard let self,
                   let assetWriter = self.assetWriter,
-                  let videoInput = self.videoInput
+                  let videoInput = self.videoInput,
+                  let adaptor = self.pixelBufferAdaptor,
+                  let context = self.ciContext
             else { return }
 
             if self.startTime == nil {
@@ -306,14 +440,28 @@ extension ScreenRecorder: SCStreamOutput {
                 assetWriter.startSession(atSourceTime: presentationTime)
             }
 
-            if videoInput.isReadyForMoreMediaData {
-                videoInput.append(buffer)
+            guard videoInput.isReadyForMoreMediaData else { return }
+
+            if self.settings.recordCamera, capturedCameraBuffer != nil {
+                if let composited = self.compositeFrame(
+                    screenBuffer: capturedScreenBuffer,
+                    cameraBuffer: capturedCameraBuffer,
+                    context: context,
+                    position: self.settings.cameraPosition,
+                    sizeFraction: self.settings.cameraSize.fraction
+                ) {
+                    adaptor.append(composited, withPresentationTime: presentationTime)
+                } else {
+                    adaptor.append(capturedScreenBuffer, withPresentationTime: presentationTime)
+                }
+            } else {
+                adaptor.append(capturedScreenBuffer, withPresentationTime: presentationTime)
             }
         }
     }
 }
 
-extension ScreenRecorder: AVCaptureAudioDataOutputSampleBufferDelegate {
+extension ScreenRecorder: AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptureAudioDataOutputSampleBufferDelegate {
     nonisolated func captureOutput(
         _ output: AVCaptureOutput,
         didOutput sampleBuffer: CMSampleBuffer,
@@ -321,16 +469,23 @@ extension ScreenRecorder: AVCaptureAudioDataOutputSampleBufferDelegate {
     ) {
         guard sampleBuffer.isValid else { return }
 
-        nonisolated(unsafe) let buffer = sampleBuffer
+        if output is AVCaptureVideoDataOutput {
+            guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+            cameraBufferLock.lock()
+            latestCameraPixelBuffer = pixelBuffer
+            cameraBufferLock.unlock()
+        } else {
+            nonisolated(unsafe) let buffer = sampleBuffer
 
-        Task { @MainActor [weak self] in
-            guard let self,
-                  let audioInput = self.audioInput,
-                  self.startTime != nil
-            else { return }
+            Task { @MainActor [weak self] in
+                guard let self,
+                      let audioInput = self.audioInput,
+                      self.startTime != nil
+                else { return }
 
-            if audioInput.isReadyForMoreMediaData {
-                audioInput.append(buffer)
+                if audioInput.isReadyForMoreMediaData {
+                    audioInput.append(buffer)
+                }
             }
         }
     }

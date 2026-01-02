@@ -103,6 +103,31 @@ struct RecordingTab: View {
                     }
                 }
             }
+
+            Divider()
+
+            Toggle("Record camera overlay", isOn: $settings.recordCamera)
+
+            if settings.recordCamera {
+                Picker("Camera:", selection: $settings.cameraDeviceID) {
+                    Text("Default").tag(nil as String?)
+                    ForEach(settings.availableCameras, id: \.uniqueID) { device in
+                        Text(device.localizedName).tag(device.uniqueID as String?)
+                    }
+                }
+
+                Picker("Position:", selection: $settings.cameraPosition) {
+                    ForEach(AppSettings.CameraOverlayPosition.allCases, id: \.self) { position in
+                        Text(position.rawValue).tag(position)
+                    }
+                }
+
+                Picker("Size:", selection: $settings.cameraSize) {
+                    ForEach(AppSettings.CameraOverlaySize.allCases, id: \.self) { size in
+                        Text(size.rawValue).tag(size)
+                    }
+                }
+            }
         }
         .padding()
     }

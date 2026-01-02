@@ -40,6 +40,8 @@ cat > "$APP_DIR/Contents/Info.plist" << EOF
     <string>Reel needs screen recording permission to capture your screen.</string>
     <key>NSMicrophoneUsageDescription</key>
     <string>Reel needs microphone access to record audio with your screen recordings.</string>
+    <key>NSCameraUsageDescription</key>
+    <string>Reel needs camera access to record a camera overlay on your screen recordings.</string>
 </dict>
 </plist>
 EOF

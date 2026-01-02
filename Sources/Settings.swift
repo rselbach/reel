@@ -60,6 +60,43 @@ class AppSettings: ObservableObject {
         didSet { UserDefaults.standard.set(audioDeviceID, forKey: "audioDeviceID") }
     }
 
+    @Published var recordCamera: Bool {
+        didSet { UserDefaults.standard.set(recordCamera, forKey: "recordCamera") }
+    }
+
+    @Published var cameraDeviceID: String? {
+        didSet { UserDefaults.standard.set(cameraDeviceID, forKey: "cameraDeviceID") }
+    }
+
+    @Published var cameraPosition: CameraOverlayPosition {
+        didSet { UserDefaults.standard.set(cameraPosition.rawValue, forKey: "cameraPosition") }
+    }
+
+    @Published var cameraSize: CameraOverlaySize {
+        didSet { UserDefaults.standard.set(cameraSize.rawValue, forKey: "cameraSize") }
+    }
+
+    enum CameraOverlayPosition: String, CaseIterable {
+        case bottomLeft = "Bottom Left"
+        case bottomRight = "Bottom Right"
+        case topLeft = "Top Left"
+        case topRight = "Top Right"
+    }
+
+    enum CameraOverlaySize: String, CaseIterable {
+        case small = "Small"
+        case medium = "Medium"
+        case large = "Large"
+
+        var fraction: CGFloat {
+            switch self {
+            case .small: return 0.15
+            case .medium: return 0.2
+            case .large: return 0.25
+            }
+        }
+    }
+
     var availableAudioDevices: [AVCaptureDevice] {
         AVCaptureDevice.DiscoverySession(
             deviceTypes: [.microphone, .external],
@@ -74,6 +111,22 @@ class AppSettings: ObservableObject {
         }
         return availableAudioDevices.first { $0.uniqueID == id }
             ?? AVCaptureDevice.default(for: .audio)
+    }
+
+    var availableCameras: [AVCaptureDevice] {
+        AVCaptureDevice.DiscoverySession(
+            deviceTypes: [.builtInWideAngleCamera, .external],
+            mediaType: .video,
+            position: .unspecified
+        ).devices
+    }
+
+    var selectedCamera: AVCaptureDevice? {
+        guard let id = cameraDeviceID else {
+            return AVCaptureDevice.default(for: .video)
+        }
+        return availableCameras.first { $0.uniqueID == id }
+            ?? AVCaptureDevice.default(for: .video)
     }
 
     enum VideoQuality: String, CaseIterable {
@@ -148,6 +201,11 @@ class AppSettings: ObservableObject {
 
         self.recordAudio = defaults.bool(forKey: "recordAudio")
         self.audioDeviceID = defaults.string(forKey: "audioDeviceID")
+
+        self.recordCamera = defaults.bool(forKey: "recordCamera")
+        self.cameraDeviceID = defaults.string(forKey: "cameraDeviceID")
+        self.cameraPosition = CameraOverlayPosition(rawValue: defaults.string(forKey: "cameraPosition") ?? "") ?? .bottomRight
+        self.cameraSize = CameraOverlaySize(rawValue: defaults.string(forKey: "cameraSize") ?? "") ?? .medium
     }
 
     private func updateLaunchAtLogin() {
