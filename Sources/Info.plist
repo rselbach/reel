@@ -2,7 +2,31 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+    <key>CFBundleExecutable</key>
+    <string>Reel</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.rselbach.reel</string>
+    <key>CFBundleName</key>
+    <string>Reel</string>
+    <key>CFBundleDisplayName</key>
+    <string>Reel</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.0.0</string>
+    <key>CFBundleVersion</key>
+    <string>1</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>15.0</string>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <key>LSUIElement</key>
+    <true/>
     <key>NSScreenCaptureUsageDescription</key>
     <string>Reel needs screen recording permission to capture your screen.</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Reel needs microphone access to record audio with your screen recordings.</string>
+    <key>NSCameraUsageDescription</key>
+    <string>Reel needs camera access to record a camera overlay on your screen recordings.</string>
 </dict>
 </plist>
