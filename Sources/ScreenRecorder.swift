@@ -39,6 +39,7 @@ class ScreenRecorder: NSObject, ObservableObject {
     private let cameraBufferLock = NSLock()
     private var pixelBufferAdaptor: AVAssetWriterInputPixelBufferAdaptor?
     private var ciContext: CIContext?
+    private var compositeBufferPool: CVPixelBufferPool?
     private var startTime: CMTime?
     private var outputURL: URL?
 
@@ -196,6 +197,24 @@ class ScreenRecorder: NSObject, ObservableObject {
                 sourcePixelBufferAttributes: pixelBufferAttributes
             )
             ciContext = CIContext()
+
+            // Create buffer pool for camera compositing
+            let poolAttributes: [CFString: Any] = [
+                kCVPixelBufferPoolMinimumBufferCountKey: 3
+            ]
+            let bufferAttributes: [CFString: Any] = [
+                kCVPixelBufferPixelFormatTypeKey: kCVPixelFormatType_32BGRA,
+                kCVPixelBufferWidthKey: width,
+                kCVPixelBufferHeightKey: height,
+                kCVPixelBufferCGImageCompatibilityKey: true,
+                kCVPixelBufferCGBitmapContextCompatibilityKey: true
+            ]
+            CVPixelBufferPoolCreate(
+                kCFAllocatorDefault,
+                poolAttributes as CFDictionary,
+                bufferAttributes as CFDictionary,
+                &compositeBufferPool
+            )
         }
 
         if settings.recordAudio {
@@ -318,6 +337,7 @@ class ScreenRecorder: NSObject, ObservableObject {
         cameraOutput = nil
         pixelBufferAdaptor = nil
         ciContext = nil
+        compositeBufferPool = nil
         cameraBufferLock.lock()
         latestCameraPixelBuffer = nil
         cameraBufferLock.unlock()
@@ -328,6 +348,7 @@ class ScreenRecorder: NSObject, ObservableObject {
         screenBuffer: CVPixelBuffer,
         cameraBuffer: CVPixelBuffer?,
         context: CIContext,
+        bufferPool: CVPixelBufferPool?,
         position: AppSettings.CameraOverlayPosition,
         sizeFraction: CGFloat,
         shape: AppSettings.CameraOverlayShape
@@ -393,18 +414,23 @@ class ScreenRecorder: NSObject, ObservableObject {
         let composited = cameraImage.composited(over: screenImage)
 
         var outputBuffer: CVPixelBuffer?
-        let attrs: [CFString: Any] = [
-            kCVPixelBufferCGImageCompatibilityKey: true,
-            kCVPixelBufferCGBitmapContextCompatibilityKey: true
-        ]
-        CVPixelBufferCreate(
-            kCFAllocatorDefault,
-            Int(screenWidth),
-            Int(screenHeight),
-            kCVPixelFormatType_32BGRA,
-            attrs as CFDictionary,
-            &outputBuffer
-        )
+        if let bufferPool {
+            CVPixelBufferPoolCreatePixelBuffer(kCFAllocatorDefault, bufferPool, &outputBuffer)
+        } else {
+            // Fallback if pool not available
+            let attrs: [CFString: Any] = [
+                kCVPixelBufferCGImageCompatibilityKey: true,
+                kCVPixelBufferCGBitmapContextCompatibilityKey: true
+            ]
+            CVPixelBufferCreate(
+                kCFAllocatorDefault,
+                Int(screenWidth),
+                Int(screenHeight),
+                kCVPixelFormatType_32BGRA,
+                attrs as CFDictionary,
+                &outputBuffer
+            )
+        }
 
         guard let outputBuffer else { return nil }
         context.render(composited, to: outputBuffer)
@@ -469,6 +495,7 @@ extension ScreenRecorder: SCStreamOutput {
                     screenBuffer: capturedScreenBuffer,
                     cameraBuffer: capturedCameraBuffer,
                     context: context,
+                    bufferPool: self.compositeBufferPool,
                     position: self.settings.cameraPosition,
                     sizeFraction: self.settings.cameraSize.fraction,
                     shape: self.settings.cameraShape
