@@ -199,7 +199,7 @@ class HotkeyRecorderView: NSView {
     func startRecording() {
         guard monitor == nil else { return }
         monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { [weak self] event in
-            if event.keyCode == 53 { // Escape
+            if event.keyCode == KeyCode.escape {
                 self?.onCancel?()
             } else if event.modifierFlags.contains(.command) ||
                       event.modifierFlags.contains(.control) ||

@@ -3,6 +3,70 @@ import CoreGraphics
 import Foundation
 import ServiceManagement
 
+// MARK: - Key Codes (Carbon virtual key codes)
+enum KeyCode {
+    static let escape: UInt16 = 53
+    static let `return`: UInt16 = 36
+    static let tab: UInt16 = 48
+    static let space: UInt16 = 49
+    static let delete: UInt16 = 51
+    static let forwardDelete: UInt16 = 117
+
+    // Letters
+    static let a: UInt16 = 0
+    static let s: UInt16 = 1
+    static let d: UInt16 = 2
+    static let f: UInt16 = 3
+    static let h: UInt16 = 4
+    static let g: UInt16 = 5
+    static let z: UInt16 = 6
+    static let x: UInt16 = 7
+    static let c: UInt16 = 8
+    static let v: UInt16 = 9
+    static let b: UInt16 = 11
+    static let q: UInt16 = 12
+    static let w: UInt16 = 13
+    static let e: UInt16 = 14
+    static let r: UInt16 = 15
+    static let y: UInt16 = 16
+    static let t: UInt16 = 17
+    static let o: UInt16 = 31
+    static let u: UInt16 = 32
+    static let i: UInt16 = 34
+    static let p: UInt16 = 35
+    static let l: UInt16 = 37
+    static let j: UInt16 = 38
+    static let k: UInt16 = 40
+    static let n: UInt16 = 45
+    static let m: UInt16 = 46
+
+    // Numbers
+    static let zero: UInt16 = 29
+    static let one: UInt16 = 18
+    static let two: UInt16 = 19
+    static let three: UInt16 = 20
+    static let four: UInt16 = 21
+    static let five: UInt16 = 23
+    static let six: UInt16 = 22
+    static let seven: UInt16 = 26
+    static let eight: UInt16 = 28
+    static let nine: UInt16 = 25
+
+    // Function keys
+    static let f1: UInt16 = 122
+    static let f2: UInt16 = 120
+    static let f3: UInt16 = 99
+    static let f4: UInt16 = 118
+    static let f5: UInt16 = 96
+    static let f6: UInt16 = 97
+    static let f7: UInt16 = 98
+    static let f8: UInt16 = 100
+    static let f9: UInt16 = 101
+    static let f10: UInt16 = 109
+    static let f11: UInt16 = 103
+    static let f12: UInt16 = 111
+}
+
 @MainActor
 class AppSettings: ObservableObject {
     static let shared = AppSettings()
@@ -174,10 +238,27 @@ class AppSettings: ObservableObject {
 
         private func keyCodeToString(_ keyCode: UInt16) -> String {
             let keyMap: [UInt16: String] = [
-                0: "A", 1: "S", 2: "D", 3: "F", 4: "H", 5: "G", 6: "Z", 7: "X",
-                8: "C", 9: "V", 11: "B", 12: "Q", 13: "W", 14: "E", 15: "R",
-                16: "Y", 17: "T", 31: "O", 32: "U", 34: "I", 35: "P", 37: "L",
-                38: "J", 40: "K", 45: "N", 46: "M"
+                // Letters
+                KeyCode.a: "A", KeyCode.b: "B", KeyCode.c: "C", KeyCode.d: "D",
+                KeyCode.e: "E", KeyCode.f: "F", KeyCode.g: "G", KeyCode.h: "H",
+                KeyCode.i: "I", KeyCode.j: "J", KeyCode.k: "K", KeyCode.l: "L",
+                KeyCode.m: "M", KeyCode.n: "N", KeyCode.o: "O", KeyCode.p: "P",
+                KeyCode.q: "Q", KeyCode.r: "R", KeyCode.s: "S", KeyCode.t: "T",
+                KeyCode.u: "U", KeyCode.v: "V", KeyCode.w: "W", KeyCode.x: "X",
+                KeyCode.y: "Y", KeyCode.z: "Z",
+                // Numbers
+                KeyCode.zero: "0", KeyCode.one: "1", KeyCode.two: "2",
+                KeyCode.three: "3", KeyCode.four: "4", KeyCode.five: "5",
+                KeyCode.six: "6", KeyCode.seven: "7", KeyCode.eight: "8",
+                KeyCode.nine: "9",
+                // Function keys
+                KeyCode.f1: "F1", KeyCode.f2: "F2", KeyCode.f3: "F3",
+                KeyCode.f4: "F4", KeyCode.f5: "F5", KeyCode.f6: "F6",
+                KeyCode.f7: "F7", KeyCode.f8: "F8", KeyCode.f9: "F9",
+                KeyCode.f10: "F10", KeyCode.f11: "F11", KeyCode.f12: "F12",
+                // Special keys
+                KeyCode.space: "Space", KeyCode.return: "↩", KeyCode.tab: "⇥",
+                KeyCode.delete: "⌫", KeyCode.forwardDelete: "⌦", KeyCode.escape: "⎋",
             ]
             return keyMap[keyCode] ?? "?"
         }

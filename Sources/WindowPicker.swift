@@ -251,7 +251,7 @@ class PickerTrackingView: NSView {
     }
     
     override func keyDown(with event: NSEvent) {
-        if event.keyCode == 53 { // Escape
+        if event.keyCode == KeyCode.escape {
             onEscape?()
         }
     }

@@ -73,7 +73,7 @@ class CountdownWindow: NSWindow {
     override var canBecomeMain: Bool { true }
     
     override func keyDown(with event: NSEvent) {
-        if event.keyCode == 53 {
+        if event.keyCode == KeyCode.escape {
             onEscape?()
         } else {
             super.keyDown(with: event)

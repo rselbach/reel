@@ -9,6 +9,13 @@ enum RecordingMode {
     case window
 }
 
+private enum RecordingConstants {
+    /// Minimum dimensions for windows to appear in the picker (filters tiny/hidden windows)
+    static let minimumWindowSize: CGFloat = 100
+    /// Padding from screen edge for camera overlay (in points, doubled for Retina)
+    static let cameraOverlayPadding: CGFloat = 40
+}
+
 @MainActor
 class ScreenRecorder: NSObject, ObservableObject {
     @Published var isRecording = false {
@@ -54,8 +61,8 @@ class ScreenRecorder: NSObject, ObservableObject {
             availableDisplays = content.displays
             availableWindows = content.windows.filter { window in
                 window.isOnScreen &&
-                window.frame.width > 100 &&
-                window.frame.height > 100 &&
+                window.frame.width > RecordingConstants.minimumWindowSize &&
+                window.frame.height > RecordingConstants.minimumWindowSize &&
                 window.owningApplication?.bundleIdentifier != Bundle.main.bundleIdentifier
             }
             hasPermission = true
@@ -75,8 +82,8 @@ class ScreenRecorder: NSObject, ObservableObject {
             )
             availableWindows = content.windows.filter { window in
                 window.isOnScreen &&
-                window.frame.width > 100 &&
-                window.frame.height > 100 &&
+                window.frame.width > RecordingConstants.minimumWindowSize &&
+                window.frame.height > RecordingConstants.minimumWindowSize &&
                 window.owningApplication?.bundleIdentifier != Bundle.main.bundleIdentifier
             }
         } catch {
@@ -390,7 +397,7 @@ class ScreenRecorder: NSObject, ObservableObject {
             ])
         }
 
-        let padding: CGFloat = 20 * 2
+        let padding: CGFloat = RecordingConstants.cameraOverlayPadding
         let xOffset: CGFloat
         let yOffset: CGFloat
 
