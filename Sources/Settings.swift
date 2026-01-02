@@ -76,6 +76,10 @@ class AppSettings: ObservableObject {
         didSet { UserDefaults.standard.set(cameraSize.rawValue, forKey: "cameraSize") }
     }
 
+    @Published var cameraShape: CameraOverlayShape {
+        didSet { UserDefaults.standard.set(cameraShape.rawValue, forKey: "cameraShape") }
+    }
+
     enum CameraOverlayPosition: String, CaseIterable {
         case bottomLeft = "Bottom Left"
         case bottomRight = "Bottom Right"
@@ -95,6 +99,11 @@ class AppSettings: ObservableObject {
             case .large: return 0.25
             }
         }
+    }
+
+    enum CameraOverlayShape: String, CaseIterable {
+        case rectangle = "Rectangle"
+        case circle = "Circle"
     }
 
     var availableAudioDevices: [AVCaptureDevice] {
@@ -206,6 +215,7 @@ class AppSettings: ObservableObject {
         self.cameraDeviceID = defaults.string(forKey: "cameraDeviceID")
         self.cameraPosition = CameraOverlayPosition(rawValue: defaults.string(forKey: "cameraPosition") ?? "") ?? .bottomRight
         self.cameraSize = CameraOverlaySize(rawValue: defaults.string(forKey: "cameraSize") ?? "") ?? .medium
+        self.cameraShape = CameraOverlayShape(rawValue: defaults.string(forKey: "cameraShape") ?? "") ?? .circle
     }
 
     private func updateLaunchAtLogin() {

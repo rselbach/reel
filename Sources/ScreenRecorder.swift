@@ -329,7 +329,8 @@ class ScreenRecorder: NSObject, ObservableObject {
         cameraBuffer: CVPixelBuffer?,
         context: CIContext,
         position: AppSettings.CameraOverlayPosition,
-        sizeFraction: CGFloat
+        sizeFraction: CGFloat,
+        shape: AppSettings.CameraOverlayShape
     ) -> CVPixelBuffer? {
         let screenImage = CIImage(cvPixelBuffer: screenBuffer)
         let screenWidth = CGFloat(CVPixelBufferGetWidth(screenBuffer))
@@ -346,6 +347,27 @@ class ScreenRecorder: NSObject, ObservableObject {
         let overlayHeight = cameraHeight * scale
 
         cameraImage = cameraImage.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
+
+        if shape == .circle {
+            let diameter = min(overlayWidth, overlayHeight)
+            let centerX = overlayWidth / 2
+            let centerY = overlayHeight / 2
+            let radius = diameter / 2
+
+            guard let radialGradient = CIFilter(name: "CIRadialGradient") else { return nil }
+            radialGradient.setValue(CIVector(x: centerX, y: centerY), forKey: "inputCenter")
+            radialGradient.setValue(radius - 1, forKey: "inputRadius0")
+            radialGradient.setValue(radius, forKey: "inputRadius1")
+            radialGradient.setValue(CIColor.white, forKey: "inputColor0")
+            radialGradient.setValue(CIColor.clear, forKey: "inputColor1")
+
+            guard let gradientOutput = radialGradient.outputImage?.cropped(to: CGRect(x: 0, y: 0, width: overlayWidth, height: overlayHeight)) else { return nil }
+
+            cameraImage = cameraImage.applyingFilter("CIBlendWithMask", parameters: [
+                kCIInputBackgroundImageKey: CIImage.empty(),
+                kCIInputMaskImageKey: gradientOutput
+            ])
+        }
 
         let padding: CGFloat = 20 * 2
         let xOffset: CGFloat
@@ -448,7 +470,8 @@ extension ScreenRecorder: SCStreamOutput {
                     cameraBuffer: capturedCameraBuffer,
                     context: context,
                     position: self.settings.cameraPosition,
-                    sizeFraction: self.settings.cameraSize.fraction
+                    sizeFraction: self.settings.cameraSize.fraction,
+                    shape: self.settings.cameraShape
                 ) {
                     adaptor.append(composited, withPresentationTime: presentationTime)
                 } else {

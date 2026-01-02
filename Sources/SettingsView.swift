@@ -127,6 +127,12 @@ struct RecordingTab: View {
                         Text(size.rawValue).tag(size)
                     }
                 }
+
+                Picker("Shape:", selection: $settings.cameraShape) {
+                    ForEach(AppSettings.CameraOverlayShape.allCases, id: \.self) { shape in
+                        Text(shape.rawValue).tag(shape)
+                    }
+                }
             }
         }
         .padding()
