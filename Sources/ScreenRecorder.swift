@@ -166,7 +166,7 @@ class ScreenRecorder: NSObject, ObservableObject {
         let outputDir = settings.outputDirectory
         let timestamp = ISO8601DateFormatter().string(from: Date())
             .replacingOccurrences(of: ":", with: "-")
-        outputURL = outputDir.appendingPathComponent("Mili-\(timestamp).mp4")
+        outputURL = outputDir.appendingPathComponent("Reel-\(timestamp).mp4")
 
         assetWriter = try AVAssetWriter(outputURL: outputURL!, fileType: .mp4)
 

@@ -24,6 +24,7 @@ struct PostRecordingView: View {
     let onDelete: () -> Void
 
     @State private var player: AVPlayer?
+    @State private var timeObserver: Any?
     @State private var duration: Double = 0
     @State private var trimStart: Double = 0
     @State private var trimEnd: Double = 0
@@ -97,6 +98,10 @@ struct PostRecordingView: View {
             setupPlayer()
         }
         .onDisappear {
+            if let player, let timeObserver {
+                player.removeTimeObserver(timeObserver)
+            }
+            timeObserver = nil
             player?.pause()
             player = nil
         }
@@ -124,7 +129,7 @@ struct PostRecordingView: View {
 
         let interval = CMTime(seconds: 0.1, preferredTimescale: 600)
         let binding = $currentTime
-        newPlayer.addPeriodicTimeObserver(forInterval: interval, queue: .main) { time in
+        timeObserver = newPlayer.addPeriodicTimeObserver(forInterval: interval, queue: .main) { time in
             Task { @MainActor in
                 binding.wrappedValue = CMTimeGetSeconds(time)
             }

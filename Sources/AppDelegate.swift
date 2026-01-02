@@ -15,7 +15,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
 
         if let button = statusItem.button {
-            button.image = NSImage(systemSymbolName: "record.circle", accessibilityDescription: "Mili")
+            button.image = NSImage(systemSymbolName: "record.circle", accessibilityDescription: "Reel")
         }
 
         AppSettings.shared.checkLaunchAtLoginStatus()
@@ -88,7 +88,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: "Settings...", action: #selector(openPreferences), keyEquivalent: ","))
         menu.addItem(NSMenuItem.separator())
-        menu.addItem(NSMenuItem(title: "Quit Mili", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
+        menu.addItem(NSMenuItem(title: "Quit Reel", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
 
         statusItem.menu = menu
     }
@@ -216,7 +216,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             let hostingController = NSHostingController(rootView: settingsView)
 
             let window = NSWindow(contentViewController: hostingController)
-            window.title = "Mili Settings"
+            window.title = "Reel Settings"
             window.styleMask = [.titled, .closable]
             window.center()
             window.isReleasedWhenClosed = false
@@ -231,7 +231,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func updateIcon(isRecording: Bool) {
         if let button = statusItem.button {
             let symbolName = isRecording ? "record.circle.fill" : "record.circle"
-            button.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: "Mili")
+            button.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: "Reel")
             button.contentTintColor = isRecording ? .red : nil
         }
         rebuildMenu()
