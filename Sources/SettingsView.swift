@@ -194,7 +194,13 @@ struct HotkeyRecorder: NSViewRepresentable {
 class HotkeyRecorderView: NSView {
     var onHotkeyRecorded: ((UInt16, UInt32) -> Void)?
     var onCancel: (() -> Void)?
-    private var monitor: Any?
+    private nonisolated(unsafe) var monitor: Any?
+
+    deinit {
+        if let monitor {
+            NSEvent.removeMonitor(monitor)
+        }
+    }
 
     func startRecording() {
         guard monitor == nil else { return }
