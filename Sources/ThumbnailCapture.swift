@@ -9,8 +9,8 @@ class ThumbnailCapture {
             let config = SCStreamConfiguration()
             
             let scale = min(maxSize.width / CGFloat(display.width), maxSize.height / CGFloat(display.height))
-            config.width = Int(CGFloat(display.width) * scale)
-            config.height = Int(CGFloat(display.height) * scale)
+            config.width = max(1, Int(CGFloat(display.width) * scale))
+            config.height = max(1, Int(CGFloat(display.height) * scale))
             config.pixelFormat = kCVPixelFormatType_32BGRA
             config.showsCursor = false
             

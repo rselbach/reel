@@ -42,13 +42,26 @@ class ScreenRecorder: NSObject, ObservableObject {
     private var audioOutput: AVCaptureAudioDataOutput?
     private var cameraCaptureSession: AVCaptureSession?
     private var cameraOutput: AVCaptureVideoDataOutput?
-    private nonisolated(unsafe) var latestCameraPixelBuffer: CVPixelBuffer?
-    private let cameraBufferLock = NSLock()
-    private var pixelBufferAdaptor: AVAssetWriterInputPixelBufferAdaptor?
-    private var ciContext: CIContext?
-    private var compositeBufferPool: CVPixelBufferPool?
-    private var startTime: CMTime?
     private var outputURL: URL?
+
+    // Thread-safe state for frame processing (accessed from ScreenCaptureKit callback queue)
+    private let frameLock = NSLock()
+    private nonisolated(unsafe) var latestCameraPixelBuffer: CVPixelBuffer?
+    private nonisolated(unsafe) var frameWriter: FrameWriter?
+
+    // Encapsulates frame writing state for thread-safe access
+    private struct FrameWriter {
+        let adaptor: AVAssetWriterInputPixelBufferAdaptor
+        let videoInput: AVAssetWriterInput
+        let assetWriter: AVAssetWriter
+        let ciContext: CIContext
+        let bufferPool: CVPixelBufferPool?
+        var startTime: CMTime?
+        let recordCamera: Bool
+        let cameraPosition: AppSettings.CameraOverlayPosition
+        let cameraSize: CGFloat
+        let cameraShape: AppSettings.CameraOverlayShape
+    }
 
     private var settings: AppSettings { AppSettings.shared }
 
@@ -191,21 +204,22 @@ class ScreenRecorder: NSObject, ObservableObject {
         videoInput = AVAssetWriterInput(mediaType: .video, outputSettings: videoSettings)
         videoInput?.expectsMediaDataInRealTime = true
 
-        if let videoInput, assetWriter?.canAdd(videoInput) == true {
-            assetWriter?.add(videoInput)
+        if let videoInput, let assetWriter, assetWriter.canAdd(videoInput) {
+            assetWriter.add(videoInput)
 
             let pixelBufferAttributes: [String: Any] = [
                 kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
                 kCVPixelBufferWidthKey as String: width,
                 kCVPixelBufferHeightKey as String: height
             ]
-            pixelBufferAdaptor = AVAssetWriterInputPixelBufferAdaptor(
+            let adaptor = AVAssetWriterInputPixelBufferAdaptor(
                 assetWriterInput: videoInput,
                 sourcePixelBufferAttributes: pixelBufferAttributes
             )
-            ciContext = CIContext()
+            let context = CIContext()
 
             // Create buffer pool for camera compositing
+            var bufferPool: CVPixelBufferPool?
             let poolAttributes: [CFString: Any] = [
                 kCVPixelBufferPoolMinimumBufferCountKey: 3
             ]
@@ -220,8 +234,24 @@ class ScreenRecorder: NSObject, ObservableObject {
                 kCFAllocatorDefault,
                 poolAttributes as CFDictionary,
                 bufferAttributes as CFDictionary,
-                &compositeBufferPool
+                &bufferPool
             )
+
+            // Create frame writer with captured settings for thread-safe access
+            frameLock.lock()
+            frameWriter = FrameWriter(
+                adaptor: adaptor,
+                videoInput: videoInput,
+                assetWriter: assetWriter,
+                ciContext: context,
+                bufferPool: bufferPool,
+                startTime: nil,
+                recordCamera: settings.recordCamera,
+                cameraPosition: settings.cameraPosition,
+                cameraSize: settings.cameraSize.fraction,
+                cameraShape: settings.cameraShape
+            )
+            frameLock.unlock()
         }
 
         if settings.recordAudio {
@@ -240,7 +270,6 @@ class ScreenRecorder: NSObject, ObservableObject {
         }
 
         assetWriter?.startWriting()
-        startTime = nil
     }
 
     private func setupAudioCapture() throws {
@@ -314,9 +343,14 @@ class ScreenRecorder: NSObject, ObservableObject {
             if response == .OK, let url = panel.url {
                 finalURL = url
                 do {
+                    // Remove existing file if user confirmed overwrite in save panel
+                    if FileManager.default.fileExists(atPath: finalURL.path()) {
+                        try FileManager.default.removeItem(at: finalURL)
+                    }
                     try FileManager.default.moveItem(at: tempURL, to: finalURL)
                 } catch {
                     errorMessage = "Failed to save: \(error.localizedDescription)"
+                    try? FileManager.default.removeItem(at: tempURL)
                     return
                 }
             } else {
@@ -342,13 +376,65 @@ class ScreenRecorder: NSObject, ObservableObject {
         audioOutput = nil
         cameraCaptureSession = nil
         cameraOutput = nil
-        pixelBufferAdaptor = nil
-        ciContext = nil
-        compositeBufferPool = nil
-        cameraBufferLock.lock()
+        frameLock.lock()
         latestCameraPixelBuffer = nil
-        cameraBufferLock.unlock()
-        startTime = nil
+        frameWriter = nil
+        frameLock.unlock()
+    }
+
+    /// Creates a copy of a pixel buffer to ensure it remains valid independently.
+    /// Only works with non-planar formats (e.g., BGRA). Planar formats require per-plane copying.
+    private nonisolated func copyPixelBuffer(_ source: CVPixelBuffer) -> CVPixelBuffer? {
+        // Only non-planar formats are supported
+        guard CVPixelBufferGetPlaneCount(source) == 0 else {
+            print("Warning: copyPixelBuffer called with planar format, skipping")
+            return nil
+        }
+
+        let width = CVPixelBufferGetWidth(source)
+        let height = CVPixelBufferGetHeight(source)
+        let pixelFormat = CVPixelBufferGetPixelFormatType(source)
+
+        var destBuffer: CVPixelBuffer?
+        let status = CVPixelBufferCreate(
+            kCFAllocatorDefault,
+            width,
+            height,
+            pixelFormat,
+            nil,
+            &destBuffer
+        )
+
+        guard status == kCVReturnSuccess, let dest = destBuffer else {
+            print("Warning: Failed to create pixel buffer copy (status: \(status))")
+            return nil
+        }
+
+        CVPixelBufferLockBaseAddress(source, .readOnly)
+        CVPixelBufferLockBaseAddress(dest, [])
+        defer {
+            CVPixelBufferUnlockBaseAddress(source, .readOnly)
+            CVPixelBufferUnlockBaseAddress(dest, [])
+        }
+
+        guard let srcBase = CVPixelBufferGetBaseAddress(source),
+              let destBase = CVPixelBufferGetBaseAddress(dest) else {
+            print("Warning: Failed to get pixel buffer base address")
+            return nil
+        }
+
+        let srcBytesPerRow = CVPixelBufferGetBytesPerRow(source)
+        let destBytesPerRow = CVPixelBufferGetBytesPerRow(dest)
+
+        // Copy row by row to handle different bytesPerRow (padding) between buffers
+        let bytesToCopy = min(srcBytesPerRow, destBytesPerRow)
+        for row in 0..<height {
+            let srcRow = srcBase.advanced(by: row * srcBytesPerRow)
+            let destRow = destBase.advanced(by: row * destBytesPerRow)
+            memcpy(destRow, srcRow, bytesToCopy)
+        }
+
+        return dest
     }
 
     nonisolated func compositeFrame(
@@ -475,45 +561,40 @@ extension ScreenRecorder: SCStreamOutput {
 
         let presentationTime = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
 
-        cameraBufferLock.lock()
+        // Process frame synchronously to avoid buffer lifetime issues
+        frameLock.lock()
+        defer { frameLock.unlock() }
+
+        guard var writer = frameWriter else { return }
         let cameraBuffer = latestCameraPixelBuffer
-        cameraBufferLock.unlock()
 
-        nonisolated(unsafe) let capturedScreenBuffer = screenBuffer
-        nonisolated(unsafe) let capturedCameraBuffer = cameraBuffer
+        // Start session on first frame
+        if writer.startTime == nil {
+            writer.startTime = presentationTime
+            writer.assetWriter.startSession(atSourceTime: presentationTime)
+            frameWriter = writer
+        }
 
-        Task { @MainActor [weak self] in
-            guard let self,
-                  let assetWriter = self.assetWriter,
-                  let videoInput = self.videoInput,
-                  let adaptor = self.pixelBufferAdaptor,
-                  let context = self.ciContext
-            else { return }
+        guard writer.videoInput.isReadyForMoreMediaData else { return }
 
-            if self.startTime == nil {
-                self.startTime = presentationTime
-                assetWriter.startSession(atSourceTime: presentationTime)
-            }
-
-            guard videoInput.isReadyForMoreMediaData else { return }
-
-            if self.settings.recordCamera, capturedCameraBuffer != nil {
-                if let composited = self.compositeFrame(
-                    screenBuffer: capturedScreenBuffer,
-                    cameraBuffer: capturedCameraBuffer,
-                    context: context,
-                    bufferPool: self.compositeBufferPool,
-                    position: self.settings.cameraPosition,
-                    sizeFraction: self.settings.cameraSize.fraction,
-                    shape: self.settings.cameraShape
-                ) {
-                    adaptor.append(composited, withPresentationTime: presentationTime)
-                } else {
-                    adaptor.append(capturedScreenBuffer, withPresentationTime: presentationTime)
-                }
+        if writer.recordCamera, cameraBuffer != nil {
+            if let composited = compositeFrame(
+                screenBuffer: screenBuffer,
+                cameraBuffer: cameraBuffer,
+                context: writer.ciContext,
+                bufferPool: writer.bufferPool,
+                position: writer.cameraPosition,
+                sizeFraction: writer.cameraSize,
+                shape: writer.cameraShape
+            ) {
+                writer.adaptor.append(composited, withPresentationTime: presentationTime)
             } else {
-                adaptor.append(capturedScreenBuffer, withPresentationTime: presentationTime)
+                // Compositing failed, fall back to screen-only frame
+                print("Warning: Camera compositing failed, using screen-only frame")
+                writer.adaptor.append(screenBuffer, withPresentationTime: presentationTime)
             }
+        } else {
+            writer.adaptor.append(screenBuffer, withPresentationTime: presentationTime)
         }
     }
 }
@@ -528,21 +609,26 @@ extension ScreenRecorder: AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptur
 
         if output is AVCaptureVideoDataOutput {
             guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
-            cameraBufferLock.lock()
-            latestCameraPixelBuffer = pixelBuffer
-            cameraBufferLock.unlock()
+            // Copy the pixel buffer to ensure it remains valid after callback returns
+            guard let copiedBuffer = copyPixelBuffer(pixelBuffer) else { return }
+            frameLock.lock()
+            latestCameraPixelBuffer = copiedBuffer
+            frameLock.unlock()
         } else {
-            nonisolated(unsafe) let buffer = sampleBuffer
+            // Audio: check if recording has started
+            frameLock.lock()
+            let writer = frameWriter
+            frameLock.unlock()
 
+            guard writer?.startTime != nil else { return }
+
+            nonisolated(unsafe) let buffer = sampleBuffer
             Task { @MainActor [weak self] in
                 guard let self,
                       let audioInput = self.audioInput,
-                      self.startTime != nil
+                      audioInput.isReadyForMoreMediaData
                 else { return }
-
-                if audioInput.isReadyForMoreMediaData {
-                    audioInput.append(buffer)
-                }
+                audioInput.append(buffer)
             }
         }
     }

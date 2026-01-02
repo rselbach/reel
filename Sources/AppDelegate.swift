@@ -39,6 +39,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                         self.showPreview(for: url)
                     }
                 } else {
+                    // Check permission and available displays before starting
+                    guard self.screenRecorder.hasPermission,
+                          !self.screenRecorder.availableDisplays.isEmpty else {
+                        // Show dialog if no permission or no displays available
+                        self.showRecordingDialog()
+                        return
+                    }
+                    // Show countdown before starting (same as menu flow)
+                    guard await CountdownOverlay().show() else { return }
                     await self.screenRecorder.startRecording()
                     self.rebuildMenu()
                 }
@@ -58,7 +67,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             permItem.isEnabled = false
             menu.addItem(permItem)
 
-            menu.addItem(NSMenuItem(title: "Open System Settings...", action: #selector(openSettings), keyEquivalent: ","))
+            menu.addItem(NSMenuItem(title: "Open System Settings...", action: #selector(openSettings), keyEquivalent: ""))
             menu.addItem(NSMenuItem(title: "Check Permission", action: #selector(checkPermission), keyEquivalent: ""))
         } else {
             if screenRecorder.isRecording {

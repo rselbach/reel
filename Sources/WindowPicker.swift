@@ -99,15 +99,18 @@ class WindowPicker: NSObject {
     }
     
     private func handleMouseMoved(to point: NSPoint) {
-        guard let screen = NSScreen.screens.first else { return }
-        
+        // Find the primary screen (origin of global coordinate system)
+        guard let primaryScreen = NSScreen.screens.first else { return }
+
+        // Convert from NSScreen coordinates (origin bottom-left of primary)
+        // to CGWindow coordinates (origin top-left of primary)
         let flippedPoint = CGPoint(
             x: point.x,
-            y: screen.frame.height - point.y
+            y: primaryScreen.frame.height - point.y
         )
-        
+
         let foundWindow = findTopmostWindow(at: flippedPoint)
-        
+
         if let window = foundWindow, window.windowID != currentHoveredWindow?.windowID {
             currentHoveredWindow = window
             showHighlight(for: window)
@@ -142,19 +145,21 @@ class WindowPicker: NSObject {
     }
     
     private func showHighlight(for window: SCWindow) {
-        guard let screen = NSScreen.main else { return }
-        
+        // Use primary screen for coordinate conversion (same as CGWindow coordinate system)
+        guard let primaryScreen = NSScreen.screens.first else { return }
+
         let frame = window.frame
+        // Convert from CGWindow coords (origin top-left) to NSScreen coords (origin bottom-left)
         let flippedFrame = CGRect(
             x: frame.origin.x,
-            y: screen.frame.height - frame.origin.y - frame.height,
+            y: primaryScreen.frame.height - frame.origin.y - frame.height,
             width: frame.width,
             height: frame.height
         )
-        
+
         highlightWindow?.setFrame(flippedFrame, display: true)
         highlightWindow?.orderFront(nil)
-        
+
         if let view = highlightWindow?.contentView as? HighlightView {
             let appName = window.owningApplication?.applicationName ?? "Unknown"
             let title = window.title ?? ""

@@ -71,10 +71,14 @@ enum KeyCode {
 class AppSettings: ObservableObject {
     static let shared = AppSettings()
 
+    private var isCheckingLaunchStatus = false
+
     @Published var launchAtLogin: Bool {
         didSet {
             UserDefaults.standard.set(launchAtLogin, forKey: "launchAtLogin")
-            updateLaunchAtLogin()
+            if !isCheckingLaunchStatus {
+                updateLaunchAtLogin()
+            }
         }
     }
 
@@ -113,6 +117,7 @@ class AppSettings: ObservableObject {
             if let data = try? JSONEncoder().encode(recordingHotkey) {
                 UserDefaults.standard.set(data, forKey: "recordingHotkey")
             }
+            HotkeyManager.shared.updateCachedHotkey(recordingHotkey)
         }
     }
 
@@ -222,14 +227,17 @@ class AppSettings: ObservableObject {
         var keyCode: UInt16
         var modifiers: UInt32
 
-        static let `default` = HotkeyCombo(keyCode: 15, modifiers: 0x180500) // Cmd+Shift+R
+        // Device-independent modifier mask (works for both NSEvent and CGEvent)
+        static let modifierMask: UInt32 = 0x1E0000  // Cmd|Opt|Ctrl|Shift
+
+        static let `default` = HotkeyCombo(keyCode: 15, modifiers: 0x120000) // Cmd+Shift+R
 
         var displayString: String {
             var parts: [String] = []
-            if modifiers & UInt32(CGEventFlags.maskControl.rawValue) != 0 { parts.append("⌃") }
-            if modifiers & UInt32(CGEventFlags.maskAlternate.rawValue) != 0 { parts.append("⌥") }
-            if modifiers & UInt32(CGEventFlags.maskShift.rawValue) != 0 { parts.append("⇧") }
-            if modifiers & UInt32(CGEventFlags.maskCommand.rawValue) != 0 { parts.append("⌘") }
+            if modifiers & 0x40000 != 0 { parts.append("⌃") }  // Control
+            if modifiers & 0x80000 != 0 { parts.append("⌥") }  // Option
+            if modifiers & 0x20000 != 0 { parts.append("⇧") }  // Shift
+            if modifiers & 0x100000 != 0 { parts.append("⌘") } // Command
 
             let keyString = keyCodeToString(keyCode)
             parts.append(keyString)
@@ -284,7 +292,14 @@ class AppSettings: ObservableObject {
 
         if let data = defaults.data(forKey: "recordingHotkey"),
            let combo = try? JSONDecoder().decode(HotkeyCombo.self, from: data) {
-            self.recordingHotkey = combo
+            // Migrate old broken default modifier value (0x180500) to new correct value (0x120000)
+            // Old value masked to 0x100000 (Cmd only), new value masks to 0x120000 (Cmd+Shift)
+            if combo.keyCode == HotkeyCombo.default.keyCode && combo.modifiers == 0x180500 {
+                print("Migrating hotkey from old modifier format")
+                self.recordingHotkey = .default
+            } else {
+                self.recordingHotkey = combo
+            }
         } else {
             self.recordingHotkey = .default
         }
@@ -312,6 +327,12 @@ class AppSettings: ObservableObject {
     }
 
     func checkLaunchAtLoginStatus() {
-        launchAtLogin = SMAppService.mainApp.status == .enabled
+        let isEnabled = SMAppService.mainApp.status == .enabled
+        // Only update if different, and skip the registration call since we're just syncing state
+        if launchAtLogin != isEnabled {
+            isCheckingLaunchStatus = true
+            launchAtLogin = isEnabled
+            isCheckingLaunchStatus = false
+        }
     }
 }

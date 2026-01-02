@@ -9,10 +9,26 @@ class HotkeyManager {
     private var runLoopSource: CFRunLoopSource?
     var onToggleRecording: (() -> Void)?
 
+    // Cached hotkey for synchronous access from event tap callback (protected by hotkeyLock)
+    private let hotkeyLock = NSLock()
+    private nonisolated(unsafe) var cachedKeyCode: UInt16 = AppSettings.HotkeyCombo.default.keyCode
+    private nonisolated(unsafe) var cachedModifiers: UInt32 = AppSettings.HotkeyCombo.default.modifiers
+
     private init() {}
+
+    func updateCachedHotkey(_ combo: AppSettings.HotkeyCombo) {
+        hotkeyLock.lock()
+        cachedKeyCode = combo.keyCode
+        cachedModifiers = combo.modifiers
+        hotkeyLock.unlock()
+    }
 
     func start() {
         guard eventTap == nil else { return }
+
+        // Initialize cached hotkey from current settings
+        let hotkey = AppSettings.shared.recordingHotkey
+        updateCachedHotkey(hotkey)
 
         let eventMask = (1 << CGEventType.keyDown.rawValue)
 
@@ -64,29 +80,20 @@ class HotkeyManager {
         }
 
         let keyCode = UInt16(event.getIntegerValueField(.keyboardEventKeycode))
-        let flags = event.flags.rawValue
+        let flags = UInt32(event.flags.rawValue) & AppSettings.HotkeyCombo.modifierMask
 
-        Task { @MainActor in
-            let settings = AppSettings.shared
-            let hotkey = settings.recordingHotkey
+        // Check synchronously using cached hotkey values
+        hotkeyLock.lock()
+        let expectedKeyCode = cachedKeyCode
+        let expectedModifiers = cachedModifiers
+        hotkeyLock.unlock()
 
-            let relevantFlags = flags & (
-                UInt64(CGEventFlags.maskCommand.rawValue) |
-                UInt64(CGEventFlags.maskShift.rawValue) |
-                UInt64(CGEventFlags.maskAlternate.rawValue) |
-                UInt64(CGEventFlags.maskControl.rawValue)
-            )
-
-            let hotkeyFlags = UInt64(hotkey.modifiers) & (
-                UInt64(CGEventFlags.maskCommand.rawValue) |
-                UInt64(CGEventFlags.maskShift.rawValue) |
-                UInt64(CGEventFlags.maskAlternate.rawValue) |
-                UInt64(CGEventFlags.maskControl.rawValue)
-            )
-
-            if keyCode == hotkey.keyCode && relevantFlags == hotkeyFlags {
+        if keyCode == expectedKeyCode && flags == expectedModifiers {
+            // Consume the event and trigger the callback
+            Task { @MainActor in
                 self.onToggleRecording?()
             }
+            return nil  // Consume the event so it doesn't reach other apps
         }
 
         return Unmanaged.passRetained(event)
