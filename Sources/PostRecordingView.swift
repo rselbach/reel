@@ -313,15 +313,18 @@ struct TrimSlider: View {
     }
 
     private func startPosition(in width: CGFloat) -> CGFloat {
-        (trimStart / duration) * width
+        guard duration > 0 else { return 0 }
+        return (trimStart / duration) * width
     }
 
     private func endPosition(in width: CGFloat) -> CGFloat {
-        (trimEnd / duration) * width
+        guard duration > 0 else { return width }
+        return (trimEnd / duration) * width
     }
 
     private func playheadPosition(in width: CGFloat) -> CGFloat {
-        (currentTime / duration) * width
+        guard duration > 0 else { return 0 }
+        return (currentTime / duration) * width
     }
 
     private func formatTime(_ seconds: Double) -> String {
