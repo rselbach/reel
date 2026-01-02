@@ -41,7 +41,7 @@ struct GeneralTab: View {
             if !settings.askWhereToSave {
                 HStack {
                     Text("Output folder:")
-                    Text(settings.outputDirectory.path)
+                    Text(settings.outputDirectory.path())
                         .lineLimit(1)
                         .truncationMode(.middle)
                         .foregroundColor(.secondary)

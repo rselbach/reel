@@ -159,7 +159,7 @@ struct RecordingDialog: View {
               let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else {
             return nil
         }
-        return NSWorkspace.shared.icon(forFile: appURL.path)
+        return NSWorkspace.shared.icon(forFile: appURL.path())
     }
 }
 

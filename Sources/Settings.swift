@@ -28,7 +28,7 @@ class AppSettings: ObservableObject {
 
     @Published var outputDirectory: URL {
         didSet {
-            UserDefaults.standard.set(outputDirectory.path, forKey: "outputDirectory")
+            UserDefaults.standard.set(outputDirectory.path(), forKey: "outputDirectory")
         }
     }
 

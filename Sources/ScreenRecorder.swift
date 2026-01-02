@@ -299,11 +299,11 @@ class ScreenRecorder: NSObject, ObservableObject {
             }
         }
 
-        print("Recording saved to: \(finalURL.path)")
+        print("Recording saved to: \(finalURL.path())")
         lastRecordedURL = finalURL
 
         if settings.openFinderAfterRecording && !settings.showPreviewAfterRecording {
-            NSWorkspace.shared.selectFile(finalURL.path, inFileViewerRootedAtPath: "")
+            NSWorkspace.shared.selectFile(finalURL.path(), inFileViewerRootedAtPath: "")
         }
     }
 

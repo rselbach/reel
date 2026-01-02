@@ -123,10 +123,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.previewWindow = nil
             },
             onRevealInFinder: {
-                NSWorkspace.shared.selectFile(url.path, inFileViewerRootedAtPath: "")
+                NSWorkspace.shared.selectFile(url.path(), inFileViewerRootedAtPath: "")
             },
             onDelete: { [weak self] in
-                try? FileManager.default.removeItem(at: url)
+                do {
+                    try FileManager.default.removeItem(at: url)
+                } catch {
+                    let alert = NSAlert()
+                    alert.messageText = "Could not delete recording"
+                    alert.informativeText = error.localizedDescription
+                    alert.alertStyle = .warning
+                    alert.runModal()
+                    return
+                }
                 self?.previewWindow?.close()
                 self?.previewWindow = nil
             }

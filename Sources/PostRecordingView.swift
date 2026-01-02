@@ -155,7 +155,7 @@ struct PostRecordingView: View {
 
         do {
             try await trimVideo(to: outputURL)
-            NSWorkspace.shared.selectFile(outputURL.path, inFileViewerRootedAtPath: "")
+            NSWorkspace.shared.selectFile(outputURL.path(), inFileViewerRootedAtPath: "")
         } catch {
             exportError = "Export failed: \(error.localizedDescription)"
         }
@@ -166,7 +166,7 @@ struct PostRecordingView: View {
     private func trimVideo(to outputURL: URL) async throws {
         let asset = AVURLAsset(url: videoURL)
 
-        if FileManager.default.fileExists(atPath: outputURL.path) {
+        if FileManager.default.fileExists(atPath: outputURL.path()) {
             try FileManager.default.removeItem(at: outputURL)
         }
 
