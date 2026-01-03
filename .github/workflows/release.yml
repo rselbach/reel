@@ -81,6 +81,54 @@ jobs:
         run: |
           ./build-app.sh --dmg --sign
       
+      - name: Sign update for Sparkle
+        env:
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: |
+          SIGN_UPDATE=".build/artifacts/sparkle/Sparkle/bin/sign_update"
+          SIGNATURE=$("$SIGN_UPDATE" .build/Reel.dmg --ed-key-file <(echo "$SPARKLE_PRIVATE_KEY"))
+          echo "SPARKLE_SIGNATURE=$SIGNATURE" >> $GITHUB_ENV
+          echo "Sparkle signature generated"
+      
+      - name: Update appcast.xml
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/v}
+          DMG_SIZE=$(stat -f%z .build/Reel.dmg)
+          DATE=$(date -R)
+          
+          cat > appcast.xml << EOF
+          <?xml version="1.0" encoding="utf-8"?>
+          <rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" xmlns:dc="http://purl.org/dc/elements/1.1/">
+            <channel>
+              <title>Reel Updates</title>
+              <link>https://raw.githubusercontent.com/rselbach/reel/main/appcast.xml</link>
+              <description>Reel app updates</description>
+              <language>en</language>
+              <item>
+                <title>Version $VERSION</title>
+                <pubDate>$DATE</pubDate>
+                <sparkle:version>$VERSION</sparkle:version>
+                <sparkle:shortVersionString>$VERSION</sparkle:shortVersionString>
+                <enclosure
+                  url="https://github.com/rselbach/reel/releases/download/v$VERSION/Reel.dmg"
+                  $SPARKLE_SIGNATURE
+                  length="$DMG_SIZE"
+                  type="application/octet-stream"/>
+              </item>
+            </channel>
+          </rss>
+          EOF
+      
+      - name: Commit appcast.xml
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git fetch origin main
+          git checkout main
+          git add appcast.xml
+          git commit -m "Update appcast.xml for ${GITHUB_REF#refs/tags/}" || echo "No changes to commit"
+          git push origin main
+      
       - name: Generate changelog
         run: |
           PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
