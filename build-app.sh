@@ -56,10 +56,14 @@ swift build -c release
 rm -rf "$APP_DIR"
 mkdir -p "$APP_DIR/Contents/MacOS"
 mkdir -p "$APP_DIR/Contents/Resources"
+mkdir -p "$APP_DIR/Contents/Frameworks"
 
 cp .build/release/Reel "$APP_DIR/Contents/MacOS/"
 cp Sources/Info.plist "$APP_DIR/Contents/Info.plist"
 cp Sources/AppIcon.icns "$APP_DIR/Contents/Resources/"
+cp -R .build/arm64-apple-macosx/release/Sparkle.framework "$APP_DIR/Contents/Frameworks/"
+
+install_name_tool -add_rpath @executable_path/../Frameworks "$APP_DIR/Contents/MacOS/Reel"
 
 echo "Built: $APP_DIR"
 
