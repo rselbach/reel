@@ -106,7 +106,6 @@ jobs:
           SPARKLE_SIG: ${{ env.SPARKLE_SIGNATURE }}
         run: |
           VERSION=${GITHUB_REF#refs/tags/v}
-          DMG_SIZE=$(stat -f%z .build/Reel.dmg)
           DATE=$(date -R)
           
           mkdir -p _site
@@ -122,7 +121,7 @@ jobs:
           printf '%s\n' "      <pubDate>${DATE}</pubDate>" >> _site/appcast.xml
           printf '%s\n' "      <sparkle:version>${VERSION}</sparkle:version>" >> _site/appcast.xml
           printf '%s\n' "      <sparkle:shortVersionString>${VERSION}</sparkle:shortVersionString>" >> _site/appcast.xml
-          printf '%s\n' "      <enclosure url=\"https://github.com/rselbach/reel/releases/download/v${VERSION}/Reel.dmg\" ${SPARKLE_SIGNATURE} length=\"${DMG_SIZE}\" type=\"application/octet-stream\"/>" >> _site/appcast.xml
+          printf '%s\n' "      <enclosure url=\"https://github.com/rselbach/reel/releases/download/v${VERSION}/Reel.dmg\" ${SPARKLE_SIGNATURE} type=\"application/octet-stream\"/>" >> _site/appcast.xml
           printf '%s\n' '    </item>' >> _site/appcast.xml
           printf '%s\n' '  </channel>' >> _site/appcast.xml
           printf '%s\n' '</rss>' >> _site/appcast.xml
