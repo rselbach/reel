@@ -76,10 +76,18 @@ if [ "$DO_SIGN" = true ]; then
     fi
 
     echo "Signing with: $SIGNING_IDENTITY"
+    
+    # Sign Sparkle framework (deep sign all nested code)
+    codesign --force --options runtime --deep \
+        --sign "$SIGNING_IDENTITY" \
+        "$APP_DIR/Contents/Frameworks/Sparkle.framework"
+    
+    # Sign main binary
     codesign --force --options runtime --entitlements "$ENTITLEMENTS" \
         --sign "$SIGNING_IDENTITY" \
         "$APP_DIR/Contents/MacOS/Reel"
     
+    # Sign app bundle
     codesign --force --options runtime --entitlements "$ENTITLEMENTS" \
         --sign "$SIGNING_IDENTITY" \
         "$APP_DIR"

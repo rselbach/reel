@@ -69,10 +69,19 @@ jobs:
           # Create zip for notarization
           ditto -c -k --keepParent .build/Reel.app .build/Reel.zip
           
-          # Submit and wait
-          xcrun notarytool submit .build/Reel.zip \
+          # Submit and wait, capture submission ID
+          SUBMIT_OUTPUT=$(xcrun notarytool submit .build/Reel.zip \
             --keychain-profile "NOTARIZE_PROFILE" \
-            --wait
+            --wait 2>&1) || true
+          echo "$SUBMIT_OUTPUT"
+          
+          # Extract submission ID and check status
+          SUBMISSION_ID=$(echo "$SUBMIT_OUTPUT" | grep "id:" | head -1 | awk '{print $2}')
+          if echo "$SUBMIT_OUTPUT" | grep -q "status: Invalid"; then
+            echo "Notarization failed. Fetching log..."
+            xcrun notarytool log "$SUBMISSION_ID" --keychain-profile "NOTARIZE_PROFILE"
+            exit 1
+          fi
           
           # Staple
           xcrun stapler staple .build/Reel.app
