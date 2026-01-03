@@ -31,7 +31,7 @@
     <key>NSCameraUsageDescription</key>
     <string>Reel needs camera access to record a camera overlay on your screen recordings.</string>
     <key>SUFeedURL</key>
-    <string>https://raw.githubusercontent.com/rselbach/reel/main/appcast.xml</string>
+    <string>https://rselbach.github.io/reel/appcast.xml</string>
     <key>SUPublicEDKey</key>
     <string>ePrj/6ZMfGvkCXTYRq+X0H9Ukshi3Wx3+swNSi75Tio=</string>
 </dict>

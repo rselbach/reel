@@ -7,6 +7,8 @@ on:
 
 permissions:
   contents: write
+  pages: write
+  id-token: write
 
 jobs:
   build:
@@ -90,18 +92,19 @@ jobs:
           echo "SPARKLE_SIGNATURE=$SIGNATURE" >> $GITHUB_ENV
           echo "Sparkle signature generated"
       
-      - name: Update appcast.xml
+      - name: Generate appcast.xml
         run: |
           VERSION=${GITHUB_REF#refs/tags/v}
           DMG_SIZE=$(stat -f%z .build/Reel.dmg)
           DATE=$(date -R)
           
-          cat > appcast.xml << EOF
+          mkdir -p _site
+          cat > _site/appcast.xml << EOF
           <?xml version="1.0" encoding="utf-8"?>
           <rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" xmlns:dc="http://purl.org/dc/elements/1.1/">
             <channel>
               <title>Reel Updates</title>
-              <link>https://raw.githubusercontent.com/rselbach/reel/main/appcast.xml</link>
+              <link>https://rselbach.github.io/reel/appcast.xml</link>
               <description>Reel app updates</description>
               <language>en</language>
               <item>
@@ -119,15 +122,10 @@ jobs:
           </rss>
           EOF
       
-      - name: Commit appcast.xml
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git fetch origin main
-          git checkout main
-          git add appcast.xml
-          git commit -m "Update appcast.xml for ${GITHUB_REF#refs/tags/}" || echo "No changes to commit"
-          git push origin main
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
       
       - name: Generate changelog
         run: |
@@ -143,3 +141,14 @@ jobs:
         with:
           files: .build/Reel.dmg
           body_path: release_notes.md
+
+  deploy-appcast:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
