@@ -108,28 +108,33 @@ jobs:
           DATE=$(date -R)
           
           mkdir -p _site
-          cat > _site/appcast.xml << EOF
-          <?xml version="1.0" encoding="utf-8"?>
-          <rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" xmlns:dc="http://purl.org/dc/elements/1.1/">
-            <channel>
-              <title>Reel Updates</title>
-              <link>https://rselbach.github.io/reel/appcast.xml</link>
-              <description>Reel app updates</description>
-              <language>en</language>
-              <item>
-                <title>Version $VERSION</title>
-                <pubDate>$DATE</pubDate>
-                <sparkle:version>$VERSION</sparkle:version>
-                <sparkle:shortVersionString>$VERSION</sparkle:shortVersionString>
-                <enclosure
-                  url="https://github.com/rselbach/reel/releases/download/v$VERSION/Reel.dmg"
-                  $SPARKLE_SIGNATURE
-                  length="$DMG_SIZE"
-                  type="application/octet-stream"/>
-              </item>
-            </channel>
-          </rss>
-          EOF
+          cat > _site/appcast.xml << 'EOF'
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" xmlns:dc="http://purl.org/dc/elements/1.1/">
+  <channel>
+    <title>Reel Updates</title>
+    <link>https://rselbach.github.io/reel/appcast.xml</link>
+    <description>Reel app updates</description>
+    <language>en</language>
+    <item>
+      <title>Version VERSION_PLACEHOLDER</title>
+      <pubDate>DATE_PLACEHOLDER</pubDate>
+      <sparkle:version>VERSION_PLACEHOLDER</sparkle:version>
+      <sparkle:shortVersionString>VERSION_PLACEHOLDER</sparkle:shortVersionString>
+      <enclosure
+        url="https://github.com/rselbach/reel/releases/download/vVERSION_PLACEHOLDER/Reel.dmg"
+        SIGNATURE_PLACEHOLDER
+        length="SIZE_PLACEHOLDER"
+        type="application/octet-stream"/>
+    </item>
+  </channel>
+</rss>
+EOF
+          # Replace placeholders (can't use variables directly with quoted heredoc)
+          sed -i '' "s|VERSION_PLACEHOLDER|$VERSION|g" _site/appcast.xml
+          sed -i '' "s|DATE_PLACEHOLDER|$DATE|g" _site/appcast.xml
+          sed -i '' "s|SIGNATURE_PLACEHOLDER|$SPARKLE_SIGNATURE|g" _site/appcast.xml
+          sed -i '' "s|SIZE_PLACEHOLDER|$DMG_SIZE|g" _site/appcast.xml
       
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
