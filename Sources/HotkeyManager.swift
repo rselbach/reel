@@ -1,5 +1,8 @@
 import Carbon
 import Cocoa
+import os.log
+
+private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "com.reel", category: "HotkeyManager")
 
 @MainActor
 class HotkeyManager {
@@ -50,7 +53,7 @@ class HotkeyManager {
         )
 
         guard let eventTap else {
-            print("Failed to create event tap. Check accessibility permissions.")
+            logger.error("Failed to create event tap. Check accessibility permissions.")
             return
         }
 

@@ -1,8 +1,17 @@
 import AVFoundation
 import CoreImage
+import os.log
 import ScreenCaptureKit
 import SwiftUI
 import UniformTypeIdentifiers
+
+private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "com.reel", category: "ScreenRecorder")
+
+private extension NSScreen {
+    var displayID: CGDirectDisplayID? {
+        deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID
+    }
+}
 
 enum RecordingMode {
     case display
@@ -124,8 +133,9 @@ class ScreenRecorder: NSObject, ObservableObject {
             }
             let display = availableDisplays[selectedDisplayIndex]
             filter = SCContentFilter(display: display, excludingWindows: [])
-            captureWidth = Int(display.width) * 2
-            captureHeight = Int(display.height) * 2
+            let scale = NSScreen.screens.first { $0.displayID == display.displayID }?.backingScaleFactor ?? 2.0
+            captureWidth = Int(CGFloat(display.width) * scale)
+            captureHeight = Int(CGFloat(display.height) * scale)
 
         case .window:
             guard let window = selectedWindow else {
@@ -133,8 +143,9 @@ class ScreenRecorder: NSObject, ObservableObject {
                 return
             }
             filter = SCContentFilter(desktopIndependentWindow: window)
-            captureWidth = Int(window.frame.width) * 2
-            captureHeight = Int(window.frame.height) * 2
+            let scale = NSScreen.main?.backingScaleFactor ?? 2.0
+            captureWidth = Int(window.frame.width * scale)
+            captureHeight = Int(window.frame.height * scale)
         }
 
         do {
@@ -192,11 +203,18 @@ class ScreenRecorder: NSObject, ObservableObject {
 
     private func setupAssetWriter(width: Int, height: Int) throws {
         let outputDir = settings.outputDirectory
+
+        // Ensure output directory exists
+        if !FileManager.default.fileExists(atPath: outputDir.path()) {
+            try FileManager.default.createDirectory(at: outputDir, withIntermediateDirectories: true)
+        }
+
         let timestamp = ISO8601DateFormatter().string(from: Date())
             .replacingOccurrences(of: ":", with: "-")
-        outputURL = outputDir.appendingPathComponent("Reel-\(timestamp).mp4")
+        let url = outputDir.appendingPathComponent("Reel-\(timestamp).mp4")
+        outputURL = url
 
-        assetWriter = try AVAssetWriter(outputURL: outputURL!, fileType: .mp4)
+        assetWriter = try AVAssetWriter(outputURL: url, fileType: .mp4)
 
         let videoSettings: [String: Any] = [
             AVVideoCodecKey: AVVideoCodecType.h264,
@@ -373,7 +391,7 @@ class ScreenRecorder: NSObject, ObservableObject {
             }
         }
 
-        print("Recording saved to: \(finalURL.path())")
+        logger.info("Recording saved to: \(finalURL.path())")
         lastRecordedURL = finalURL
 
         if settings.openFinderAfterRecording && !settings.showPreviewAfterRecording {
@@ -401,7 +419,7 @@ class ScreenRecorder: NSObject, ObservableObject {
     private nonisolated func copyPixelBuffer(_ source: CVPixelBuffer) -> CVPixelBuffer? {
         // Only non-planar formats are supported
         guard CVPixelBufferGetPlaneCount(source) == 0 else {
-            print("Warning: copyPixelBuffer called with planar format, skipping")
+            logger.warning("copyPixelBuffer called with planar format, skipping")
             return nil
         }
 
@@ -420,7 +438,7 @@ class ScreenRecorder: NSObject, ObservableObject {
         )
 
         guard status == kCVReturnSuccess, let dest = destBuffer else {
-            print("Warning: Failed to create pixel buffer copy (status: \(status))")
+            logger.warning("Failed to create pixel buffer copy (status: \(status))")
             return nil
         }
 
@@ -433,7 +451,7 @@ class ScreenRecorder: NSObject, ObservableObject {
 
         guard let srcBase = CVPixelBufferGetBaseAddress(source),
               let destBase = CVPixelBufferGetBaseAddress(dest) else {
-            print("Warning: Failed to get pixel buffer base address")
+            logger.warning("Failed to get pixel buffer base address")
             return nil
         }
 
@@ -604,7 +622,7 @@ extension ScreenRecorder: SCStreamOutput {
                 writer.adaptor.append(composited, withPresentationTime: presentationTime)
             } else {
                 // Compositing failed, fall back to screen-only frame
-                print("Warning: Camera compositing failed, using screen-only frame")
+                logger.warning("Camera compositing failed, using screen-only frame")
                 writer.adaptor.append(screenBuffer, withPresentationTime: presentationTime)
             }
         } else {

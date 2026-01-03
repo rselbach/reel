@@ -12,7 +12,7 @@ class CountdownOverlay {
         let barHeight: CGFloat = 80
         let barFrame = NSRect(
             x: screen.frame.origin.x,
-            y: screen.frame.origin.y,
+            y: screen.frame.maxY - barHeight,
             width: screen.frame.width,
             height: barHeight
         )

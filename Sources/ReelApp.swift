@@ -1,7 +1,7 @@
 import SwiftUI
 
 @main
-struct MiliApp: App {
+struct ReelApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
     var body: some Scene {

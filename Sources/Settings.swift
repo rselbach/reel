@@ -1,7 +1,10 @@
 import AVFoundation
 import CoreGraphics
 import Foundation
+import os.log
 import ServiceManagement
+
+private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "com.reel", category: "Settings")
 
 // MARK: - Key Codes (Carbon virtual key codes)
 enum KeyCode {
@@ -112,12 +115,15 @@ class AppSettings: ObservableObject {
         didSet { UserDefaults.standard.set(showPreviewAfterRecording, forKey: "showPreviewAfterRecording") }
     }
 
+    static let hotkeyChangedNotification = Notification.Name("AppSettingsHotkeyChanged")
+
     @Published var recordingHotkey: HotkeyCombo {
         didSet {
             if let data = try? JSONEncoder().encode(recordingHotkey) {
                 UserDefaults.standard.set(data, forKey: "recordingHotkey")
             }
             HotkeyManager.shared.updateCachedHotkey(recordingHotkey)
+            NotificationCenter.default.post(name: Self.hotkeyChangedNotification, object: nil)
         }
     }
 
@@ -295,7 +301,7 @@ class AppSettings: ObservableObject {
             // Migrate old broken default modifier value (0x180500) to new correct value (0x120000)
             // Old value masked to 0x100000 (Cmd only), new value masks to 0x120000 (Cmd+Shift)
             if combo.keyCode == HotkeyCombo.default.keyCode && combo.modifiers == 0x180500 {
-                print("Migrating hotkey from old modifier format")
+                logger.info("Migrating hotkey from old modifier format")
                 self.recordingHotkey = .default
             } else {
                 self.recordingHotkey = combo
@@ -322,7 +328,7 @@ class AppSettings: ObservableObject {
                 try SMAppService.mainApp.unregister()
             }
         } catch {
-            print("Failed to update launch at login: \(error)")
+            logger.error("Failed to update launch at login: \(error)")
         }
     }
 

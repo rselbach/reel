@@ -10,6 +10,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var recordingDialogWindow: NSWindow?
     private var previewWindow: NSWindow?
     private var isCountdownActive = false
+    private var hotkeyObserver: NSObjectProtocol?
     private let updaterController = SPUStandardUpdaterController(
         startingUpdater: true,
         updaterDelegate: nil,
@@ -27,6 +28,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         AppSettings.shared.checkLaunchAtLoginStatus()
         setupHotkey()
+
+        hotkeyObserver = NotificationCenter.default.addObserver(
+            forName: AppSettings.hotkeyChangedNotification,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.rebuildMenu()
+            }
+        }
 
         Task { @MainActor in
             await screenRecorder.requestPermission()
@@ -56,10 +67,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     // Prevent multiple overlapping countdowns
                     guard !self.isCountdownActive else { return }
                     self.isCountdownActive = true
-                    defer { self.isCountdownActive = false }
-                    
+
                     // Show countdown before starting (same as menu flow)
-                    guard await CountdownOverlay().show() else { return }
+                    let shouldStart = await CountdownOverlay().show()
+                    self.isCountdownActive = false
+                    guard shouldStart else { return }
                     await self.screenRecorder.startRecording()
                     self.rebuildMenu()
                 }

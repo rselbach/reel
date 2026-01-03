@@ -190,12 +190,10 @@ struct PostRecordingView: View {
 
 enum ExportError: LocalizedError {
     case sessionCreationFailed
-    case exportFailed
 
     var errorDescription: String? {
         switch self {
         case .sessionCreationFailed: return "Could not create export session"
-        case .exportFailed: return "Export did not complete successfully"
         }
     }
 }
