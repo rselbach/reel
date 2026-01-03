@@ -205,10 +205,6 @@ struct TrimSlider: View {
     @Binding var currentTime: Double
     let onSeek: (Double) -> Void
 
-    @State private var isDraggingStart = false
-    @State private var isDraggingEnd = false
-    @State private var isDraggingPlayhead = false
-
     private let handleWidth: CGFloat = 12
     private let trackHeight: CGFloat = 50
 
@@ -258,12 +254,10 @@ struct TrimSlider: View {
                         .gesture(
                             DragGesture()
                                 .onChanged { value in
-                                    isDraggingStart = true
                                     let newStart = (value.location.x / usableWidth) * duration
                                     trimStart = min(max(0, newStart), trimEnd - 0.5)
                                     onSeek(trimStart)
                                 }
-                                .onEnded { _ in isDraggingStart = false }
                         )
 
                     TrimHandle(color: .accentColor)
@@ -272,12 +266,10 @@ struct TrimSlider: View {
                         .gesture(
                             DragGesture()
                                 .onChanged { value in
-                                    isDraggingEnd = true
                                     let newEnd = (value.location.x / usableWidth) * duration
                                     trimEnd = max(min(duration, newEnd), trimStart + 0.5)
                                     onSeek(trimEnd)
                                 }
-                                .onEnded { _ in isDraggingEnd = false }
                         )
 
                     Capsule()
@@ -288,12 +280,10 @@ struct TrimSlider: View {
                         .gesture(
                             DragGesture()
                                 .onChanged { value in
-                                    isDraggingPlayhead = true
                                     let newTime = (value.location.x - handleWidth) / usableWidth * duration
                                     let clampedTime = min(max(0, newTime), duration)
                                     onSeek(clampedTime)
                                 }
-                                .onEnded { _ in isDraggingPlayhead = false }
                         )
                 }
                 .clipShape(RoundedRectangle(cornerRadius: 4))

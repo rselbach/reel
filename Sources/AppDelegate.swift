@@ -17,6 +17,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         userDriverDelegate: nil
     )
 
+    func applicationWillTerminate(_ notification: Notification) {
+        if let observer = hotkeyObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
+    }
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         screenRecorder = ScreenRecorder()
 

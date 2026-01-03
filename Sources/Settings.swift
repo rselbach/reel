@@ -291,7 +291,8 @@ class AppSettings: ObservableObject {
         if let path = defaults.string(forKey: "outputDirectory") {
             self.outputDirectory = URL(fileURLWithPath: path)
         } else {
-            self.outputDirectory = FileManager.default.urls(for: .moviesDirectory, in: .userDomainMask)[0]
+            self.outputDirectory = FileManager.default.urls(for: .moviesDirectory, in: .userDomainMask).first
+                ?? URL(fileURLWithPath: NSHomeDirectory())
         }
 
         self.askWhereToSave = defaults.bool(forKey: "askWhereToSave")

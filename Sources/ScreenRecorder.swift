@@ -105,6 +105,7 @@ class ScreenRecorder: NSObject, ObservableObject {
                 false,
                 onScreenWindowsOnly: true
             )
+            availableDisplays = content.displays
             availableWindows = content.windows.filter { window in
                 window.isOnScreen &&
                 window.frame.width > RecordingConstants.minimumWindowSize &&
@@ -143,7 +144,8 @@ class ScreenRecorder: NSObject, ObservableObject {
                 return
             }
             filter = SCContentFilter(desktopIndependentWindow: window)
-            let scale = NSScreen.main?.backingScaleFactor ?? 2.0
+            let windowScreen = NSScreen.screens.first { $0.frame.intersects(window.frame) }
+            let scale = windowScreen?.backingScaleFactor ?? 2.0
             captureWidth = Int(window.frame.width * scale)
             captureHeight = Int(window.frame.height * scale)
         }
@@ -387,6 +389,7 @@ class ScreenRecorder: NSObject, ObservableObject {
                 }
             } else {
                 try? FileManager.default.removeItem(at: tempURL)
+                lastRecordedURL = nil
                 return
             }
         }

@@ -36,7 +36,7 @@ class HotkeyManager {
         let eventMask = (1 << CGEventType.keyDown.rawValue)
 
         let callback: CGEventTapCallBack = { proxy, type, event, refcon in
-            guard let refcon else { return Unmanaged.passRetained(event) }
+            guard let refcon else { return Unmanaged.passUnretained(event) }
             let manager = Unmanaged<HotkeyManager>.fromOpaque(refcon).takeUnretainedValue()
             return manager.handleEvent(proxy: proxy, type: type, event: event)
         }
@@ -109,6 +109,6 @@ class HotkeyManager {
 
     func requestAccessibilityPermission() {
         let options = ["AXTrustedCheckOptionPrompt": true] as CFDictionary
-        AXIsProcessTrustedWithOptions(options)
+        _ = AXIsProcessTrustedWithOptions(options)
     }
 }

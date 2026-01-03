@@ -7,6 +7,7 @@ class CountdownOverlay {
     private var cancelled = false
     
     func show() async -> Bool {
+        cancelled = false
         guard let screen = NSScreen.main else { return false }
         
         let barHeight: CGFloat = 80
