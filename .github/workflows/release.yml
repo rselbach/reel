@@ -102,36 +102,30 @@ jobs:
           echo "Sparkle signature generated"
       
       - name: Generate appcast.xml
+        env:
+          SPARKLE_SIG: ${{ env.SPARKLE_SIGNATURE }}
         run: |
           VERSION=${GITHUB_REF#refs/tags/v}
           DMG_SIZE=$(stat -f%z .build/Reel.dmg)
           DATE=$(date -R)
           
           mkdir -p _site
-          cat > _site/appcast.xml << APPCAST_EOF
-          <?xml version="1.0" encoding="utf-8"?>
-          <rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" xmlns:dc="http://purl.org/dc/elements/1.1/">
-            <channel>
-              <title>Reel Updates</title>
-              <link>https://rselbach.github.io/reel/appcast.xml</link>
-              <description>Reel app updates</description>
-              <language>en</language>
-              <item>
-                <title>Version ${VERSION}</title>
-                <pubDate>${DATE}</pubDate>
-                <sparkle:version>${VERSION}</sparkle:version>
-                <sparkle:shortVersionString>${VERSION}</sparkle:shortVersionString>
-                <enclosure
-                  url="https://github.com/rselbach/reel/releases/download/v${VERSION}/Reel.dmg"
-                  ${SPARKLE_SIGNATURE}
-                  length="${DMG_SIZE}"
-                  type="application/octet-stream"/>
-              </item>
-            </channel>
-          </rss>
-          APPCAST_EOF
-          # Remove leading whitespace from each line
-          sed -i '' 's/^          //' _site/appcast.xml
+          printf '%s\n' '<?xml version="1.0" encoding="utf-8"?>' > _site/appcast.xml
+          printf '%s\n' '<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" xmlns:dc="http://purl.org/dc/elements/1.1/">' >> _site/appcast.xml
+          printf '%s\n' '  <channel>' >> _site/appcast.xml
+          printf '%s\n' '    <title>Reel Updates</title>' >> _site/appcast.xml
+          printf '%s\n' '    <link>https://rselbach.github.io/reel/appcast.xml</link>' >> _site/appcast.xml
+          printf '%s\n' '    <description>Reel app updates</description>' >> _site/appcast.xml
+          printf '%s\n' '    <language>en</language>' >> _site/appcast.xml
+          printf '%s\n' '    <item>' >> _site/appcast.xml
+          printf '%s\n' "      <title>Version ${VERSION}</title>" >> _site/appcast.xml
+          printf '%s\n' "      <pubDate>${DATE}</pubDate>" >> _site/appcast.xml
+          printf '%s\n' "      <sparkle:version>${VERSION}</sparkle:version>" >> _site/appcast.xml
+          printf '%s\n' "      <sparkle:shortVersionString>${VERSION}</sparkle:shortVersionString>" >> _site/appcast.xml
+          printf '%s\n' "      <enclosure url=\"https://github.com/rselbach/reel/releases/download/v${VERSION}/Reel.dmg\" ${SPARKLE_SIGNATURE} length=\"${DMG_SIZE}\" type=\"application/octet-stream\"/>" >> _site/appcast.xml
+          printf '%s\n' '    </item>' >> _site/appcast.xml
+          printf '%s\n' '  </channel>' >> _site/appcast.xml
+          printf '%s\n' '</rss>' >> _site/appcast.xml
       
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
