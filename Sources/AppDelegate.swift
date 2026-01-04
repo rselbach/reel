@@ -75,7 +75,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     self.isCountdownActive = true
 
                     // Show countdown before starting (same as menu flow)
-                    let shouldStart = await CountdownOverlay().show()
+                    let shouldStart = await CountdownOverlay().show(targetFrame: self.screenRecorder.countdownTargetFrame)
                     self.isCountdownActive = false
                     guard shouldStart else { return }
                     await self.screenRecorder.startRecording()
@@ -246,7 +246,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 screenRecorder.recordingMode = .window
             }
             
-            guard await CountdownOverlay().show() else { return }
+            guard await CountdownOverlay().show(targetFrame: screenRecorder.countdownTargetFrame) else { return }
             await screenRecorder.startRecording()
             rebuildMenu()
         }

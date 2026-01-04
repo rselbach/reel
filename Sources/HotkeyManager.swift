@@ -12,10 +12,11 @@ class HotkeyManager {
     private var runLoopSource: CFRunLoopSource?
     var onToggleRecording: (() -> Void)?
 
-    // Cached hotkey for synchronous access from event tap callback (protected by hotkeyLock)
+    // Cached state for synchronous access from event tap callback (protected by hotkeyLock)
     private let hotkeyLock = NSLock()
     private nonisolated(unsafe) var cachedKeyCode: UInt16 = AppSettings.HotkeyCombo.default.keyCode
     private nonisolated(unsafe) var cachedModifiers: UInt32 = AppSettings.HotkeyCombo.default.modifiers
+    private nonisolated(unsafe) var cachedEventTap: CFMachPort?
 
     private init() {}
 
@@ -60,9 +61,17 @@ class HotkeyManager {
         runLoopSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, eventTap, 0)
         CFRunLoopAddSource(CFRunLoopGetCurrent(), runLoopSource, .commonModes)
         CGEvent.tapEnable(tap: eventTap, enable: true)
+
+        hotkeyLock.lock()
+        cachedEventTap = eventTap
+        hotkeyLock.unlock()
     }
 
     func stop() {
+        hotkeyLock.lock()
+        cachedEventTap = nil
+        hotkeyLock.unlock()
+
         if let eventTap {
             CGEvent.tapEnable(tap: eventTap, enable: false)
             if let source = runLoopSource {
@@ -78,6 +87,22 @@ class HotkeyManager {
         type: CGEventType,
         event: CGEvent
     ) -> Unmanaged<CGEvent>? {
+        if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+            let reason = type == .tapDisabledByTimeout ? "timeout" : "user input"
+            logger.warning("Event tap disabled by \(reason), re-enabling")
+
+            hotkeyLock.lock()
+            let tap = cachedEventTap
+            hotkeyLock.unlock()
+
+            if let tap {
+                CGEvent.tapEnable(tap: tap, enable: true)
+            } else {
+                logger.error("Cannot re-enable event tap: tap is nil")
+            }
+            return Unmanaged.passUnretained(event)
+        }
+
         guard type == .keyDown else {
             return Unmanaged.passUnretained(event)
         }

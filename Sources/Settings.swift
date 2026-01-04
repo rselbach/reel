@@ -198,8 +198,15 @@ class AppSettings: ObservableObject {
     }
 
     var availableCameras: [AVCaptureDevice] {
-        AVCaptureDevice.DiscoverySession(
-            deviceTypes: [.builtInWideAngleCamera, .external],
+        var deviceTypes: [AVCaptureDevice.DeviceType] = [.builtInWideAngleCamera, .external]
+        if #available(macOS 13.0, *) {
+            deviceTypes.append(.deskViewCamera)
+        }
+        if #available(macOS 14.0, *) {
+            deviceTypes.append(.continuityCamera)
+        }
+        return AVCaptureDevice.DiscoverySession(
+            deviceTypes: deviceTypes,
             mediaType: .video,
             position: .unspecified
         ).devices

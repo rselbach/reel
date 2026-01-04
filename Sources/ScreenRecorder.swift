@@ -1,4 +1,4 @@
-import AVFoundation
+@preconcurrency import AVFoundation
 import CoreImage
 import os.log
 import ScreenCaptureKit
@@ -45,6 +45,16 @@ class ScreenRecorder: NSObject, ObservableObject {
     @Published var errorMessage: String?
     @Published var lastRecordedURL: URL?
 
+    var countdownTargetFrame: CGRect? {
+        switch recordingMode {
+        case .display:
+            guard selectedDisplayIndex < availableDisplays.count else { return nil }
+            return availableDisplays[selectedDisplayIndex].frame
+        case .window:
+            return selectedWindow?.frame
+        }
+    }
+
     private var stream: SCStream?
     private var assetWriter: AVAssetWriter?
     private var videoInput: AVAssetWriterInput?
@@ -54,6 +64,7 @@ class ScreenRecorder: NSObject, ObservableObject {
     private var cameraCaptureSession: AVCaptureSession?
     private var cameraOutput: AVCaptureVideoDataOutput?
     private var outputURL: URL?
+    private let captureSessionQueue = DispatchQueue(label: "com.rselbach.reel.capture")
 
     // Thread-safe state for frame processing (accessed from ScreenCaptureKit callback queue)
     private let frameLock = NSLock()
@@ -174,10 +185,19 @@ class ScreenRecorder: NSObject, ObservableObject {
             try stream?.addStreamOutput(self, type: .screen, sampleHandlerQueue: .global())
 
             try await stream?.startCapture()
-            audioCaptureSession?.startRunning()
-            cameraCaptureSession?.startRunning()
+            let failures = startCaptureSessions()
             isRecording = true
-            errorMessage = nil
+
+            // Surface capture session failures as warnings (recording continues without them)
+            if failures.audioFailed && failures.cameraFailed {
+                errorMessage = "Audio and camera failed to start"
+            } else if failures.audioFailed {
+                errorMessage = "Audio failed to start"
+            } else if failures.cameraFailed {
+                errorMessage = "Camera failed to start"
+            } else {
+                errorMessage = nil
+            }
         } catch {
             errorMessage = "Failed to start: \(error.localizedDescription)"
             cleanup()
@@ -189,8 +209,7 @@ class ScreenRecorder: NSObject, ObservableObject {
         isStopping = true
         defer { isStopping = false }
 
-        audioCaptureSession?.stopRunning()
-        cameraCaptureSession?.stopRunning()
+        stopCaptureSessions()
 
         do {
             try await stream?.stopCapture()
@@ -377,11 +396,15 @@ class ScreenRecorder: NSObject, ObservableObject {
             if response == .OK, let url = panel.url {
                 finalURL = url
                 do {
-                    // Remove existing file if user confirmed overwrite in save panel
-                    if FileManager.default.fileExists(atPath: finalURL.path()) {
-                        try FileManager.default.removeItem(at: finalURL)
+                    if finalURL != tempURL {
+                        // Remove existing file if user confirmed overwrite in save panel
+                        if FileManager.default.fileExists(atPath: finalURL.path()) {
+                            try FileManager.default.removeItem(at: finalURL)
+                        }
+                        try FileManager.default.moveItem(at: tempURL, to: finalURL)
+                    } else {
+                        logger.info("Recording already at final location, skipping move")
                     }
-                    try FileManager.default.moveItem(at: tempURL, to: finalURL)
                 } catch {
                     errorMessage = "Failed to save: \(error.localizedDescription)"
                     try? FileManager.default.removeItem(at: tempURL)
@@ -415,6 +438,41 @@ class ScreenRecorder: NSObject, ObservableObject {
         latestCameraPixelBuffer = nil
         frameWriter = nil
         frameLock.unlock()
+    }
+
+    private func startCaptureSessions() -> (audioFailed: Bool, cameraFailed: Bool) {
+        let audioSession = audioCaptureSession
+        let cameraSession = cameraCaptureSession
+        var audioFailed = false
+        var cameraFailed = false
+
+        captureSessionQueue.sync {
+            if let audio = audioSession {
+                audio.startRunning()
+                if !audio.isRunning {
+                    logger.error("Audio capture session failed to start")
+                    audioFailed = true
+                }
+            }
+            if let camera = cameraSession {
+                camera.startRunning()
+                if !camera.isRunning {
+                    logger.error("Camera capture session failed to start")
+                    cameraFailed = true
+                }
+            }
+        }
+
+        return (audioFailed, cameraFailed)
+    }
+
+    private func stopCaptureSessions() {
+        let audioSession = audioCaptureSession
+        let cameraSession = cameraCaptureSession
+        captureSessionQueue.sync {
+            audioSession?.stopRunning()
+            cameraSession?.stopRunning()
+        }
     }
 
     /// Creates a copy of a pixel buffer to ensure it remains valid independently.

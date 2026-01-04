@@ -6,15 +6,31 @@ class CountdownOverlay {
     private var label: NSTextField?
     private var cancelled = false
     
-    func show() async -> Bool {
+    func show(targetFrame: CGRect? = nil) async -> Bool {
         cancelled = false
-        guard let screen = NSScreen.main else { return false }
-        
+
+        let referenceFrame: NSRect
+        if let targetFrame {
+            // SCWindow/SCDisplay use Quartz coordinates (origin top-left, Y down)
+            // NSWindow uses Cocoa coordinates (origin bottom-left, Y up)
+            let primaryHeight = NSScreen.screens.first?.frame.height ?? 0
+            referenceFrame = NSRect(
+                x: targetFrame.origin.x,
+                y: primaryHeight - targetFrame.origin.y - targetFrame.height,
+                width: targetFrame.width,
+                height: targetFrame.height
+            )
+        } else if let screen = NSScreen.main {
+            referenceFrame = screen.frame
+        } else {
+            return false
+        }
+
         let barHeight: CGFloat = 80
         let barFrame = NSRect(
-            x: screen.frame.origin.x,
-            y: screen.frame.maxY - barHeight,
-            width: screen.frame.width,
+            x: referenceFrame.origin.x,
+            y: referenceFrame.maxY - barHeight,
+            width: referenceFrame.width,
             height: barHeight
         )
         
