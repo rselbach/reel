@@ -1,28 +1,42 @@
 import AppKit
+import os.log
+
+private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "com.reel", category: "CountdownOverlay")
 
 @MainActor
 class CountdownOverlay {
     private var window: CountdownWindow?
     private var label: NSTextField?
     private var cancelled = false
-    
+
+    /// Converts Quartz coordinates (origin top-left, Y down) to Cocoa coordinates (origin bottom-left, Y up)
+    private func quartzToCocoa(_ frame: CGRect) -> NSRect? {
+        guard let primaryHeight = NSScreen.screens.first?.frame.height else {
+            logger.warning("No primary screen found for coordinate conversion")
+            return nil
+        }
+        return NSRect(
+            x: frame.origin.x,
+            y: primaryHeight - frame.origin.y - frame.height,
+            width: frame.width,
+            height: frame.height
+        )
+    }
+
     func show(targetFrame: CGRect? = nil) async -> Bool {
         cancelled = false
 
         let referenceFrame: NSRect
         if let targetFrame {
-            // SCWindow/SCDisplay use Quartz coordinates (origin top-left, Y down)
-            // NSWindow uses Cocoa coordinates (origin bottom-left, Y up)
-            let primaryHeight = NSScreen.screens.first?.frame.height ?? 0
-            referenceFrame = NSRect(
-                x: targetFrame.origin.x,
-                y: primaryHeight - targetFrame.origin.y - targetFrame.height,
-                width: targetFrame.width,
-                height: targetFrame.height
-            )
+            guard let converted = quartzToCocoa(targetFrame) else {
+                logger.error("Cannot show countdown: no screens available for coordinate conversion")
+                return false
+            }
+            referenceFrame = converted
         } else if let screen = NSScreen.main {
             referenceFrame = screen.frame
         } else {
+            logger.error("Cannot show countdown: no target frame and no main screen available")
             return false
         }
 
