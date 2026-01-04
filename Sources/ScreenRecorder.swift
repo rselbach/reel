@@ -600,15 +600,16 @@ class ScreenRecorder: NSObject, ObservableObject {
         let composited = cameraImage.composited(over: screenImage)
 
         var outputBuffer: CVPixelBuffer?
+        let status: CVReturn
         if let bufferPool {
-            CVPixelBufferPoolCreatePixelBuffer(kCFAllocatorDefault, bufferPool, &outputBuffer)
+            status = CVPixelBufferPoolCreatePixelBuffer(kCFAllocatorDefault, bufferPool, &outputBuffer)
         } else {
             // Fallback if pool not available
             let attrs: [CFString: Any] = [
                 kCVPixelBufferCGImageCompatibilityKey: true,
                 kCVPixelBufferCGBitmapContextCompatibilityKey: true
             ]
-            CVPixelBufferCreate(
+            status = CVPixelBufferCreate(
                 kCFAllocatorDefault,
                 Int(screenWidth),
                 Int(screenHeight),
@@ -616,6 +617,10 @@ class ScreenRecorder: NSObject, ObservableObject {
                 attrs as CFDictionary,
                 &outputBuffer
             )
+        }
+
+        if status != kCVReturnSuccess {
+            logger.warning("Failed to create output pixel buffer (status: \(status))")
         }
 
         guard let outputBuffer else { return nil }
