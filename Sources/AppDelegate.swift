@@ -84,6 +84,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
+        HotkeyManager.shared.onHotkeyDisabled = { [weak self] message in
+            Task { @MainActor in
+                guard let self else { return }
+                let alert = NSAlert()
+                alert.messageText = "Hotkey Error"
+                alert.informativeText = message
+                alert.alertStyle = .warning
+                alert.addButton(withTitle: "OK")
+                alert.runModal()
+            }
+        }
+
         if HotkeyManager.shared.hasAccessibilityPermission() {
             HotkeyManager.shared.start()
         }

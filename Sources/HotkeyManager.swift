@@ -11,12 +11,14 @@ class HotkeyManager {
     private var eventTap: CFMachPort?
     private var runLoopSource: CFRunLoopSource?
     var onToggleRecording: (() -> Void)?
+    var onHotkeyDisabled: ((String) -> Void)?
 
     // Cached state for synchronous access from event tap callback (protected by hotkeyLock)
     private let hotkeyLock = NSLock()
     private nonisolated(unsafe) var cachedKeyCode: UInt16 = AppSettings.HotkeyCombo.default.keyCode
     private nonisolated(unsafe) var cachedModifiers: UInt32 = AppSettings.HotkeyCombo.default.modifiers
     private nonisolated(unsafe) var cachedEventTap: CFMachPort?
+    private nonisolated(unsafe) var cachedOnHotkeyDisabled: ((String) -> Void)?
 
     private init() {}
 
@@ -64,6 +66,7 @@ class HotkeyManager {
 
         hotkeyLock.lock()
         cachedEventTap = eventTap
+        cachedOnHotkeyDisabled = onHotkeyDisabled
         hotkeyLock.unlock()
     }
 
@@ -93,12 +96,16 @@ class HotkeyManager {
 
             hotkeyLock.lock()
             let tap = cachedEventTap
+            let disabledCallback = cachedOnHotkeyDisabled
             hotkeyLock.unlock()
 
             if let tap {
                 CGEvent.tapEnable(tap: tap, enable: true)
             } else {
                 logger.error("Cannot re-enable event tap: tap is nil")
+                Task { @MainActor in
+                    disabledCallback?("Hotkey stopped working and could not be restored. Please restart the app.")
+                }
             }
             return Unmanaged.passUnretained(event)
         }
