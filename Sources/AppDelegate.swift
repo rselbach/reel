@@ -1,6 +1,9 @@
 import AppKit
+import os.log
 import Sparkle
 import SwiftUI
+
+private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "com.rselbach.reel", category: "AppDelegate")
 
 @MainActor
 class AppDelegate: NSObject, NSApplicationDelegate {
@@ -150,7 +153,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func openSettings() {
-        NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")!)
+        guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") else {
+            logger.error("Failed to create System Settings URL for screen capture privacy settings")
+            return
+        }
+        NSWorkspace.shared.open(url)
     }
 
     @objc private func checkPermission() {
