@@ -84,9 +84,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             }
         }
 
-        HotkeyManager.shared.onHotkeyDisabled = { [weak self] message in
+        HotkeyManager.shared.onHotkeyDisabled = { message in
             Task { @MainActor in
-                guard let self else { return }
                 let alert = NSAlert()
                 alert.messageText = "Hotkey Error"
                 alert.informativeText = message
@@ -249,6 +248,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     
     private func startRecording(selection: RecordingSelection) {
         Task { @MainActor in
+            guard !isCountdownActive else { return }
+            isCountdownActive = true
+            defer { isCountdownActive = false }
+
             switch selection {
             case .display(let index):
                 screenRecorder.selectedDisplayIndex = index
@@ -257,7 +260,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 screenRecorder.selectedWindow = window
                 screenRecorder.recordingMode = .window
             }
-            
+
             guard await CountdownOverlay().show(targetFrame: screenRecorder.countdownTargetFrame) else { return }
             await screenRecorder.startRecording()
             rebuildMenu()

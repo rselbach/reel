@@ -240,8 +240,14 @@ class AppSettings: ObservableObject {
         var keyCode: UInt16
         var modifiers: UInt32
 
-        // Device-independent modifier mask (works for both NSEvent and CGEvent)
-        static let modifierMask: UInt32 = 0x1E0000  // Cmd|Opt|Ctrl|Shift
+        // Device-independent modifier mask for comparing hotkeys across NSEvent and CGEvent.
+        // These are the high bits of NSEvent.ModifierFlags / CGEventFlags:
+        //   0x020000 = Shift
+        //   0x040000 = Control
+        //   0x080000 = Option
+        //   0x100000 = Command
+        // Combined: 0x1E0000 masks out device-dependent bits (caps lock, fn, etc.)
+        static let modifierMask: UInt32 = 0x1E0000
 
         static let `default` = HotkeyCombo(keyCode: 15, modifiers: 0x120000) // Cmd+Shift+R
 

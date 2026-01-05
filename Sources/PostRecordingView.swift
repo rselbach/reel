@@ -208,6 +208,11 @@ struct TrimSlider: View {
     private let handleWidth: CGFloat = 12
     private let trackHeight: CGFloat = 50
 
+    // Track initial values at drag start to compute deltas correctly
+    @State private var dragStartTrimStart: Double = 0
+    @State private var dragStartTrimEnd: Double = 0
+    @State private var dragStartTime: Double = 0
+
     var body: some View {
         VStack(spacing: 8) {
             GeometryReader { geometry in
@@ -254,7 +259,11 @@ struct TrimSlider: View {
                         .gesture(
                             DragGesture()
                                 .onChanged { value in
-                                    let newStart = (value.location.x / usableWidth) * duration
+                                    if value.translation == .zero {
+                                        dragStartTrimStart = trimStart
+                                    }
+                                    let delta = (value.translation.width / usableWidth) * duration
+                                    let newStart = dragStartTrimStart + delta
                                     trimStart = min(max(0, newStart), trimEnd - 0.5)
                                     onSeek(trimStart)
                                 }
@@ -266,7 +275,11 @@ struct TrimSlider: View {
                         .gesture(
                             DragGesture()
                                 .onChanged { value in
-                                    let newEnd = (value.location.x / usableWidth) * duration
+                                    if value.translation == .zero {
+                                        dragStartTrimEnd = trimEnd
+                                    }
+                                    let delta = (value.translation.width / usableWidth) * duration
+                                    let newEnd = dragStartTrimEnd + delta
                                     trimEnd = max(min(duration, newEnd), trimStart + 0.5)
                                     onSeek(trimEnd)
                                 }
@@ -280,7 +293,11 @@ struct TrimSlider: View {
                         .gesture(
                             DragGesture()
                                 .onChanged { value in
-                                    let newTime = (value.location.x - handleWidth) / usableWidth * duration
+                                    if value.translation == .zero {
+                                        dragStartTime = currentTime
+                                    }
+                                    let delta = (value.translation.width / usableWidth) * duration
+                                    let newTime = dragStartTime + delta
                                     let clampedTime = min(max(0, newTime), duration)
                                     onSeek(clampedTime)
                                 }

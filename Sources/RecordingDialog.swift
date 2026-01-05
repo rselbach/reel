@@ -132,12 +132,14 @@ struct RecordingDialog: View {
     
     private func loadThumbnails() async {
         for (index, display) in availableDisplays.enumerated() {
+            guard !Task.isCancelled else { return }
             if let image = await ThumbnailCapture.captureDisplay(display, maxSize: thumbnailSize) {
                 displayThumbnails[index] = image
             }
         }
-        
+
         for window in availableWindows {
+            guard !Task.isCancelled else { return }
             let windowID = window.windowID
             if let image = await ThumbnailCapture.captureWindow(window, maxSize: thumbnailSize) {
                 windowThumbnails[windowID] = image

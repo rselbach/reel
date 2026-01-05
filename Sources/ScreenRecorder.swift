@@ -185,19 +185,9 @@ class ScreenRecorder: NSObject, ObservableObject {
             try stream?.addStreamOutput(self, type: .screen, sampleHandlerQueue: .global())
 
             try await stream?.startCapture()
-            let failures = startCaptureSessions()
+            startCaptureSessions()
             isRecording = true
-
-            // Surface capture session failures as warnings (recording continues without them)
-            if failures.audioFailed && failures.cameraFailed {
-                errorMessage = "Audio and camera failed to start"
-            } else if failures.audioFailed {
-                errorMessage = "Audio failed to start"
-            } else if failures.cameraFailed {
-                errorMessage = "Camera failed to start"
-            } else {
-                errorMessage = nil
-            }
+            errorMessage = nil
         } catch {
             errorMessage = "Failed to start: \(error.localizedDescription)"
             cleanup()
@@ -276,12 +266,15 @@ class ScreenRecorder: NSObject, ObservableObject {
                 kCVPixelBufferCGImageCompatibilityKey: true,
                 kCVPixelBufferCGBitmapContextCompatibilityKey: true
             ]
-            CVPixelBufferPoolCreate(
+            let poolStatus = CVPixelBufferPoolCreate(
                 kCFAllocatorDefault,
                 poolAttributes as CFDictionary,
                 bufferAttributes as CFDictionary,
                 &bufferPool
             )
+            if poolStatus != kCVReturnSuccess {
+                logger.warning("Failed to create pixel buffer pool (status: \(poolStatus)), will allocate per-frame")
+            }
 
             // Set up audio input before creating FrameWriter so it can be included
             if settings.recordAudio {
@@ -440,30 +433,17 @@ class ScreenRecorder: NSObject, ObservableObject {
         frameLock.unlock()
     }
 
-    private func startCaptureSessions() -> (audioFailed: Bool, cameraFailed: Bool) {
+    private func startCaptureSessions() {
         let audioSession = audioCaptureSession
         let cameraSession = cameraCaptureSession
-        var audioFailed = false
-        var cameraFailed = false
 
-        captureSessionQueue.sync {
-            if let audio = audioSession {
-                audio.startRunning()
-                if !audio.isRunning {
-                    logger.error("Audio capture session failed to start")
-                    audioFailed = true
-                }
-            }
-            if let camera = cameraSession {
-                camera.startRunning()
-                if !camera.isRunning {
-                    logger.error("Camera capture session failed to start")
-                    cameraFailed = true
-                }
-            }
+        // Note: startRunning() is asynchronous - isRunning won't be true immediately.
+        // If sessions fail to start, we simply won't receive frames from them.
+        // Recording continues without audio/camera in that case.
+        captureSessionQueue.async {
+            audioSession?.startRunning()
+            cameraSession?.startRunning()
         }
-
-        return (audioFailed, cameraFailed)
     }
 
     private func stopCaptureSessions() {

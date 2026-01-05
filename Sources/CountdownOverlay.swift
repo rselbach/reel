@@ -9,12 +9,16 @@ class CountdownOverlay {
     private var label: NSTextField?
     private var cancelled = false
 
-    /// Converts Quartz coordinates (origin top-left, Y down) to Cocoa coordinates (origin bottom-left, Y up)
+    /// Converts Quartz coordinates (origin top-left, Y down) to Cocoa coordinates (origin bottom-left, Y up).
+    /// Uses the primary screen's height as the reference since Quartz coordinate system is relative to it.
     private func quartzToCocoa(_ frame: CGRect) -> NSRect? {
-        guard let primaryHeight = NSScreen.screens.first?.frame.height else {
+        // Quartz coordinate system has origin at top-left of the primary display.
+        // To convert to Cocoa (origin at bottom-left of primary), we need the primary screen's height.
+        guard let primaryScreen = NSScreen.screens.first else {
             logger.warning("No primary screen found for coordinate conversion")
             return nil
         }
+        let primaryHeight = primaryScreen.frame.height
         return NSRect(
             x: frame.origin.x,
             y: primaryHeight - frame.origin.y - frame.height,
