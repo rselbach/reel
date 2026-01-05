@@ -17,6 +17,11 @@ let package = Package(
             ],
             path: "Sources",
             exclude: ["Info.plist", "AppIcon.icns"]
+        ),
+        .testTarget(
+            name: "ReelTests",
+            dependencies: ["Reel"],
+            path: "Tests"
         )
     ]
 )
