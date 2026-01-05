@@ -276,12 +276,15 @@ class ScreenRecorder: NSObject, ObservableObject {
                 kCVPixelBufferCGImageCompatibilityKey: true,
                 kCVPixelBufferCGBitmapContextCompatibilityKey: true
             ]
-            CVPixelBufferPoolCreate(
+            let poolStatus = CVPixelBufferPoolCreate(
                 kCFAllocatorDefault,
                 poolAttributes as CFDictionary,
                 bufferAttributes as CFDictionary,
                 &bufferPool
             )
+            if poolStatus != kCVReturnSuccess {
+                logger.warning("Failed to create pixel buffer pool (status: \(poolStatus)). Camera compositing may use fallback allocation.")
+            }
 
             // Set up audio input before creating FrameWriter so it can be included
             if settings.recordAudio {
