@@ -267,11 +267,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func requestAccessibility() {
         HotkeyManager.shared.requestAccessibilityPermission()
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
-            if HotkeyManager.shared.hasAccessibilityPermission() {
-                HotkeyManager.shared.start()
+        // Poll for permission with timeout instead of fixed delay
+        Task { @MainActor in
+            let maxAttempts = 60  // 30 seconds at 0.5s intervals
+            for _ in 0..<maxAttempts {
+                try? await Task.sleep(for: .milliseconds(500))
+                if HotkeyManager.shared.hasAccessibilityPermission() {
+                    HotkeyManager.shared.start()
+                    rebuildMenu()
+                    return
+                }
             }
-            self?.rebuildMenu()
+            // Timeout reached, update menu anyway to reflect current state
+            rebuildMenu()
         }
     }
 
