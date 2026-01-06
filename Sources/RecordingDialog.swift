@@ -60,10 +60,10 @@ struct RecordingDialog: View {
                                 image: displayThumbnails[index],
                                 title: availableDisplays.count == 1 ? "Display" : "Display \(index + 1)",
                                 isSelected: selection == .display(index),
-                                isLoading: isLoading
-                            ) {
-                                selection = .display(index)
-                            }
+                                isLoading: isLoading,
+                                action: { selection = .display(index) },
+                                onDoubleClick: { onStart(.display(index)) }
+                            )
                             .frame(width: 160)
                         }
                     }
@@ -93,10 +93,10 @@ struct RecordingDialog: View {
                                 title: windowTitle(for: window),
                                 appIcon: appIcon(for: window),
                                 isSelected: selection == .window(window),
-                                isLoading: isLoading
-                            ) {
-                                selection = .window(window)
-                            }
+                                isLoading: isLoading,
+                                action: { selection = .window(window) },
+                                onDoubleClick: { onStart(.window(window)) }
+                            )
                         }
                     }
                     .padding(.horizontal, 16)
@@ -171,49 +171,54 @@ struct ThumbnailCard: View {
     let isSelected: Bool
     let isLoading: Bool
     let action: () -> Void
+    var onDoubleClick: (() -> Void)? = nil
     
     var body: some View {
-        Button(action: action) {
-            VStack(spacing: 6) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 6)
-                        .fill(Color(nsColor: .controlBackgroundColor))
-                        .frame(height: 100)
-                    
-                    if let image {
-                        Image(nsImage: image)
-                            .resizable()
-                            .aspectRatio(contentMode: .fit)
-                            .frame(maxHeight: 96)
-                            .clipShape(RoundedRectangle(cornerRadius: 4))
-                    } else if isLoading {
-                        ProgressView()
-                            .scaleEffect(0.6)
-                    } else {
-                        Image(systemName: "rectangle.dashed")
-                            .font(.largeTitle)
-                            .foregroundColor(.secondary)
-                    }
-                }
-                .overlay(
-                    RoundedRectangle(cornerRadius: 6)
-                        .stroke(isSelected ? Color.accentColor : Color.clear, lineWidth: 3)
-                )
+        VStack(spacing: 6) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(Color(nsColor: .controlBackgroundColor))
+                    .frame(height: 100)
                 
-                HStack(spacing: 4) {
-                    if let appIcon {
-                        Image(nsImage: appIcon)
-                            .resizable()
-                            .frame(width: 14, height: 14)
-                    }
-                    Text(title)
-                        .font(.caption)
-                        .lineLimit(1)
-                        .truncationMode(.tail)
+                if let image {
+                    Image(nsImage: image)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(maxHeight: 96)
+                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                } else if isLoading {
+                    ProgressView()
+                        .scaleEffect(0.6)
+                } else {
+                    Image(systemName: "rectangle.dashed")
+                        .font(.largeTitle)
+                        .foregroundColor(.secondary)
                 }
-                .foregroundColor(isSelected ? .accentColor : .primary)
             }
+            .overlay(
+                RoundedRectangle(cornerRadius: 6)
+                    .stroke(isSelected ? Color.accentColor : Color.clear, lineWidth: 3)
+            )
+            
+            HStack(spacing: 4) {
+                if let appIcon {
+                    Image(nsImage: appIcon)
+                        .resizable()
+                        .frame(width: 14, height: 14)
+                }
+                Text(title)
+                    .font(.caption)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+            .foregroundColor(isSelected ? .accentColor : .primary)
         }
-        .buttonStyle(.plain)
+        .contentShape(Rectangle())
+        .onTapGesture(count: 2) {
+            onDoubleClick?()
+        }
+        .onTapGesture(count: 1) {
+            action()
+        }
     }
 }
