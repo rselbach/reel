@@ -17,17 +17,23 @@ build:
 
 # Build the .app bundle
 build-app: build
+    #!/usr/bin/env bash
+    set -e
     rm -rf "{{ app_dir }}"
     mkdir -p "{{ app_dir }}/Contents/MacOS"
     mkdir -p "{{ app_dir }}/Contents/Resources"
     mkdir -p "{{ app_dir }}/Contents/Frameworks"
     cp .build/release/Reel "{{ app_dir }}/Contents/MacOS/"
     cp Sources/Info.plist "{{ app_dir }}/Contents/Info.plist"
+    # Inject git commit hash
+    GIT_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "dev")
+    /usr/libexec/PlistBuddy -c "Set :GitCommit $GIT_COMMIT" "{{ app_dir }}/Contents/Info.plist"
+    echo "Embedded commit: $GIT_COMMIT"
     cp Sources/AppIcon.icns "{{ app_dir }}/Contents/Resources/"
     cp -R .build/arm64-apple-macosx/release/Sparkle.framework "{{ app_dir }}/Contents/Frameworks/"
     install_name_tool -add_rpath @executable_path/../Frameworks "{{ app_dir }}/Contents/MacOS/Reel"
-    @echo "Built: {{ app_dir }}"
-    @echo "Run: open '{{ app_dir }}'"
+    echo "Built: {{ app_dir }}"
+    echo "Run: open '{{ app_dir }}'"
 
 # Code sign the app (requires SIGNING_IDENTITY env var)
 sign: build-app
@@ -70,8 +76,8 @@ notarize: sign
     rm "$zip_path"
     echo "Notarization complete!"
 
-# Create a .dmg installer (unsigned)
-dmg: build-app
+# Create a .dmg installer from existing app bundle (no rebuild)
+_dmg-only:
     #!/usr/bin/env bash
     set -e
     dmg_path=".build/{{ app_name }}.dmg"
@@ -85,22 +91,24 @@ dmg: build-app
     rm -rf "$dmg_staging"
     echo "Created: $dmg_path"
 
-# Create a signed .dmg installer (requires SIGNING_IDENTITY env var)
-dmg-signed: sign
+# Create a .dmg installer (unsigned)
+dmg: build-app _dmg-only
+
+# Sign an existing DMG (requires SIGNING_IDENTITY env var)
+_sign-dmg:
     #!/usr/bin/env bash
     set -e
     dmg_path=".build/{{ app_name }}.dmg"
-    dmg_staging=".build/dmg"
-    echo "Creating DMG..."
-    rm -rf "$dmg_staging" "$dmg_path"
-    mkdir -p "$dmg_staging"
-    cp -R "{{ app_dir }}" "$dmg_staging/"
-    ln -s /Applications "$dmg_staging/Applications"
-    hdiutil create -volname "{{ app_name }}" -srcfolder "$dmg_staging" -ov -format UDZO "$dmg_path"
-    rm -rf "$dmg_staging"
+    if [[ -z "${SIGNING_IDENTITY:-}" ]]; then
+        echo "Error: SIGNING_IDENTITY not set"
+        exit 1
+    fi
     echo "Signing DMG..."
     codesign --force --sign "$SIGNING_IDENTITY" "$dmg_path"
-    echo "Created: $dmg_path"
+    echo "Signed: $dmg_path"
+
+# Create a signed .dmg installer (requires SIGNING_IDENTITY env var)
+dmg-signed: sign _dmg-only _sign-dmg
 
 # Open the built app
 run: build-app

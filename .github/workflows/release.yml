@@ -22,6 +22,9 @@ jobs:
         with:
           xcode-version: latest-stable
       
+      - name: Setup just
+        uses: extractions/setup-just@v2
+      
       - name: Import certificate
         env:
           CERTIFICATE_P12: ${{ secrets.CERTIFICATE_P12 }}
@@ -57,8 +60,7 @@ jobs:
       - name: Build and sign
         env:
           SIGNING_IDENTITY: "Developer ID Application: Roberto Teixeira (LS8YD2TR79)"
-        run: |
-          ./build-app.sh --sign
+        run: just sign
       
       - name: Notarize
         env:
@@ -95,8 +97,7 @@ jobs:
       - name: Create DMG
         env:
           SIGNING_IDENTITY: "Developer ID Application: Roberto Teixeira (LS8YD2TR79)"
-        run: |
-          ./build-app.sh --dmg --sign
+        run: just _dmg-only _sign-dmg
       
       - name: Sign update for Sparkle
         env:
