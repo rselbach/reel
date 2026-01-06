@@ -12,6 +12,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var settingsWindow: NSWindow?
     private var recordingDialogWindow: NSWindow?
     private var previewWindow: NSWindow?
+    private var aboutWindow: NSWindow?
     private var isCountdownActive = false
     private var hotkeyObserver: NSObjectProtocol?
     private var cameraOverlayController: CameraOverlayController?
@@ -143,12 +144,31 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         menu.addItem(NSMenuItem.separator())
+        menu.addItem(NSMenuItem(title: "About Reel", action: #selector(showAbout), keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: "Check for Updates...", action: #selector(checkForUpdates), keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: "Settings...", action: #selector(openPreferences), keyEquivalent: ","))
         menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: "Quit Reel", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
 
         statusItem.menu = menu
+    }
+
+    @objc private func showAbout() {
+        if aboutWindow == nil {
+            let aboutView = AboutView()
+            let hostingController = NSHostingController(rootView: aboutView)
+
+            let window = NSWindow(contentViewController: hostingController)
+            window.title = "About Reel"
+            window.styleMask = [.titled, .closable]
+            window.center()
+            window.isReleasedWhenClosed = false
+
+            aboutWindow = window
+        }
+
+        aboutWindow?.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     @objc private func checkForUpdates() {

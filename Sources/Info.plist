@@ -34,5 +34,7 @@
     <string>https://rselbach.github.io/reel/appcast.xml</string>
     <key>SUPublicEDKey</key>
     <string>ePrj/6ZMfGvkCXTYRq+X0H9Ukshi3Wx3+swNSi75Tio=</string>
-</dict>
+    <key>GitCommit</key>
+    <string>dev</string>
+    </dict>
 </plist>

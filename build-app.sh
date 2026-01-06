@@ -60,6 +60,10 @@ mkdir -p "$APP_DIR/Contents/Frameworks"
 
 cp .build/release/Reel "$APP_DIR/Contents/MacOS/"
 cp Sources/Info.plist "$APP_DIR/Contents/Info.plist"
+
+GIT_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "dev")
+/usr/libexec/PlistBuddy -c "Set :GitCommit $GIT_COMMIT" "$APP_DIR/Contents/Info.plist"
+echo "Embedded commit: $GIT_COMMIT"
 cp Sources/AppIcon.icns "$APP_DIR/Contents/Resources/"
 cp -R .build/arm64-apple-macosx/release/Sparkle.framework "$APP_DIR/Contents/Frameworks/"
 
