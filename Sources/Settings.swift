@@ -155,11 +155,40 @@ class AppSettings: ObservableObject {
         didSet { UserDefaults.standard.set(cameraShape.rawValue, forKey: "cameraShape") }
     }
 
+    // MARK: - Runtime Camera Overlay Position (not persisted)
+    // These are normalized coordinates (0.0-1.0) for the camera overlay position.
+    // They reset to the corner preset at the start of each recording.
+    // X: 0.0 = left edge, 1.0 = right edge
+    // Y: 0.0 = bottom edge, 1.0 = top edge (Core Image coordinate system)
+
+    @Published var cameraOverlayX: CGFloat = 1.0
+    @Published var cameraOverlayY: CGFloat = 0.0
+
+    /// Resets the camera overlay position to match the current corner preset.
+    /// Call this at the start of each recording.
+    func resetCameraOverlayPosition() {
+        let (x, y) = cameraPosition.normalizedCoordinates
+        cameraOverlayX = x
+        cameraOverlayY = y
+    }
+
     enum CameraOverlayPosition: String, CaseIterable {
         case bottomLeft = "Bottom Left"
         case bottomRight = "Bottom Right"
         case topLeft = "Top Left"
         case topRight = "Top Right"
+
+        /// Returns normalized (x, y) coordinates for this corner position.
+        /// X: 0.0 = left, 1.0 = right
+        /// Y: 0.0 = bottom, 1.0 = top (Core Image coordinate system)
+        var normalizedCoordinates: (x: CGFloat, y: CGFloat) {
+            switch self {
+            case .bottomLeft:  return (0.0, 0.0)
+            case .bottomRight: return (1.0, 0.0)
+            case .topLeft:     return (0.0, 1.0)
+            case .topRight:    return (1.0, 1.0)
+            }
+        }
     }
 
     enum CameraOverlaySize: String, CaseIterable {
@@ -326,6 +355,11 @@ class AppSettings: ObservableObject {
         self.cameraPosition = CameraOverlayPosition(rawValue: defaults.string(forKey: "cameraPosition") ?? "") ?? .bottomRight
         self.cameraSize = CameraOverlaySize(rawValue: defaults.string(forKey: "cameraSize") ?? "") ?? .medium
         self.cameraShape = CameraOverlayShape(rawValue: defaults.string(forKey: "cameraShape") ?? "") ?? .circle
+
+        // Initialize runtime overlay position from corner preset
+        let coords = self.cameraPosition.normalizedCoordinates
+        self.cameraOverlayX = coords.x
+        self.cameraOverlayY = coords.y
     }
 
     private func updateLaunchAtLogin() {

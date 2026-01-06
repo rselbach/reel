@@ -14,6 +14,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private var previewWindow: NSWindow?
     private var isCountdownActive = false
     private var hotkeyObserver: NSObjectProtocol?
+    private var cameraOverlayController: CameraOverlayController?
     private let updaterController = SPUStandardUpdaterController(
         startingUpdater: true,
         updaterDelegate: nil,
@@ -59,6 +60,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             Task { @MainActor in
                 guard let self else { return }
                 if self.screenRecorder.isRecording {
+                    self.hideCameraOverlay()
                     await self.screenRecorder.stopRecording()
                     self.rebuildMenu()
                     if AppSettings.shared.showPreviewAfterRecording,
@@ -82,6 +84,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                     self.isCountdownActive = false
                     guard shouldStart else { return }
                     await self.screenRecorder.startRecording()
+                    self.showCameraOverlayIfNeeded()
                     self.rebuildMenu()
                 }
             }
@@ -89,7 +92,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         HotkeyManager.shared.onHotkeyDisabled = { [weak self] message in
             Task { @MainActor in
-                guard let self else { return }
+                guard self != nil else { return }
                 let alert = NSAlert()
                 alert.messageText = "Hotkey Error"
                 alert.informativeText = message
@@ -169,6 +172,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func stopRecording() {
         Task { @MainActor in
+            hideCameraOverlay()
             await screenRecorder.stopRecording()
             rebuildMenu()
             if AppSettings.shared.showPreviewAfterRecording,
@@ -267,8 +271,37 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             
             guard await CountdownOverlay().show(targetFrame: screenRecorder.countdownTargetFrame) else { return }
             await screenRecorder.startRecording()
+            showCameraOverlayIfNeeded()
             rebuildMenu()
         }
+    }
+    
+    /// Shows the draggable camera overlay if camera recording is enabled.
+    private func showCameraOverlayIfNeeded() {
+        let settings = AppSettings.shared
+        guard settings.recordCamera,
+              let session = screenRecorder.activeCameraCaptureSession,
+              let bounds = screenRecorder.recordingBounds else {
+            return
+        }
+        
+        cameraOverlayController = CameraOverlayController()
+        cameraOverlayController?.show(
+            session: session,
+            bounds: bounds,
+            initialPosition: settings.cameraPosition,
+            size: settings.cameraSize,
+            shape: settings.cameraShape,
+            onPositionChanged: { [weak self] x, y in
+                self?.screenRecorder.updateCameraOverlayPosition(x: x, y: y)
+            }
+        )
+    }
+    
+    /// Hides the camera overlay window.
+    private func hideCameraOverlay() {
+        cameraOverlayController?.hide()
+        cameraOverlayController = nil
     }
 
     @objc private func requestAccessibility() {

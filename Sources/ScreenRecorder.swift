@@ -70,6 +70,11 @@ class ScreenRecorder: NSObject, ObservableObject {
     private let frameLock = NSLock()
     private nonisolated(unsafe) var latestCameraPixelBuffer: CVPixelBuffer?
     private nonisolated(unsafe) var frameWriter: FrameWriter?
+    private nonisolated(unsafe) var isCaptureStopped = false  // Signals callbacks to bail out
+    
+    // Dynamic camera overlay position (normalized 0-1 coordinates, updated during drag)
+    private nonisolated(unsafe) var currentCameraX: CGFloat = 1.0  // 0=left, 1=right
+    private nonisolated(unsafe) var currentCameraY: CGFloat = 0.0  // 0=bottom, 1=top
 
     // Encapsulates frame writing state for thread-safe access
     private struct FrameWriter {
@@ -81,12 +86,19 @@ class ScreenRecorder: NSObject, ObservableObject {
         let bufferPool: CVPixelBufferPool?
         var startTime: CMTime?
         let recordCamera: Bool
-        let cameraPosition: AppSettings.CameraOverlayPosition
         let cameraSize: CGFloat
         let cameraShape: AppSettings.CameraOverlayShape
     }
 
     private var settings: AppSettings { AppSettings.shared }
+    
+    /// The active camera capture session, if camera recording is enabled.
+    /// Used by CameraOverlayController to display live preview.
+    var activeCameraCaptureSession: AVCaptureSession? { cameraCaptureSession }
+    
+    /// The bounds of the area being recorded (display or window frame).
+    /// Used to position and constrain the camera overlay.
+    var recordingBounds: CGRect? { countdownTargetFrame }
 
     func requestPermission() async {
         do {
@@ -132,6 +144,9 @@ class ScreenRecorder: NSObject, ObservableObject {
         guard !isRecording, !isStarting else { return }
         isStarting = true
         defer { isStarting = false }
+
+        // Reset stop signal for new recording
+        resetCaptureStopSignal()
 
         let filter: SCContentFilter
         let captureWidth: Int
@@ -209,6 +224,9 @@ class ScreenRecorder: NSObject, ObservableObject {
         isStopping = true
         defer { isStopping = false }
 
+        // Signal callbacks to stop processing immediately
+        signalCaptureStop()
+
         stopCaptureSessions()
 
         do {
@@ -220,6 +238,30 @@ class ScreenRecorder: NSObject, ObservableObject {
         await finalizeRecording()
         cleanup()
         isRecording = false
+    }
+    
+    private nonisolated func signalCaptureStop() {
+        frameLock.lock()
+        isCaptureStopped = true
+        frameLock.unlock()
+    }
+    
+    private nonisolated func resetCaptureStopSignal() {
+        frameLock.lock()
+        isCaptureStopped = false
+        frameLock.unlock()
+    }
+
+    /// Updates the camera overlay position during recording.
+    /// Called from the draggable overlay window on the main thread.
+    /// - Parameters:
+    ///   - x: Normalized X position (0.0 = left edge, 1.0 = right edge)
+    ///   - y: Normalized Y position (0.0 = bottom edge, 1.0 = top edge)
+    func updateCameraOverlayPosition(x: CGFloat, y: CGFloat) {
+        frameLock.lock()
+        currentCameraX = min(max(x, 0), 1)
+        currentCameraY = min(max(y, 0), 1)
+        frameLock.unlock()
     }
 
     private func setupAssetWriter(width: Int, height: Int) throws {
@@ -303,7 +345,11 @@ class ScreenRecorder: NSObject, ObservableObject {
             }
 
             // Create frame writer with captured settings for thread-safe access
+            // Initialize camera position from corner preset (will be read dynamically during compositing)
+            let initialPos = settings.cameraPosition.normalizedCoordinates
             frameLock.lock()
+            currentCameraX = initialPos.x
+            currentCameraY = initialPos.y
             frameWriter = FrameWriter(
                 adaptor: adaptor,
                 videoInput: videoInput,
@@ -313,7 +359,6 @@ class ScreenRecorder: NSObject, ObservableObject {
                 bufferPool: bufferPool,
                 startTime: nil,
                 recordCamera: settings.recordCamera,
-                cameraPosition: settings.cameraPosition,
                 cameraSize: settings.cameraSize.fraction,
                 cameraShape: settings.cameraShape
             )
@@ -538,7 +583,8 @@ class ScreenRecorder: NSObject, ObservableObject {
         cameraBuffer: CVPixelBuffer?,
         context: CIContext,
         bufferPool: CVPixelBufferPool?,
-        position: AppSettings.CameraOverlayPosition,
+        xNormalized: CGFloat,
+        yNormalized: CGFloat,
         sizeFraction: CGFloat,
         shape: AppSettings.CameraOverlayShape
     ) -> CVPixelBuffer? {
@@ -579,24 +625,14 @@ class ScreenRecorder: NSObject, ObservableObject {
             ])
         }
 
+        // Position the overlay using normalized coordinates
+        // X: 0 = left edge (with padding), 1 = right edge (with padding)
+        // Y: 0 = bottom edge (with padding), 1 = top edge (with padding)
         let padding: CGFloat = RecordingConstants.cameraOverlayPadding
-        let xOffset: CGFloat
-        let yOffset: CGFloat
-
-        switch position {
-        case .bottomLeft:
-            xOffset = padding
-            yOffset = padding
-        case .bottomRight:
-            xOffset = screenWidth - overlayWidth - padding
-            yOffset = padding
-        case .topLeft:
-            xOffset = padding
-            yOffset = screenHeight - overlayHeight - padding
-        case .topRight:
-            xOffset = screenWidth - overlayWidth - padding
-            yOffset = screenHeight - overlayHeight - padding
-        }
+        let availableWidth = screenWidth - overlayWidth - (padding * 2)
+        let availableHeight = screenHeight - overlayHeight - (padding * 2)
+        let xOffset = padding + (xNormalized * availableWidth)
+        let yOffset = padding + (yNormalized * availableHeight)
 
         cameraImage = cameraImage.transformed(by: CGAffineTransform(translationX: xOffset, y: yOffset))
 
@@ -666,6 +702,8 @@ extension ScreenRecorder: SCStreamOutput {
         frameLock.lock()
         defer { frameLock.unlock() }
 
+        // Bail out if capture is stopping to prevent accessing cleaned-up resources
+        guard !isCaptureStopped else { return }
         guard var writer = frameWriter else { return }
         let cameraBuffer = latestCameraPixelBuffer
 
@@ -679,12 +717,17 @@ extension ScreenRecorder: SCStreamOutput {
         guard writer.videoInput.isReadyForMoreMediaData else { return }
 
         if writer.recordCamera, cameraBuffer != nil {
+            // Read current position (we already hold frameLock)
+            let posX = currentCameraX
+            let posY = currentCameraY
+            
             if let composited = compositeFrame(
                 screenBuffer: screenBuffer,
                 cameraBuffer: cameraBuffer,
                 context: writer.ciContext,
                 bufferPool: writer.bufferPool,
-                position: writer.cameraPosition,
+                xNormalized: posX,
+                yNormalized: posY,
                 sizeFraction: writer.cameraSize,
                 shape: writer.cameraShape
             ) {
@@ -713,10 +756,20 @@ extension ScreenRecorder: AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptur
             // Copy the pixel buffer to ensure it remains valid after callback returns
             guard let copiedBuffer = copyPixelBuffer(pixelBuffer) else { return }
             frameLock.lock()
+            // Bail out if capture is stopping
+            guard !isCaptureStopped else {
+                frameLock.unlock()
+                return
+            }
             latestCameraPixelBuffer = copiedBuffer
             frameLock.unlock()
         } else if output is AVCaptureAudioDataOutput {
             frameLock.lock()
+            // Bail out if capture is stopping
+            guard !isCaptureStopped else {
+                frameLock.unlock()
+                return
+            }
             let writer = frameWriter
             frameLock.unlock()
 

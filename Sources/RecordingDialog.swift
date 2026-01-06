@@ -131,34 +131,17 @@ struct RecordingDialog: View {
     }
     
     private func loadThumbnails() async {
-        // Load display thumbnails in parallel
-        await withTaskGroup(of: (Int, NSImage?).self) { group in
-            for (index, display) in availableDisplays.enumerated() {
-                group.addTask {
-                    let image = await ThumbnailCapture.captureDisplay(display, maxSize: self.thumbnailSize)
-                    return (index, image)
-                }
-            }
-            for await (index, image) in group {
-                if let image {
-                    displayThumbnails[index] = image
-                }
+        // Load display thumbnails sequentially (SCDisplay isn't Sendable)
+        for (index, display) in availableDisplays.enumerated() {
+            if let image = await ThumbnailCapture.captureDisplay(display, maxSize: thumbnailSize) {
+                displayThumbnails[index] = image
             }
         }
 
-        // Load window thumbnails in parallel
-        await withTaskGroup(of: (CGWindowID, NSImage?).self) { group in
-            for window in availableWindows {
-                let windowID = window.windowID
-                group.addTask {
-                    let image = await ThumbnailCapture.captureWindow(window, maxSize: self.thumbnailSize)
-                    return (windowID, image)
-                }
-            }
-            for await (windowID, image) in group {
-                if let image {
-                    windowThumbnails[windowID] = image
-                }
+        // Load window thumbnails sequentially (SCWindow isn't Sendable)
+        for window in availableWindows {
+            if let image = await ThumbnailCapture.captureWindow(window, maxSize: thumbnailSize) {
+                windowThumbnails[window.windowID] = image
             }
         }
         isLoading = false

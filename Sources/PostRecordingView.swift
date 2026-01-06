@@ -15,6 +15,11 @@ struct VideoPlayerView: NSViewRepresentable {
     func updateNSView(_ nsView: AVPlayerView, context: Context) {
         nsView.player = player
     }
+    
+    static func dismantleNSView(_ nsView: AVPlayerView, coordinator: ()) {
+        // Disconnect player during teardown to prevent use-after-free
+        nsView.player = nil
+    }
 }
 
 struct PostRecordingView: View {
@@ -25,6 +30,7 @@ struct PostRecordingView: View {
 
     @State private var player: AVPlayer?
     @State private var timeObserver: Any?
+    @State private var isCleanedUp = false
     @State private var duration: Double = 0
     @State private var trimStart: Double = 0
     @State private var trimEnd: Double = 0
@@ -98,17 +104,29 @@ struct PostRecordingView: View {
             setupPlayer()
         }
         .onDisappear {
-            if let player, let timeObserver {
-                player.removeTimeObserver(timeObserver)
-            }
-            timeObserver = nil
-            player?.pause()
-            player = nil
+            cleanupPlayer()
         }
     }
 
     private var hasTrimChanges: Bool {
         duration > 0 && (trimStart > 0.1 || trimEnd < duration - 0.1)
+    }
+
+    /// Safely tears down the player and time observer.
+    /// Must be called before the view is deallocated to prevent use-after-free crashes.
+    private func cleanupPlayer() {
+        // Mark as cleaned up first to prevent time observer callback from updating state
+        isCleanedUp = true
+        
+        // Pause first to stop generating new callbacks
+        player?.pause()
+        
+        // Remove time observer while player is still valid
+        if let player, let timeObserver {
+            player.removeTimeObserver(timeObserver)
+        }
+        timeObserver = nil
+        player = nil
     }
 
     private func setupPlayer() {
@@ -117,8 +135,10 @@ struct PostRecordingView: View {
         let newPlayer = AVPlayer(playerItem: playerItem)
         player = newPlayer
 
-        Task {
+        Task { @MainActor [self] in
+            guard !isCleanedUp else { return }
             if let durationTime = try? await asset.load(.duration) {
+                guard !isCleanedUp else { return }
                 let seconds = CMTimeGetSeconds(durationTime)
                 if seconds.isFinite && seconds > 0 {
                     duration = seconds
@@ -128,10 +148,12 @@ struct PostRecordingView: View {
         }
 
         let interval = CMTime(seconds: 0.1, preferredTimescale: 600)
-        let binding = $currentTime
-        timeObserver = newPlayer.addPeriodicTimeObserver(forInterval: interval, queue: .main) { time in
-            Task { @MainActor in
-                binding.wrappedValue = CMTimeGetSeconds(time)
+        timeObserver = newPlayer.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak newPlayer] time in
+            // Bail if player was deallocated (view is being torn down)
+            guard newPlayer != nil else { return }
+            Task { @MainActor [self] in
+                guard !isCleanedUp else { return }
+                currentTime = CMTimeGetSeconds(time)
             }
         }
     }
