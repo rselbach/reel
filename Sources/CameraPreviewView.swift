@@ -3,6 +3,7 @@ import SwiftUI
 
 /// NSView wrapper for AVCaptureVideoPreviewLayer.
 /// Displays a live camera feed from the provided capture session.
+/// Re-enables mouse events for this view even when the parent window ignores them.
 final class CameraPreviewNSView: NSView {
     private var previewLayer: AVCaptureVideoPreviewLayer?
     
@@ -52,6 +53,10 @@ final class CameraPreviewNSView: NSView {
         if newWindow == nil {
             tearDown()
         }
+    }
+    
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
+        true
     }
 }
 
