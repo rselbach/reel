@@ -2,7 +2,7 @@ import Carbon
 import Cocoa
 import os.log
 
-private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "com.reel", category: "HotkeyManager")
+private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "com.rselbach.reel", category: "HotkeyManager")
 
 @MainActor
 class HotkeyManager {
@@ -18,7 +18,7 @@ class HotkeyManager {
     private nonisolated(unsafe) var cachedKeyCode: UInt16 = AppSettings.HotkeyCombo.default.keyCode
     private nonisolated(unsafe) var cachedModifiers: UInt32 = AppSettings.HotkeyCombo.default.modifiers
     private nonisolated(unsafe) var cachedEventTap: CFMachPort?
-    private nonisolated(unsafe) var cachedOnHotkeyDisabled: ((String) -> Void)?
+    private nonisolated(unsafe) var cachedHotkeyDisabledHandler: ((String) -> Void)?
 
     private init() {}
 
@@ -66,7 +66,7 @@ class HotkeyManager {
 
         hotkeyLock.lock()
         cachedEventTap = eventTap
-        cachedOnHotkeyDisabled = onHotkeyDisabled
+        cachedHotkeyDisabledHandler = onHotkeyDisabled
         hotkeyLock.unlock()
     }
 
@@ -90,13 +90,14 @@ class HotkeyManager {
         type: CGEventType,
         event: CGEvent
     ) -> Unmanaged<CGEvent>? {
-        if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
+        switch type {
+        case .tapDisabledByTimeout, .tapDisabledByUserInput:
             let reason = type == .tapDisabledByTimeout ? "timeout" : "user input"
             logger.warning("Event tap disabled by \(reason), re-enabling")
 
             hotkeyLock.lock()
             let tap = cachedEventTap
-            let disabledCallback = cachedOnHotkeyDisabled
+            let onHotkeyDisabled = cachedHotkeyDisabledHandler
             hotkeyLock.unlock()
 
             if let tap {
@@ -104,13 +105,13 @@ class HotkeyManager {
             } else {
                 logger.error("Cannot re-enable event tap: tap is nil")
                 Task { @MainActor in
-                    disabledCallback?("Hotkey stopped working and could not be restored. Please restart the app.")
+                    onHotkeyDisabled?("Hotkey stopped working and could not be restored. Please restart the app.")
                 }
             }
             return Unmanaged.passUnretained(event)
-        }
-
-        guard type == .keyDown else {
+        case .keyDown:
+            break
+        default:
             return Unmanaged.passUnretained(event)
         }
 

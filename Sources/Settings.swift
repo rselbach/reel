@@ -4,7 +4,7 @@ import Foundation
 import os.log
 import ServiceManagement
 
-private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "com.reel", category: "Settings")
+private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "com.rselbach.reel", category: "Settings")
 
 // MARK: - Key Codes (Carbon virtual key codes)
 enum KeyCode {
@@ -74,45 +74,49 @@ enum KeyCode {
 class AppSettings: ObservableObject {
     static let shared = AppSettings()
 
-    private var isCheckingLaunchStatus = false
+    private var isSyncingLaunchAtLogin = false
+
+    private func persist(_ value: Any?, key: String) {
+        UserDefaults.standard.set(value, forKey: key)
+    }
 
     @Published var launchAtLogin: Bool {
         didSet {
-            UserDefaults.standard.set(launchAtLogin, forKey: "launchAtLogin")
-            if !isCheckingLaunchStatus {
+            persist(launchAtLogin, key: "launchAtLogin")
+            if !isSyncingLaunchAtLogin {
                 updateLaunchAtLogin()
             }
         }
     }
 
     @Published var showCursor: Bool {
-        didSet { UserDefaults.standard.set(showCursor, forKey: "showCursor") }
+        didSet { persist(showCursor, key: "showCursor") }
     }
 
     @Published var frameRate: Int {
-        didSet { UserDefaults.standard.set(frameRate, forKey: "frameRate") }
+        didSet { persist(frameRate, key: "frameRate") }
     }
 
     @Published var videoQuality: VideoQuality {
-        didSet { UserDefaults.standard.set(videoQuality.rawValue, forKey: "videoQuality") }
+        didSet { persist(videoQuality.rawValue, key: "videoQuality") }
     }
 
     @Published var outputDirectory: URL {
         didSet {
-            UserDefaults.standard.set(outputDirectory.path(), forKey: "outputDirectory")
+            persist(outputDirectory.path(), key: "outputDirectory")
         }
     }
 
     @Published var askWhereToSave: Bool {
-        didSet { UserDefaults.standard.set(askWhereToSave, forKey: "askWhereToSave") }
+        didSet { persist(askWhereToSave, key: "askWhereToSave") }
     }
 
     @Published var openFinderAfterRecording: Bool {
-        didSet { UserDefaults.standard.set(openFinderAfterRecording, forKey: "openFinderAfterRecording") }
+        didSet { persist(openFinderAfterRecording, key: "openFinderAfterRecording") }
     }
 
     @Published var showPreviewAfterRecording: Bool {
-        didSet { UserDefaults.standard.set(showPreviewAfterRecording, forKey: "showPreviewAfterRecording") }
+        didSet { persist(showPreviewAfterRecording, key: "showPreviewAfterRecording") }
     }
 
     static let hotkeyChangedNotification = Notification.Name("AppSettingsHotkeyChanged")
@@ -128,48 +132,31 @@ class AppSettings: ObservableObject {
     }
 
     @Published var recordAudio: Bool {
-        didSet { UserDefaults.standard.set(recordAudio, forKey: "recordAudio") }
+        didSet { persist(recordAudio, key: "recordAudio") }
     }
 
     @Published var audioDeviceID: String? {
-        didSet { UserDefaults.standard.set(audioDeviceID, forKey: "audioDeviceID") }
+        didSet { persist(audioDeviceID, key: "audioDeviceID") }
     }
 
     @Published var recordCamera: Bool {
-        didSet { UserDefaults.standard.set(recordCamera, forKey: "recordCamera") }
+        didSet { persist(recordCamera, key: "recordCamera") }
     }
 
     @Published var cameraDeviceID: String? {
-        didSet { UserDefaults.standard.set(cameraDeviceID, forKey: "cameraDeviceID") }
+        didSet { persist(cameraDeviceID, key: "cameraDeviceID") }
     }
 
     @Published var cameraPosition: CameraOverlayPosition {
-        didSet { UserDefaults.standard.set(cameraPosition.rawValue, forKey: "cameraPosition") }
+        didSet { persist(cameraPosition.rawValue, key: "cameraPosition") }
     }
 
     @Published var cameraSize: CameraOverlaySize {
-        didSet { UserDefaults.standard.set(cameraSize.rawValue, forKey: "cameraSize") }
+        didSet { persist(cameraSize.rawValue, key: "cameraSize") }
     }
 
     @Published var cameraShape: CameraOverlayShape {
-        didSet { UserDefaults.standard.set(cameraShape.rawValue, forKey: "cameraShape") }
-    }
-
-    // MARK: - Runtime Camera Overlay Position (not persisted)
-    // These are normalized coordinates (0.0-1.0) for the camera overlay position.
-    // They reset to the corner preset at the start of each recording.
-    // X: 0.0 = left edge, 1.0 = right edge
-    // Y: 0.0 = bottom edge, 1.0 = top edge (Core Image coordinate system)
-
-    @Published var cameraOverlayX: CGFloat = 1.0
-    @Published var cameraOverlayY: CGFloat = 0.0
-
-    /// Resets the camera overlay position to match the current corner preset.
-    /// Call this at the start of each recording.
-    func resetCameraOverlayPosition() {
-        let (x, y) = cameraPosition.normalizedCoordinates
-        cameraOverlayX = x
-        cameraOverlayY = y
+        didSet { persist(cameraShape.rawValue, key: "cameraShape") }
     }
 
     enum CameraOverlayPosition: String, CaseIterable {
@@ -286,32 +273,48 @@ class AppSettings: ObservableObject {
             return parts.joined()
         }
 
+        private static let keyCodeNames: [UInt16: String] = [
+            // Letters
+            KeyCode.a: "A", KeyCode.b: "B", KeyCode.c: "C", KeyCode.d: "D",
+            KeyCode.e: "E", KeyCode.f: "F", KeyCode.g: "G", KeyCode.h: "H",
+            KeyCode.i: "I", KeyCode.j: "J", KeyCode.k: "K", KeyCode.l: "L",
+            KeyCode.m: "M", KeyCode.n: "N", KeyCode.o: "O", KeyCode.p: "P",
+            KeyCode.q: "Q", KeyCode.r: "R", KeyCode.s: "S", KeyCode.t: "T",
+            KeyCode.u: "U", KeyCode.v: "V", KeyCode.w: "W", KeyCode.x: "X",
+            KeyCode.y: "Y", KeyCode.z: "Z",
+            // Numbers
+            KeyCode.zero: "0", KeyCode.one: "1", KeyCode.two: "2",
+            KeyCode.three: "3", KeyCode.four: "4", KeyCode.five: "5",
+            KeyCode.six: "6", KeyCode.seven: "7", KeyCode.eight: "8",
+            KeyCode.nine: "9",
+            // Function keys
+            KeyCode.f1: "F1", KeyCode.f2: "F2", KeyCode.f3: "F3",
+            KeyCode.f4: "F4", KeyCode.f5: "F5", KeyCode.f6: "F6",
+            KeyCode.f7: "F7", KeyCode.f8: "F8", KeyCode.f9: "F9",
+            KeyCode.f10: "F10", KeyCode.f11: "F11", KeyCode.f12: "F12",
+            // Special keys
+            KeyCode.space: "Space", KeyCode.return: "↩", KeyCode.tab: "⇥",
+            KeyCode.delete: "⌫", KeyCode.forwardDelete: "⌦", KeyCode.escape: "⎋",
+        ]
+
         private func keyCodeToString(_ keyCode: UInt16) -> String {
-            let keyMap: [UInt16: String] = [
-                // Letters
-                KeyCode.a: "A", KeyCode.b: "B", KeyCode.c: "C", KeyCode.d: "D",
-                KeyCode.e: "E", KeyCode.f: "F", KeyCode.g: "G", KeyCode.h: "H",
-                KeyCode.i: "I", KeyCode.j: "J", KeyCode.k: "K", KeyCode.l: "L",
-                KeyCode.m: "M", KeyCode.n: "N", KeyCode.o: "O", KeyCode.p: "P",
-                KeyCode.q: "Q", KeyCode.r: "R", KeyCode.s: "S", KeyCode.t: "T",
-                KeyCode.u: "U", KeyCode.v: "V", KeyCode.w: "W", KeyCode.x: "X",
-                KeyCode.y: "Y", KeyCode.z: "Z",
-                // Numbers
-                KeyCode.zero: "0", KeyCode.one: "1", KeyCode.two: "2",
-                KeyCode.three: "3", KeyCode.four: "4", KeyCode.five: "5",
-                KeyCode.six: "6", KeyCode.seven: "7", KeyCode.eight: "8",
-                KeyCode.nine: "9",
-                // Function keys
-                KeyCode.f1: "F1", KeyCode.f2: "F2", KeyCode.f3: "F3",
-                KeyCode.f4: "F4", KeyCode.f5: "F5", KeyCode.f6: "F6",
-                KeyCode.f7: "F7", KeyCode.f8: "F8", KeyCode.f9: "F9",
-                KeyCode.f10: "F10", KeyCode.f11: "F11", KeyCode.f12: "F12",
-                // Special keys
-                KeyCode.space: "Space", KeyCode.return: "↩", KeyCode.tab: "⇥",
-                KeyCode.delete: "⌫", KeyCode.forwardDelete: "⌦", KeyCode.escape: "⎋",
-            ]
-            return keyMap[keyCode] ?? "?"
+            Self.keyCodeNames[keyCode] ?? "?"
         }
+    }
+
+    private static func loadRecordingHotkey(from defaults: UserDefaults) -> HotkeyCombo {
+        if let data = defaults.data(forKey: "recordingHotkey"),
+           let combo = try? JSONDecoder().decode(HotkeyCombo.self, from: data) {
+            // Migrate old broken default modifier value (0x180500) to new correct value (0x120000)
+            // Old value masked to 0x100000 (Cmd only), new value masks to 0x120000 (Cmd+Shift)
+            if combo.keyCode == HotkeyCombo.default.keyCode && combo.modifiers == 0x180500 {
+                logger.info("Migrating hotkey from old modifier format")
+                return .default
+            }
+            return combo
+        }
+
+        return .default
     }
 
     private init() {
@@ -333,19 +336,7 @@ class AppSettings: ObservableObject {
 
         self.askWhereToSave = defaults.bool(forKey: "askWhereToSave")
 
-        if let data = defaults.data(forKey: "recordingHotkey"),
-           let combo = try? JSONDecoder().decode(HotkeyCombo.self, from: data) {
-            // Migrate old broken default modifier value (0x180500) to new correct value (0x120000)
-            // Old value masked to 0x100000 (Cmd only), new value masks to 0x120000 (Cmd+Shift)
-            if combo.keyCode == HotkeyCombo.default.keyCode && combo.modifiers == 0x180500 {
-                logger.info("Migrating hotkey from old modifier format")
-                self.recordingHotkey = .default
-            } else {
-                self.recordingHotkey = combo
-            }
-        } else {
-            self.recordingHotkey = .default
-        }
+        self.recordingHotkey = Self.loadRecordingHotkey(from: defaults)
 
         self.recordAudio = defaults.bool(forKey: "recordAudio")
         self.audioDeviceID = defaults.string(forKey: "audioDeviceID")
@@ -355,11 +346,6 @@ class AppSettings: ObservableObject {
         self.cameraPosition = CameraOverlayPosition(rawValue: defaults.string(forKey: "cameraPosition") ?? "") ?? .bottomRight
         self.cameraSize = CameraOverlaySize(rawValue: defaults.string(forKey: "cameraSize") ?? "") ?? .medium
         self.cameraShape = CameraOverlayShape(rawValue: defaults.string(forKey: "cameraShape") ?? "") ?? .circle
-
-        // Initialize runtime overlay position from corner preset
-        let coords = self.cameraPosition.normalizedCoordinates
-        self.cameraOverlayX = coords.x
-        self.cameraOverlayY = coords.y
     }
 
     private func updateLaunchAtLogin() {
@@ -378,9 +364,9 @@ class AppSettings: ObservableObject {
         let isEnabled = SMAppService.mainApp.status == .enabled
         // Only update if different, and skip the registration call since we're just syncing state
         if launchAtLogin != isEnabled {
-            isCheckingLaunchStatus = true
+            isSyncingLaunchAtLogin = true
             launchAtLogin = isEnabled
-            isCheckingLaunchStatus = false
+            isSyncingLaunchAtLogin = false
         }
     }
 }

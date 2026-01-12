@@ -22,6 +22,10 @@ struct VideoPlayerView: NSViewRepresentable {
     }
 }
 
+private enum TrimConstants {
+    static let threshold: Double = 0.1
+}
+
 struct PostRecordingView: View {
     let videoURL: URL
     let onDismiss: () -> Void
@@ -109,7 +113,7 @@ struct PostRecordingView: View {
     }
 
     private var hasTrimChanges: Bool {
-        duration > 0 && (trimStart > 0.1 || trimEnd < duration - 0.1)
+        duration > 0 && (trimStart > TrimConstants.threshold || trimEnd < duration - TrimConstants.threshold)
     }
 
     /// Safely tears down the player and time observer.
@@ -136,7 +140,6 @@ struct PostRecordingView: View {
         player = newPlayer
 
         Task { @MainActor [self] in
-            guard !isCleanedUp else { return }
             if let durationTime = try? await asset.load(.duration) {
                 guard !isCleanedUp else { return }
                 let seconds = CMTimeGetSeconds(durationTime)
@@ -163,19 +166,7 @@ struct PostRecordingView: View {
         isExporting = true
         exportError = nil
 
-        let panel = NSSavePanel()
-        panel.allowedContentTypes = [.mpeg4Movie]
-        let originalName = videoURL.deletingPathExtension().lastPathComponent
-        panel.nameFieldStringValue = "\(originalName)-trimmed.mp4"
-        panel.directoryURL = videoURL.deletingLastPathComponent()
-
-        let response: NSApplication.ModalResponse
-        if let keyWindow = NSApp.keyWindow {
-            response = await panel.beginSheetModal(for: keyWindow)
-        } else {
-            response = panel.runModal()
-        }
-        guard response == .OK, let outputURL = panel.url else {
+        guard let outputURL = await selectExportURL() else {
             isExporting = false
             return
         }
@@ -188,6 +179,24 @@ struct PostRecordingView: View {
         }
 
         isExporting = false
+    }
+
+    private func selectExportURL() async -> URL? {
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.mpeg4Movie]
+        let originalName = videoURL.deletingPathExtension().lastPathComponent
+        panel.nameFieldStringValue = "\(originalName)-trimmed.mp4"
+        panel.directoryURL = videoURL.deletingLastPathComponent()
+
+        let response: NSApplication.ModalResponse
+        if let keyWindow = NSApp.keyWindow {
+            response = await panel.beginSheetModal(for: keyWindow)
+        } else {
+            response = panel.runModal()
+        }
+
+        guard response == .OK else { return nil }
+        return panel.url
     }
 
     private func trimVideo(to outputURL: URL) async throws {

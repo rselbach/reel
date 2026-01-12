@@ -1,7 +1,11 @@
 import AppKit
 import os.log
 
-private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "com.reel", category: "CountdownOverlay")
+private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "com.rselbach.reel", category: "CountdownOverlay")
+
+private enum CountdownConstants {
+    static let barHeight: CGFloat = 80
+}
 
 @MainActor
 class CountdownOverlay {
@@ -40,12 +44,11 @@ class CountdownOverlay {
             return false
         }
 
-        let barHeight: CGFloat = 80
         let barFrame = NSRect(
             x: referenceFrame.origin.x,
             y: referenceFrame.origin.y,
             width: referenceFrame.width,
-            height: barHeight
+            height: CountdownConstants.barHeight
         )
         
         let window = CountdownWindow(
@@ -67,7 +70,7 @@ class CountdownOverlay {
         label.font = NSFont.monospacedDigitSystemFont(ofSize: 48, weight: .bold)
         label.textColor = .white
         label.alignment = .center
-        label.frame = NSRect(x: 0, y: 0, width: barFrame.width, height: barHeight)
+        label.frame = NSRect(x: 0, y: 0, width: barFrame.width, height: CountdownConstants.barHeight)
         label.autoresizingMask = [.width, .height]
         
         window.contentView?.addSubview(label)

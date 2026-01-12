@@ -1,8 +1,8 @@
+import AVFoundation
 import SwiftUI
 
 struct SettingsView: View {
     @ObservedObject var settings = AppSettings.shared
-    @State private var isRecordingHotkey = false
 
     var body: some View {
         TabView {
@@ -16,7 +16,7 @@ struct SettingsView: View {
                     Label("Recording", systemImage: "video")
                 }
 
-            ShortcutsTab(settings: settings, isRecordingHotkey: $isRecordingHotkey)
+            ShortcutsTab(settings: settings)
                 .tabItem {
                     Label("Shortcuts", systemImage: "keyboard")
                 }
@@ -73,6 +73,21 @@ struct GeneralTab: View {
     }
 }
 
+struct DevicePicker: View {
+    let title: String
+    let devices: [AVCaptureDevice]
+    @Binding var selection: String?
+
+    var body: some View {
+        Picker(title, selection: $selection) {
+            Text("Default").tag(nil as String?)
+            ForEach(devices, id: \.uniqueID) { device in
+                Text(device.localizedName).tag(device.uniqueID as String?)
+            }
+        }
+    }
+}
+
 struct RecordingTab: View {
     @ObservedObject var settings: AppSettings
 
@@ -96,12 +111,11 @@ struct RecordingTab: View {
             Toggle("Record audio from microphone", isOn: $settings.recordAudio)
 
             if settings.recordAudio {
-                Picker("Audio input:", selection: $settings.audioDeviceID) {
-                    Text("Default").tag(nil as String?)
-                    ForEach(settings.availableAudioDevices, id: \.uniqueID) { device in
-                        Text(device.localizedName).tag(device.uniqueID as String?)
-                    }
-                }
+                DevicePicker(
+                    title: "Audio input:",
+                    devices: settings.availableAudioDevices,
+                    selection: $settings.audioDeviceID
+                )
             }
 
             Divider()
@@ -109,12 +123,11 @@ struct RecordingTab: View {
             Toggle("Record camera overlay", isOn: $settings.recordCamera)
 
             if settings.recordCamera {
-                Picker("Camera:", selection: $settings.cameraDeviceID) {
-                    Text("Default").tag(nil as String?)
-                    ForEach(settings.availableCameras, id: \.uniqueID) { device in
-                        Text(device.localizedName).tag(device.uniqueID as String?)
-                    }
-                }
+                DevicePicker(
+                    title: "Camera:",
+                    devices: settings.availableCameras,
+                    selection: $settings.cameraDeviceID
+                )
 
                 Picker("Position:", selection: $settings.cameraPosition) {
                     ForEach(AppSettings.CameraOverlayPosition.allCases, id: \.self) { position in
@@ -141,7 +154,7 @@ struct RecordingTab: View {
 
 struct ShortcutsTab: View {
     @ObservedObject var settings: AppSettings
-    @Binding var isRecordingHotkey: Bool
+    @State private var isRecordingHotkey = false
 
     var body: some View {
         Form {

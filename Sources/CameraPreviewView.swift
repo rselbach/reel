@@ -1,4 +1,5 @@
 import AVFoundation
+import Foundation
 import SwiftUI
 
 /// NSView wrapper for AVCaptureVideoPreviewLayer.
@@ -66,29 +67,24 @@ final class CameraPreviewNSView: NSView {
 final class SessionHolder {
     weak var session: AVCaptureSession?
     var isInvalidated = false
-    private var registeredViews: [WeakViewRef] = []
-    
-    private class WeakViewRef {
-        weak var view: CameraPreviewNSView?
-        init(_ view: CameraPreviewNSView) { self.view = view }
-    }
-    
+    private let registeredViews = NSHashTable<CameraPreviewNSView>.weakObjects()
+
     init(session: AVCaptureSession) {
         self.session = session
     }
-    
+
     func registerView(_ view: CameraPreviewNSView) {
-        registeredViews.append(WeakViewRef(view))
+        registeredViews.add(view)
     }
-    
+
     func invalidate() {
         isInvalidated = true
         session = nil
         // Explicitly tear down all registered views
-        for ref in registeredViews {
-            ref.view?.tearDown()
+        for view in registeredViews.allObjects {
+            view.tearDown()
         }
-        registeredViews.removeAll()
+        registeredViews.removeAllObjects()
     }
 }
 
