@@ -43,10 +43,10 @@ Releases are signed with Sparkle for automatic updates. To set up:
 
 The CI workflow will sign each release and update `appcast.xml` automatically.
 
-## Why?
+## Disclaimer
 
-I made this because I wanted a simple screen recorder that does exactly what I need without the bloat in order to record quick demos/tutorials for teammates at work. It's a personal project to scratch my own itch, but you're welcome to use it.
+This is a personal project made for my own use. It is **not supported** in any way — no issues, no PRs, no guarantees it works, no promises it won't set your Mac on fire. Use at your own risk. If it breaks, you get to keep both pieces.
 
 ## License
 
-MIT License - see [LICENSE](LICENSE) for details.
+Public Domain (Unlicense) — do whatever you want with it. See [LICENSE](LICENSE).
