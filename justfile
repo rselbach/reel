@@ -30,7 +30,12 @@ build-app: build
     /usr/libexec/PlistBuddy -c "Set :GitCommit $GIT_COMMIT" "{{ app_dir }}/Contents/Info.plist"
     echo "Embedded commit: $GIT_COMMIT"
     cp Sources/AppIcon.icns "{{ app_dir }}/Contents/Resources/"
-    cp -R .build/arm64-apple-macosx/release/Sparkle.framework "{{ app_dir }}/Contents/Frameworks/"
+    sparkle_framework_path="$(find .build -type d -path "*/release/Sparkle.framework" | head -n 1)"
+    if [[ -z "$sparkle_framework_path" ]]; then
+        echo "Error: Sparkle.framework not found in .build"
+        exit 1
+    fi
+    cp -R "$sparkle_framework_path" "{{ app_dir }}/Contents/Frameworks/"
     install_name_tool -add_rpath @executable_path/../Frameworks "{{ app_dir }}/Contents/MacOS/Reel"
     echo "Built: {{ app_dir }}"
     echo "Run: open '{{ app_dir }}'"
