@@ -15,13 +15,17 @@ class CountdownOverlay {
 
     /// Converts Quartz coordinates (origin top-left, Y down) to Cocoa coordinates (origin bottom-left, Y up)
     private func quartzToCocoa(_ frame: CGRect) -> NSRect? {
-        guard let primaryHeight = NSScreen.screens.first?.frame.height else {
-            logger.warning("No primary screen found for coordinate conversion")
+        guard !NSScreen.screens.isEmpty else {
+            logger.warning("No screens available for coordinate conversion")
             return nil
+        }
+        let desktopBounds = NSScreen.screens.reduce(into: CGRect.null) { partial, screen in
+            partial = partial.union(screen.frame)
         }
         return NSRect(
             x: frame.origin.x,
-            y: primaryHeight - frame.origin.y - frame.height,
+            // Use full virtual desktop height so placement works on vertically stacked displays.
+            y: desktopBounds.maxY - frame.origin.y - frame.height,
             width: frame.width,
             height: frame.height
         )
