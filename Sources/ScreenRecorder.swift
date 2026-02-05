@@ -580,7 +580,16 @@ class ScreenRecorder: NSObject, ObservableObject {
     }
 
     private func discardTempRecording(_ tempURL: URL) {
-        try? FileManager.default.removeItem(at: tempURL)
+        do {
+            if FileManager.default.fileExists(atPath: tempURL.path()) {
+                try FileManager.default.removeItem(at: tempURL)
+            }
+        } catch {
+            logger.error("Failed to remove temporary recording at \(tempURL.path(), privacy: .public): \(error.localizedDescription, privacy: .public)")
+            if errorMessage == nil {
+                errorMessage = "Failed to clean up temporary recording: \(error.localizedDescription)"
+            }
+        }
         lastRecordedURL = nil
     }
 
