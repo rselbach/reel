@@ -94,6 +94,7 @@ class ScreenRecorder: NSObject, ObservableObject {
         let recordCamera: Bool
         let cameraSize: CGFloat
         let cameraShape: AppSettings.CameraOverlayShape
+        var hasWriteFailure = false
     }
 
     private var settings: AppSettings { AppSettings.shared }
@@ -316,7 +317,14 @@ class ScreenRecorder: NSObject, ObservableObject {
         self.videoInput = videoInput
         self.audioInput = audioInput
 
-        assetWriter.startWriting()
+        guard assetWriter.startWriting() else {
+            let reason = assetWriter.error?.localizedDescription ?? "Unknown writer error"
+            throw NSError(
+                domain: "ScreenRecorder",
+                code: 4,
+                userInfo: [NSLocalizedDescriptionKey: "Cannot start writer: \(reason)"]
+            )
+        }
     }
 
     private func makeOutputURL() throws -> URL {
@@ -514,6 +522,13 @@ class ScreenRecorder: NSObject, ObservableObject {
         await assetWriter?.finishWriting()
 
         guard let tempURL = outputURL else { return }
+        guard let assetWriter else { return }
+        guard assetWriter.status == .completed else {
+            let reason = assetWriter.error?.localizedDescription ?? "Writer status: \(assetWriter.status.rawValue)"
+            errorMessage = "Failed to finalize recording: \(reason)"
+            discardTempRecording(tempURL)
+            return
+        }
 
         var finalURL = tempURL
 
@@ -763,6 +778,15 @@ class ScreenRecorder: NSObject, ObservableObject {
 
         return outputBuffer
     }
+
+    private nonisolated func handleAppendFailure(_ writer: inout FrameWriter, context: String) {
+        writer.hasWriteFailure = true
+        let reason = writer.assetWriter.error?.localizedDescription ?? "Unknown writer error"
+        logger.error("\(context, privacy: .public): \(reason, privacy: .public)")
+        Task { @MainActor in
+            errorMessage = "\(context): \(reason)"
+        }
+    }
 }
 
 extension ScreenRecorder: SCStreamDelegate {
@@ -799,6 +823,7 @@ extension ScreenRecorder: SCStreamOutput {
             // Bail out if capture is stopping to prevent accessing cleaned-up resources
             guard !isCaptureStopped else { return }
             guard var writer = frameWriter else { return }
+            guard !writer.hasWriteFailure else { return }
             let cameraBuffer = latestCameraPixelBuffer
 
             // Start session on first frame
@@ -825,14 +850,29 @@ extension ScreenRecorder: SCStreamOutput {
                     sizeFraction: writer.cameraSize,
                     shape: writer.cameraShape
                 ) {
-                    writer.adaptor.append(composited, withPresentationTime: presentationTime)
+                    if !writer.adaptor.append(composited, withPresentationTime: presentationTime) {
+                        handleAppendFailure(&writer, context: "Failed to append composited video frame")
+                        frameWriter = writer
+                        isCaptureStopped = true
+                        return
+                    }
                 } else {
                     // Compositing failed, fall back to screen-only frame
                     logger.warning("Camera compositing failed, using screen-only frame")
-                    writer.adaptor.append(screenBuffer, withPresentationTime: presentationTime)
+                    if !writer.adaptor.append(screenBuffer, withPresentationTime: presentationTime) {
+                        handleAppendFailure(&writer, context: "Failed to append fallback video frame")
+                        frameWriter = writer
+                        isCaptureStopped = true
+                        return
+                    }
                 }
             } else {
-                writer.adaptor.append(screenBuffer, withPresentationTime: presentationTime)
+                if !writer.adaptor.append(screenBuffer, withPresentationTime: presentationTime) {
+                    handleAppendFailure(&writer, context: "Failed to append video frame")
+                    frameWriter = writer
+                    isCaptureStopped = true
+                    return
+                }
             }
         }
     }
@@ -862,13 +902,19 @@ extension ScreenRecorder: AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptur
                 return frameWriter
             }
 
-            guard let writer,
+            guard var writer,
                   writer.startTime != nil,
                   let audio = writer.audioInput,
                   audio.isReadyForMoreMediaData
             else { return }
 
-            audio.append(sampleBuffer)
+            if !audio.append(sampleBuffer) {
+                withFrameLock {
+                    handleAppendFailure(&writer, context: "Failed to append audio sample")
+                    frameWriter = writer
+                    isCaptureStopped = true
+                }
+            }
         }
     }
 }
