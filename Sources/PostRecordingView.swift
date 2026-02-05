@@ -238,6 +238,8 @@ struct TrimSlider: View {
 
     private let handleWidth: CGFloat = 12
     private let trackHeight: CGFloat = 50
+    @State private var startHandleDragOrigin: Double?
+    @State private var endHandleDragOrigin: Double?
 
     var body: some View {
         VStack(spacing: 8) {
@@ -285,9 +287,18 @@ struct TrimSlider: View {
                         .gesture(
                             DragGesture()
                                 .onChanged { value in
-                                    let newStart = (value.location.x / usableWidth) * duration
+                                    guard usableWidth > 0 else { return }
+                                    if startHandleDragOrigin == nil {
+                                        startHandleDragOrigin = trimStart
+                                    }
+                                    let origin = startHandleDragOrigin ?? trimStart
+                                    let delta = (value.translation.width / usableWidth) * duration
+                                    let newStart = origin + delta
                                     trimStart = min(max(0, newStart), trimEnd - 0.5)
                                     onSeek(trimStart)
+                                }
+                                .onEnded { _ in
+                                    startHandleDragOrigin = nil
                                 }
                         )
 
@@ -297,9 +308,18 @@ struct TrimSlider: View {
                         .gesture(
                             DragGesture()
                                 .onChanged { value in
-                                    let newEnd = (value.location.x / usableWidth) * duration
+                                    guard usableWidth > 0 else { return }
+                                    if endHandleDragOrigin == nil {
+                                        endHandleDragOrigin = trimEnd
+                                    }
+                                    let origin = endHandleDragOrigin ?? trimEnd
+                                    let delta = (value.translation.width / usableWidth) * duration
+                                    let newEnd = origin + delta
                                     trimEnd = max(min(duration, newEnd), trimStart + 0.5)
                                     onSeek(trimEnd)
+                                }
+                                .onEnded { _ in
+                                    endHandleDragOrigin = nil
                                 }
                         )
 
