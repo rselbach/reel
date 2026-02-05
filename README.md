@@ -25,7 +25,7 @@ swift build
 Or use the included build script for a full app bundle:
 
 ```bash
-./build-app.sh
+just build-app
 ```
 
 ## Auto-Updates Setup (for maintainers)
