@@ -702,8 +702,17 @@ class ScreenRecorder: NSObject, ObservableObject {
             return nil
         }
 
-        CVPixelBufferLockBaseAddress(source, .readOnly)
-        CVPixelBufferLockBaseAddress(dest, [])
+        let sourceLock = CVPixelBufferLockBaseAddress(source, .readOnly)
+        guard sourceLock == kCVReturnSuccess else {
+            logger.warning("Failed to lock source pixel buffer (status: \(sourceLock))")
+            return nil
+        }
+        let destLock = CVPixelBufferLockBaseAddress(dest, [])
+        guard destLock == kCVReturnSuccess else {
+            logger.warning("Failed to lock destination pixel buffer (status: \(destLock))")
+            CVPixelBufferUnlockBaseAddress(source, .readOnly)
+            return nil
+        }
         defer {
             CVPixelBufferUnlockBaseAddress(source, .readOnly)
             CVPixelBufferUnlockBaseAddress(dest, [])
