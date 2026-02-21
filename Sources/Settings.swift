@@ -77,7 +77,11 @@ class AppSettings: ObservableObject {
     private var isSyncingLaunchAtLogin = false
 
     private func persist(_ value: Any?, key: String) {
-        UserDefaults.standard.set(value, forKey: key)
+        if let value {
+            UserDefaults.standard.set(value, forKey: key)
+        } else {
+            UserDefaults.standard.removeObject(forKey: key)
+        }
     }
 
     @Published var launchAtLogin: Bool {
