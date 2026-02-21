@@ -71,7 +71,11 @@ class ScreenRecorder: NSObject, ObservableObject {
     private nonisolated(unsafe) var latestCameraPixelBuffer: CVPixelBuffer?
     private nonisolated(unsafe) var frameWriter: FrameWriter?
     private nonisolated(unsafe) var isCaptureStopped = false  // Signals callbacks to bail out
-    private let circularMaskCache = NSCache<NSString, CIImage>()
+    private let circularMaskCache: NSCache<NSString, CIImage> = {
+        let cache = NSCache<NSString, CIImage>()
+        cache.countLimit = 4
+        return cache
+    }()
 
     private nonisolated func withFrameLock<T>(_ action: () -> T) -> T {
         frameLock.lock()
