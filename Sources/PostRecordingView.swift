@@ -40,6 +40,7 @@ struct PostRecordingView: View {
     @State private var trimEnd: Double = 0
     @State private var currentTime: Double = 0
     @State private var isExporting = false
+    @State private var showDeleteConfirmation = false
     @State private var exportError: String?
 
     var body: some View {
@@ -77,7 +78,7 @@ struct PostRecordingView: View {
                 }
 
                 Button("Delete", role: .destructive) {
-                    onDelete()
+                    showDeleteConfirmation = true
                 }
                 .foregroundColor(.red)
 
@@ -104,6 +105,14 @@ struct PostRecordingView: View {
         }
         .padding()
         .frame(minWidth: 700, minHeight: 550)
+        .alert("Delete recording?", isPresented: $showDeleteConfirmation) {
+            Button("Delete", role: .destructive) {
+                onDelete()
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This will permanently remove the file from disk.")
+        }
         .onAppear {
             setupPlayer()
         }
