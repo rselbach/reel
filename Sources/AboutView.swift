@@ -1,3 +1,4 @@
+import Foundation
 import SwiftUI
 
 struct AboutView: View {
@@ -15,8 +16,18 @@ struct AboutView: View {
 
     private var commitURL: URL? {
         let commit = gitCommit
-        guard commit != "dev" else { return nil }
-        return URL(string: "https://github.com/rselbach/reel/commit/\(commit)")
+        guard commit != "dev", isValidCommitSHA(commit) else { return nil }
+        
+        var components = URLComponents()
+        components.scheme = "https"
+        components.host = "github.com"
+        components.path = "/rselbach/reel/commit/\(commit)"
+        return components.url
+    }
+
+    private func isValidCommitSHA(_ commit: String) -> Bool {
+        guard (7...40).contains(commit.count) else { return false }
+        return commit.unicodeScalars.allSatisfy { CharacterSet.hexadecimalDigits.contains($0) }
     }
 
     var body: some View {

@@ -140,13 +140,17 @@ struct PostRecordingView: View {
         player = newPlayer
 
         Task { @MainActor [self] in
-            if let durationTime = try? await asset.load(.duration) {
+            do {
+                let durationTime = try await asset.load(.duration)
                 guard !isCleanedUp else { return }
                 let seconds = CMTimeGetSeconds(durationTime)
                 if seconds.isFinite && seconds > 0 {
                     duration = seconds
                     trimEnd = seconds
                 }
+            } catch {
+                guard !isCleanedUp else { return }
+                exportError = "Unable to load recording duration: \(error.localizedDescription)"
             }
         }
 

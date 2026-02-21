@@ -87,13 +87,15 @@ class CountdownOverlay {
         for count in [3, 2, 1] {
             if cancelled { break }
             label.stringValue = "\(count)"
-            try? await Task.sleep(for: .seconds(1))
+            guard await waitOneSecond() else {
+                return false
+            }
         }
         
         if cancelled {
             label.stringValue = "Cancelled"
             window.backgroundColor = NSColor.systemGray
-            try? await Task.sleep(for: .seconds(1))
+            _ = await waitOneSecond()
         }
         
         window.orderOut(nil)
@@ -101,6 +103,16 @@ class CountdownOverlay {
         self.label = nil
         
         return !cancelled
+    }
+
+    private func waitOneSecond() async -> Bool {
+        do {
+            try await Task.sleep(for: .seconds(1))
+            return true
+        } catch {
+            logger.warning("Countdown sleep interrupted: \(error.localizedDescription)")
+            return false
+        }
     }
 }
 
