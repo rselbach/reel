@@ -394,13 +394,22 @@ class ScreenRecorder: NSObject, ObservableObject {
 
         let timestamp = ISO8601DateFormatter().string(from: Date())
             .replacingOccurrences(of: ":", with: "-")
-        while true {
+        for _ in 0..<64 {
             let randomID = UUID().uuidString.prefix(8)
             let candidate = outputDir.appendingPathComponent("Reel-\(timestamp)-\(randomID).mp4")
             if !FileManager.default.fileExists(atPath: candidate.path()) {
                 return candidate
             }
         }
+
+        throw RecordingError.outputDirectoryCreationFailed(
+            outputDir,
+            NSError(
+                domain: "ScreenRecorder",
+                code: 7,
+                userInfo: [NSLocalizedDescriptionKey: "Unable to generate unique recording filename"]
+            )
+        )
     }
 
     private func persistSettingOutputDirectory(_ url: URL) {
