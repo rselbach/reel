@@ -357,6 +357,7 @@ class AppSettings: ObservableObject {
                 logger.warning("Stored outputDirectory is invalid, using default: \(path)")
                 self.outputDirectory = FileManager.default.urls(for: .moviesDirectory, in: .userDomainMask).first
                     ?? URL(fileURLWithPath: NSHomeDirectory())
+                persist(self.outputDirectory.path(), key: "outputDirectory")
             }
         } else {
             self.outputDirectory = FileManager.default.urls(for: .moviesDirectory, in: .userDomainMask).first
