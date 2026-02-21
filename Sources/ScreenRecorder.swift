@@ -374,10 +374,14 @@ class ScreenRecorder: NSObject, ObservableObject {
             throw RecordingError.outputDirectoryCreationFailed(outputDir, error)
         }
 
-        guard
-            let values = try? outputDir.resourceValues(forKeys: [.isDirectoryKey, .isWritableKey]),
-            values.isDirectory == true
-        else {
+        let values: URLResourceValues
+        do {
+            values = try outputDir.resourceValues(forKeys: [.isDirectoryKey, .isWritableKey])
+        } catch {
+            throw RecordingError.outputDirectoryCreationFailed(outputDir, error)
+        }
+
+        guard values.isDirectory == true else {
             throw RecordingError.outputDirectoryCreationFailed(
                 outputDir,
                 NSError(domain: "ScreenRecorder", code: 6, userInfo: [NSLocalizedDescriptionKey: "Output path is not a directory"])
