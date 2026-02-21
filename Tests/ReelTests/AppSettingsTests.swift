@@ -1,7 +1,7 @@
 import XCTest
 @testable import Reel
 
-final class AppSettingsTests: XCTestCase {
+    final class AppSettingsTests: XCTestCase {
     @MainActor
     func testCameraOverlayPositionNormalizedCoordinates() {
         XCTAssertEqual(AppSettings.CameraOverlayPosition.bottomLeft.normalizedCoordinates.x, 0.0)
@@ -28,5 +28,13 @@ final class AppSettingsTests: XCTestCase {
     func testHotkeyDisplayStringUsesFallbackForUnknownKeyCode() {
         let combo = AppSettings.HotkeyCombo(keyCode: 255, modifiers: 0x100000)
         XCTAssertEqual(combo.displayString, "⌘?")
+    }
+
+    @MainActor
+    func testFrameRateSanitizationUsesSafeFallback() {
+        XCTAssertEqual(AppSettings.sanitizedFrameRate(0), 60)
+        XCTAssertEqual(AppSettings.sanitizedFrameRate(30), 30)
+        XCTAssertEqual(AppSettings.sanitizedFrameRate(60), 60)
+        XCTAssertEqual(AppSettings.sanitizedFrameRate(45), 30)
     }
 }

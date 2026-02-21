@@ -336,7 +336,13 @@ class ScreenRecorder: NSObject, ObservableObject {
 
         let timestamp = ISO8601DateFormatter().string(from: Date())
             .replacingOccurrences(of: ":", with: "-")
-        return outputDir.appendingPathComponent("Reel-\(timestamp).mp4")
+        while true {
+            let randomID = UUID().uuidString.prefix(8)
+            let candidate = outputDir.appendingPathComponent("Reel-\(timestamp)-\(randomID).mp4")
+            if !FileManager.default.fileExists(atPath: candidate.path()) {
+                return candidate
+            }
+        }
     }
 
     private func makeVideoInput(width: Int, height: Int) -> AVAssetWriterInput {
@@ -554,8 +560,7 @@ class ScreenRecorder: NSObject, ObservableObject {
                     return
                 }
             } else {
-                discardTempRecording(tempURL)
-                return
+                finalURL = tempURL
             }
         }
 

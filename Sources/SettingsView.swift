@@ -96,8 +96,9 @@ struct RecordingTab: View {
             Toggle("Show cursor in recording", isOn: $settings.showCursor)
 
             Picker("Frame rate:", selection: $settings.frameRate) {
-                Text("30 fps").tag(30)
-                Text("60 fps").tag(60)
+                ForEach(AppSettings.supportedFrameRates, id: \.self) { frameRate in
+                    Text("\(frameRate) fps").tag(frameRate)
+                }
             }
 
             Picker("Video quality:", selection: $settings.videoQuality) {
@@ -222,7 +223,8 @@ class HotkeyRecorderView: NSView {
                 self?.onCancel?()
             } else if event.modifierFlags.contains(.command) ||
                       event.modifierFlags.contains(.control) ||
-                      event.modifierFlags.contains(.option) {
+                      event.modifierFlags.contains(.option) ||
+                      event.modifierFlags.contains(.shift) {
                 // Mask to device-independent bits only for cross-API compatibility
                 let modifiers = UInt32(event.modifierFlags.rawValue) & AppSettings.HotkeyCombo.modifierMask
                 self?.onHotkeyRecorded?(event.keyCode, modifiers)

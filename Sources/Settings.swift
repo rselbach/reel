@@ -94,7 +94,14 @@ class AppSettings: ObservableObject {
     }
 
     @Published var frameRate: Int {
-        didSet { persist(frameRate, key: "frameRate") }
+        didSet {
+            let sanitized = Self.sanitizedFrameRate(frameRate)
+            if sanitized != frameRate {
+                frameRate = sanitized
+                return
+            }
+            persist(frameRate, key: "frameRate")
+        }
     }
 
     @Published var videoQuality: VideoQuality {
@@ -252,6 +259,16 @@ class AppSettings: ObservableObject {
         }
     }
 
+    static let supportedFrameRates = [30, 60]
+
+    static func sanitizedFrameRate(_ frameRate: Int) -> Int {
+        guard frameRate > 0 else { return 60 }
+        if supportedFrameRates.contains(frameRate) { return frameRate }
+
+        let closest = supportedFrameRates.min(by: { abs($0 - frameRate) < abs($1 - frameRate) }) ?? 60
+        return closest
+    }
+
     struct HotkeyCombo: Codable, Equatable {
         var keyCode: UInt16
         var modifiers: UInt32
@@ -322,7 +339,7 @@ class AppSettings: ObservableObject {
 
         self.launchAtLogin = defaults.bool(forKey: "launchAtLogin")
         self.showCursor = defaults.object(forKey: "showCursor") as? Bool ?? true
-        self.frameRate = defaults.object(forKey: "frameRate") as? Int ?? 60
+        self.frameRate = Self.sanitizedFrameRate(defaults.object(forKey: "frameRate") as? Int ?? 60)
         self.videoQuality = VideoQuality(rawValue: defaults.string(forKey: "videoQuality") ?? "") ?? .medium
         self.openFinderAfterRecording = defaults.object(forKey: "openFinderAfterRecording") as? Bool ?? true
         self.showPreviewAfterRecording = defaults.object(forKey: "showPreviewAfterRecording") as? Bool ?? true
