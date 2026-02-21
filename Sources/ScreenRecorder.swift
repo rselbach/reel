@@ -204,6 +204,11 @@ class ScreenRecorder: NSObject, ObservableObject {
             captureHeight = dimensions.height
         }
 
+        guard captureWidth > 0, captureHeight > 0 else {
+            errorMessage = "Invalid recording dimensions"
+            return
+        }
+
         do {
             let config = SCStreamConfiguration()
             config.width = captureWidth
