@@ -127,6 +127,11 @@ jobs:
         run: |
           VERSION=${GITHUB_REF#refs/tags/v}
           DATE=$(date -R)
+          SAFE_VERSION=$(printf '%s' "$VERSION" | tr -cd 'A-Za-z0-9._-')
+          if [ -z "$SAFE_VERSION" ]; then
+            echo "Invalid release tag: $VERSION"
+            exit 1
+          fi
           
           mkdir -p _site
           printf '%s\n' '<?xml version="1.0" encoding="utf-8"?>' > _site/appcast.xml
@@ -137,10 +142,10 @@ jobs:
           printf '%s\n' '    <description>Reel app updates</description>' >> _site/appcast.xml
           printf '%s\n' '    <language>en</language>' >> _site/appcast.xml
           printf '%s\n' '    <item>' >> _site/appcast.xml
-          printf '%s\n' "      <title>Version ${VERSION}</title>" >> _site/appcast.xml
+          printf '%s\n' "      <title>Version ${SAFE_VERSION}</title>" >> _site/appcast.xml
           printf '%s\n' "      <pubDate>${DATE}</pubDate>" >> _site/appcast.xml
-          printf '%s\n' "      <sparkle:version>${VERSION}</sparkle:version>" >> _site/appcast.xml
-          printf '%s\n' "      <sparkle:shortVersionString>${VERSION}</sparkle:shortVersionString>" >> _site/appcast.xml
+          printf '%s\n' "      <sparkle:version>${SAFE_VERSION}</sparkle:version>" >> _site/appcast.xml
+          printf '%s\n' "      <sparkle:shortVersionString>${SAFE_VERSION}</sparkle:shortVersionString>" >> _site/appcast.xml
           printf '%s\n' "      <enclosure url=\"https://github.com/rselbach/reel/releases/download/v${VERSION}/Reel.dmg\" ${SPARKLE_SIGNATURE} type=\"application/octet-stream\"/>" >> _site/appcast.xml
           printf '%s\n' '    </item>' >> _site/appcast.xml
           printf '%s\n' '  </channel>' >> _site/appcast.xml
