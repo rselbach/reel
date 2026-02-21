@@ -349,7 +349,15 @@ class AppSettings: ObservableObject {
         self.showPreviewAfterRecording = defaults.object(forKey: "showPreviewAfterRecording") as? Bool ?? true
 
         if let path = defaults.string(forKey: "outputDirectory") {
-            self.outputDirectory = URL(fileURLWithPath: path)
+            let candidate = URL(fileURLWithPath: path, isDirectory: true)
+            if let values = try? candidate.resourceValues(forKeys: [.isDirectoryKey]),
+               values.isDirectory == true {
+                self.outputDirectory = candidate
+            } else {
+                logger.warning("Stored outputDirectory is invalid, using default: \(path)")
+                self.outputDirectory = FileManager.default.urls(for: .moviesDirectory, in: .userDomainMask).first
+                    ?? URL(fileURLWithPath: NSHomeDirectory())
+            }
         } else {
             self.outputDirectory = FileManager.default.urls(for: .moviesDirectory, in: .userDomainMask).first
                 ?? URL(fileURLWithPath: NSHomeDirectory())
