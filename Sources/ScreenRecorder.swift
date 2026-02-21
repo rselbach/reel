@@ -652,7 +652,19 @@ class ScreenRecorder: NSObject, ObservableObject {
         if FileManager.default.fileExists(atPath: finalURL.path()) {
             try FileManager.default.removeItem(at: finalURL)
         }
-        try FileManager.default.moveItem(at: tempURL, to: finalURL)
+        do {
+            try FileManager.default.moveItem(at: tempURL, to: finalURL)
+        } catch {
+            logger.warning("Move failed for recording file, attempting copy fallback: \(error.localizedDescription)")
+            do {
+                try FileManager.default.copyItem(at: tempURL, to: finalURL)
+                if FileManager.default.fileExists(atPath: tempURL.path()) {
+                    try? FileManager.default.removeItem(at: tempURL)
+                }
+            } catch {
+                throw error
+            }
+        }
     }
 
     private func discardTempRecording(_ tempURL: URL) {
