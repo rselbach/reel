@@ -71,6 +71,7 @@ class ScreenRecorder: NSObject, ObservableObject {
     private nonisolated(unsafe) var latestCameraPixelBuffer: CVPixelBuffer?
     private nonisolated(unsafe) var frameWriter: FrameWriter?
     private nonisolated(unsafe) var isCaptureStopped = false  // Signals callbacks to bail out
+    private let circularMaskCache = NSCache<NSString, CIImage>()
 
     private nonisolated func withFrameLock<T>(_ action: () -> T) -> T {
         frameLock.lock()
@@ -735,14 +736,22 @@ class ScreenRecorder: NSObject, ObservableObject {
             let centerY = overlayHeight / 2
             let radius = diameter / 2
 
-            guard let radialGradient = CIFilter(name: "CIRadialGradient") else { return nil }
-            radialGradient.setValue(CIVector(x: centerX, y: centerY), forKey: "inputCenter")
-            radialGradient.setValue(radius - 1, forKey: "inputRadius0")
-            radialGradient.setValue(radius, forKey: "inputRadius1")
-            radialGradient.setValue(CIColor.white, forKey: "inputColor0")
-            radialGradient.setValue(CIColor.clear, forKey: "inputColor1")
+            let cacheKey = "\(Int(overlayWidth.rounded()))x\(Int(overlayHeight.rounded()))"
+            let gradientOutput: CIImage
+            if let cached = circularMaskCache.object(forKey: cacheKey as NSString) {
+                gradientOutput = cached
+            } else {
+                guard let radialGradient = CIFilter(name: "CIRadialGradient") else { return nil }
+                radialGradient.setValue(CIVector(x: centerX, y: centerY), forKey: "inputCenter")
+                radialGradient.setValue(radius - 1, forKey: "inputRadius0")
+                radialGradient.setValue(radius, forKey: "inputRadius1")
+                radialGradient.setValue(CIColor.white, forKey: "inputColor0")
+                radialGradient.setValue(CIColor.clear, forKey: "inputColor1")
 
-            guard let gradientOutput = radialGradient.outputImage?.cropped(to: CGRect(x: 0, y: 0, width: overlayWidth, height: overlayHeight)) else { return nil }
+                guard let cachedOutput = radialGradient.outputImage?.cropped(to: CGRect(x: 0, y: 0, width: overlayWidth, height: overlayHeight)) else { return nil }
+                circularMaskCache.setObject(cachedOutput, forKey: cacheKey as NSString)
+                gradientOutput = cachedOutput
+            }
 
             cameraImage = cameraImage.applyingFilter("CIBlendWithMask", parameters: [
                 kCIInputBackgroundImageKey: CIImage.empty(),
