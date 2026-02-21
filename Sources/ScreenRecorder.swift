@@ -330,7 +330,18 @@ class ScreenRecorder: NSObject, ObservableObject {
 
     private func makeOutputURL() throws -> URL {
         let outputDir = settings.outputDirectory
+        do {
+            return try makeOutputURL(in: outputDir)
+        } catch {
+            logger.warning("Configured output directory unavailable (\(outputDir.path()), using fallback: \(error.localizedDescription))")
+            let fallback = FileManager.default.urls(for: .moviesDirectory, in: .userDomainMask).first
+                ?? URL(fileURLWithPath: NSHomeDirectory())
+            persistSettingOutputDirectory(fallback)
+            return try makeOutputURL(in: fallback)
+        }
+    }
 
+    private func makeOutputURL(in outputDir: URL) throws -> URL {
         if !FileManager.default.fileExists(atPath: outputDir.path()) {
             try FileManager.default.createDirectory(at: outputDir, withIntermediateDirectories: true)
         }
@@ -344,6 +355,10 @@ class ScreenRecorder: NSObject, ObservableObject {
                 return candidate
             }
         }
+    }
+
+    private func persistSettingOutputDirectory(_ url: URL) {
+        settings.outputDirectory = url
     }
 
     private func makeVideoInput(width: Int, height: Int) -> AVAssetWriterInput {
