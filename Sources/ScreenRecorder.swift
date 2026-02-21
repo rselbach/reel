@@ -933,81 +933,83 @@ extension ScreenRecorder: SCStreamOutput {
         didOutputSampleBuffer sampleBuffer: CMSampleBuffer,
         of type: SCStreamOutputType
     ) {
-        guard type == .screen,
-              sampleBuffer.isValid,
-              let attachments = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: false)
-                as? [[SCStreamFrameInfo: Any]],
-              let statusRaw = attachments.first?[.status] as? Int,
-              let status = SCFrameStatus(rawValue: statusRaw),
-              status == .complete
-        else { return }
+        autoreleasepool {
+            guard type == .screen,
+                  sampleBuffer.isValid,
+                  let attachments = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: false)
+                    as? [[SCStreamFrameInfo: Any]],
+                  let statusRaw = attachments.first?[.status] as? Int,
+                  let status = SCFrameStatus(rawValue: statusRaw),
+                  status == .complete
+            else { return }
 
-        guard let screenBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+            guard let screenBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
 
-        let presentationTime = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
+            let presentationTime = CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
 
-        var writerSnapshot: FrameWriter?
-        var cameraBuffer: CVPixelBuffer?
-        var cameraX: CGFloat = 0
-        var cameraY: CGFloat = 0
+            var writerSnapshot: FrameWriter?
+            var cameraBuffer: CVPixelBuffer?
+            var cameraX: CGFloat = 0
+            var cameraY: CGFloat = 0
 
-        withFrameLock {
-            guard !frameState.isCaptureStopped else { return }
-            guard var writer = frameState.frameWriter else { return }
-            guard !writer.hasWriteFailure else { return }
+            withFrameLock {
+                guard !frameState.isCaptureStopped else { return }
+                guard var writer = frameState.frameWriter else { return }
+                guard !writer.hasWriteFailure else { return }
 
-            cameraBuffer = frameState.latestCameraPixelBuffer
+                cameraBuffer = frameState.latestCameraPixelBuffer
 
-            if writer.startTime == nil {
-                writer.startTime = presentationTime
-                writer.assetWriter.startSession(atSourceTime: presentationTime)
-                frameState.frameWriter = writer
+                if writer.startTime == nil {
+                    writer.startTime = presentationTime
+                    writer.assetWriter.startSession(atSourceTime: presentationTime)
+                    frameState.frameWriter = writer
+                }
+
+                guard writer.videoInput.isReadyForMoreMediaData else { return }
+
+                cameraX = frameState.currentCameraX
+                cameraY = frameState.currentCameraY
+                writerSnapshot = writer
             }
 
-            guard writer.videoInput.isReadyForMoreMediaData else { return }
+            guard let snapshot = writerSnapshot else { return }
 
-            cameraX = frameState.currentCameraX
-            cameraY = frameState.currentCameraY
-            writerSnapshot = writer
-        }
+            var frameToWrite = screenBuffer
+            var usedCompositedBuffer = false
 
-        guard let snapshot = writerSnapshot else { return }
-
-        var frameToWrite = screenBuffer
-        var usedCompositedBuffer = false
-
-        if snapshot.recordCamera, let cameraBuffer {
-            if let composited = compositeFrame(
-                screenBuffer: screenBuffer,
-                cameraBuffer: cameraBuffer,
-                context: snapshot.ciContext,
-                bufferPool: snapshot.bufferPool,
-                xNormalized: cameraX,
-                yNormalized: cameraY,
-                sizeFraction: snapshot.cameraSize,
-                shape: snapshot.cameraShape
-            ) {
-                frameToWrite = composited
-                usedCompositedBuffer = true
-            } else {
-                logger.warning("Camera compositing failed, using screen-only frame")
+            if snapshot.recordCamera, let cameraBuffer {
+                if let composited = compositeFrame(
+                    screenBuffer: screenBuffer,
+                    cameraBuffer: cameraBuffer,
+                    context: snapshot.ciContext,
+                    bufferPool: snapshot.bufferPool,
+                    xNormalized: cameraX,
+                    yNormalized: cameraY,
+                    sizeFraction: snapshot.cameraSize,
+                    shape: snapshot.cameraShape
+                ) {
+                    frameToWrite = composited
+                    usedCompositedBuffer = true
+                } else {
+                    logger.warning("Camera compositing failed, using screen-only frame")
+                }
             }
-        }
 
-        withFrameLock {
-            guard !frameState.isCaptureStopped else { return }
-            guard var writer = frameState.frameWriter else { return }
-            guard !writer.hasWriteFailure else { return }
-            guard writer.videoInput.isReadyForMoreMediaData else { return }
+            withFrameLock {
+                guard !frameState.isCaptureStopped else { return }
+                guard var writer = frameState.frameWriter else { return }
+                guard !writer.hasWriteFailure else { return }
+                guard writer.videoInput.isReadyForMoreMediaData else { return }
 
-            if !writer.adaptor.append(frameToWrite, withPresentationTime: presentationTime) {
-                let context = usedCompositedBuffer
-                    ? "Failed to append composited video frame"
-                    : "Failed to append video frame"
-                handleAppendFailure(&writer, context: context)
-                frameState.frameWriter = writer
-                frameState.isCaptureStopped = true
-                return
+                if !writer.adaptor.append(frameToWrite, withPresentationTime: presentationTime) {
+                    let context = usedCompositedBuffer
+                        ? "Failed to append composited video frame"
+                        : "Failed to append video frame"
+                    handleAppendFailure(&writer, context: context)
+                    frameState.frameWriter = writer
+                    frameState.isCaptureStopped = true
+                    return
+                }
             }
         }
     }
@@ -1019,35 +1021,37 @@ extension ScreenRecorder: AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptur
         didOutput sampleBuffer: CMSampleBuffer,
         from connection: AVCaptureConnection
     ) {
-        guard sampleBuffer.isValid else { return }
+        autoreleasepool {
+            guard sampleBuffer.isValid else { return }
 
-        if output is AVCaptureVideoDataOutput {
-            guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
-            // Copy the pixel buffer to ensure it remains valid after callback returns
-            guard let copiedBuffer = copyPixelBuffer(pixelBuffer) else { return }
-            let stored = withFrameLock { () -> Bool in
-                guard !frameState.isCaptureStopped else { return false }
-                frameState.latestCameraPixelBuffer = copiedBuffer
-                return true
-            }
-            guard stored else { return }
-        } else if output is AVCaptureAudioDataOutput {
-            let writer = withFrameLock { () -> FrameWriter? in
-                guard !frameState.isCaptureStopped else { return nil }
-                return frameState.frameWriter
-            }
+            if output is AVCaptureVideoDataOutput {
+                guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
+                // Copy the pixel buffer to ensure it remains valid after callback returns
+                guard let copiedBuffer = copyPixelBuffer(pixelBuffer) else { return }
+                let stored = withFrameLock { () -> Bool in
+                    guard !frameState.isCaptureStopped else { return false }
+                    frameState.latestCameraPixelBuffer = copiedBuffer
+                    return true
+                }
+                guard stored else { return }
+            } else if output is AVCaptureAudioDataOutput {
+                let writer = withFrameLock { () -> FrameWriter? in
+                    guard !frameState.isCaptureStopped else { return nil }
+                    return frameState.frameWriter
+                }
 
-            guard var writer,
-                  writer.startTime != nil,
-                  let audio = writer.audioInput,
-                  audio.isReadyForMoreMediaData
-            else { return }
+                guard var writer,
+                      writer.startTime != nil,
+                      let audio = writer.audioInput,
+                      audio.isReadyForMoreMediaData
+                else { return }
 
-            if !audio.append(sampleBuffer) {
-                withFrameLock {
-                    handleAppendFailure(&writer, context: "Failed to append audio sample")
-                    frameState.frameWriter = writer
-                    frameState.isCaptureStopped = true
+                if !audio.append(sampleBuffer) {
+                    withFrameLock {
+                        handleAppendFailure(&writer, context: "Failed to append audio sample")
+                        frameState.frameWriter = writer
+                        frameState.isCaptureStopped = true
+                    }
                 }
             }
         }
