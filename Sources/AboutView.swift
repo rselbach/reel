@@ -15,7 +15,7 @@ struct AboutView: View {
     }
 
     private var commitURL: URL? {
-        let commit = gitCommit
+        let commit = gitCommit.trimmingCharacters(in: .whitespacesAndNewlines)
         guard commit != "dev", isValidCommitSHA(commit) else { return nil }
         
         var components = URLComponents()
