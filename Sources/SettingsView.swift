@@ -221,6 +221,7 @@ class HotkeyRecorderView: NSView {
         monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { [weak self] event in
             if event.keyCode == KeyCode.escape {
                 self?.onCancel?()
+                return nil
             } else if event.modifierFlags.contains(.command) ||
                       event.modifierFlags.contains(.control) ||
                       event.modifierFlags.contains(.option) ||
@@ -228,8 +229,9 @@ class HotkeyRecorderView: NSView {
                 // Mask to device-independent bits only for cross-API compatibility
                 let modifiers = UInt32(event.modifierFlags.rawValue) & AppSettings.HotkeyCombo.modifierMask
                 self?.onHotkeyRecorded?(event.keyCode, modifiers)
+                return nil
             }
-            return nil
+            return event
         }
     }
 
