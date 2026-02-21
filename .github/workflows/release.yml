@@ -128,7 +128,7 @@ jobs:
           VERSION=${GITHUB_REF#refs/tags/v}
           DATE=$(date -R)
           SAFE_VERSION=$(printf '%s' "$VERSION" | tr -cd 'A-Za-z0-9._-')
-          if [ -z "$SAFE_VERSION" ]; then
+          if [ -z "$SAFE_VERSION" ] || [ "$SAFE_VERSION" != "$VERSION" ]; then
             echo "Invalid release tag: $VERSION"
             exit 1
           fi
