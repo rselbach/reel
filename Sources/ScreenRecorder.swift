@@ -39,6 +39,28 @@ private enum RecordingError: LocalizedError {
     }
 }
 
+private struct FrameWriter {
+    let adaptor: AVAssetWriterInputPixelBufferAdaptor
+    let videoInput: AVAssetWriterInput
+    let audioInput: AVAssetWriterInput?
+    let assetWriter: AVAssetWriter
+    let ciContext: CIContext
+    let bufferPool: CVPixelBufferPool?
+    var startTime: CMTime?
+    let recordCamera: Bool
+    let cameraSize: CGFloat
+    let cameraShape: AppSettings.CameraOverlayShape
+    var hasWriteFailure = false
+}
+
+private final class FrameCaptureState {
+    var latestCameraPixelBuffer: CVPixelBuffer?
+    var frameWriter: FrameWriter?
+    var isCaptureStopped = false
+    var currentCameraX: CGFloat = 1.0
+    var currentCameraY: CGFloat = 0.0
+}
+
 @MainActor
 class ScreenRecorder: NSObject, ObservableObject {
     @Published private(set) var isRecording = false {
@@ -81,10 +103,8 @@ class ScreenRecorder: NSObject, ObservableObject {
     private let captureSessionQueue = DispatchQueue(label: "com.rselbach.reel.capture")
 
     // Thread-safe state for frame processing (accessed from ScreenCaptureKit callback queue)
+    private let frameState = FrameCaptureState()
     private let frameLock = NSLock()
-    private nonisolated(unsafe) var latestCameraPixelBuffer: CVPixelBuffer?
-    private nonisolated(unsafe) var frameWriter: FrameWriter?
-    private nonisolated(unsafe) var isCaptureStopped = false  // Signals callbacks to bail out
     private let circularMaskCache: NSCache<NSString, CIImage> = {
         let cache = NSCache<NSString, CIImage>()
         cache.countLimit = 4
@@ -98,23 +118,7 @@ class ScreenRecorder: NSObject, ObservableObject {
     }
     
     // Dynamic camera overlay position (normalized 0-1 coordinates, updated during drag)
-    private nonisolated(unsafe) var currentCameraX: CGFloat = 1.0  // 0=left, 1=right
-    private nonisolated(unsafe) var currentCameraY: CGFloat = 0.0  // 0=bottom, 1=top
-
-    // Encapsulates frame writing state for thread-safe access
-    private struct FrameWriter {
-        let adaptor: AVAssetWriterInputPixelBufferAdaptor
-        let videoInput: AVAssetWriterInput
-        let audioInput: AVAssetWriterInput?
-        let assetWriter: AVAssetWriter
-        let ciContext: CIContext
-        let bufferPool: CVPixelBufferPool?
-        var startTime: CMTime?
-        let recordCamera: Bool
-        let cameraSize: CGFloat
-        let cameraShape: AppSettings.CameraOverlayShape
-        var hasWriteFailure = false
-    }
+    
 
     private var settings: AppSettings { AppSettings.shared }
     
@@ -289,13 +293,13 @@ class ScreenRecorder: NSObject, ObservableObject {
     
     private nonisolated func signalCaptureStop() {
         withFrameLock {
-            isCaptureStopped = true
+            frameState.isCaptureStopped = true
         }
     }
     
     private nonisolated func resetCaptureStopSignal() {
         withFrameLock {
-            isCaptureStopped = false
+            frameState.isCaptureStopped = false
         }
     }
 
@@ -306,8 +310,8 @@ class ScreenRecorder: NSObject, ObservableObject {
     ///   - y: Normalized Y position (0.0 = bottom edge, 1.0 = top edge)
     func updateCameraOverlayPosition(x: CGFloat, y: CGFloat) {
         withFrameLock {
-            currentCameraX = min(max(x, 0), 1)
-            currentCameraY = min(max(y, 0), 1)
+            frameState.currentCameraX = min(max(x, 0), 1)
+            frameState.currentCameraY = min(max(y, 0), 1)
         }
     }
 
@@ -485,9 +489,9 @@ class ScreenRecorder: NSObject, ObservableObject {
     ) {
         let initialPos = settings.cameraPosition.normalizedCoordinates
         withFrameLock {
-            currentCameraX = initialPos.x
-            currentCameraY = initialPos.y
-            frameWriter = FrameWriter(
+            frameState.currentCameraX = initialPos.x
+            frameState.currentCameraY = initialPos.y
+            frameState.frameWriter = FrameWriter(
                 adaptor: adaptor,
                 videoInput: videoInput,
                 audioInput: audioInput,
@@ -663,8 +667,8 @@ class ScreenRecorder: NSObject, ObservableObject {
         cameraOutput = nil
         circularMaskCache.removeAllObjects()
         withFrameLock {
-            latestCameraPixelBuffer = nil
-            frameWriter = nil
+            frameState.latestCameraPixelBuffer = nil
+            frameState.frameWriter = nil
         }
     }
 
@@ -910,22 +914,22 @@ extension ScreenRecorder: SCStreamOutput {
         var cameraY: CGFloat = 0
 
         withFrameLock {
-            guard !isCaptureStopped else { return }
-            guard var writer = frameWriter else { return }
+            guard !frameState.isCaptureStopped else { return }
+            guard var writer = frameState.frameWriter else { return }
             guard !writer.hasWriteFailure else { return }
 
-            cameraBuffer = latestCameraPixelBuffer
+            cameraBuffer = frameState.latestCameraPixelBuffer
 
             if writer.startTime == nil {
                 writer.startTime = presentationTime
                 writer.assetWriter.startSession(atSourceTime: presentationTime)
-                frameWriter = writer
+                frameState.frameWriter = writer
             }
 
             guard writer.videoInput.isReadyForMoreMediaData else { return }
 
-            cameraX = currentCameraX
-            cameraY = currentCameraY
+            cameraX = frameState.currentCameraX
+            cameraY = frameState.currentCameraY
             writerSnapshot = writer
         }
 
@@ -953,8 +957,8 @@ extension ScreenRecorder: SCStreamOutput {
         }
 
         withFrameLock {
-            guard !isCaptureStopped else { return }
-            guard var writer = frameWriter else { return }
+            guard !frameState.isCaptureStopped else { return }
+            guard var writer = frameState.frameWriter else { return }
             guard !writer.hasWriteFailure else { return }
             guard writer.videoInput.isReadyForMoreMediaData else { return }
 
@@ -963,8 +967,8 @@ extension ScreenRecorder: SCStreamOutput {
                     ? "Failed to append composited video frame"
                     : "Failed to append video frame"
                 handleAppendFailure(&writer, context: context)
-                frameWriter = writer
-                isCaptureStopped = true
+                frameState.frameWriter = writer
+                frameState.isCaptureStopped = true
                 return
             }
         }
@@ -984,15 +988,15 @@ extension ScreenRecorder: AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptur
             // Copy the pixel buffer to ensure it remains valid after callback returns
             guard let copiedBuffer = copyPixelBuffer(pixelBuffer) else { return }
             let stored = withFrameLock { () -> Bool in
-                guard !isCaptureStopped else { return false }
-                latestCameraPixelBuffer = copiedBuffer
+                guard !frameState.isCaptureStopped else { return false }
+                frameState.latestCameraPixelBuffer = copiedBuffer
                 return true
             }
             guard stored else { return }
         } else if output is AVCaptureAudioDataOutput {
             let writer = withFrameLock { () -> FrameWriter? in
-                guard !isCaptureStopped else { return nil }
-                return frameWriter
+                guard !frameState.isCaptureStopped else { return nil }
+                return frameState.frameWriter
             }
 
             guard var writer,
@@ -1004,8 +1008,8 @@ extension ScreenRecorder: AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptur
             if !audio.append(sampleBuffer) {
                 withFrameLock {
                     handleAppendFailure(&writer, context: "Failed to append audio sample")
-                    frameWriter = writer
-                    isCaptureStopped = true
+                    frameState.frameWriter = writer
+                    frameState.isCaptureStopped = true
                 }
             }
         }
