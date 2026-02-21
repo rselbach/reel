@@ -22,7 +22,7 @@ PY
 )
 
 mkdir -p "$(dirname "$OUTPUT_FILE")"
-if [[ ! -f "$OUTPUT_FILE" ]] && [[ -e "$OUTPUT_FILE" ]]; then
+if [[ -e "$OUTPUT_FILE" && ! -f "$OUTPUT_FILE" ]]; then
     echo "Output path is not writable: $OUTPUT_FILE"
     exit 1
 fi
