@@ -32,6 +32,10 @@ class HotkeyManager {
     func start() {
         guard eventTap == nil else { return }
 
+        hotkeyLock.lock()
+        cachedHotkeyDisabledHandler = onHotkeyDisabled
+        hotkeyLock.unlock()
+
         // Initialize cached hotkey from current settings
         let hotkey = AppSettings.shared.recordingHotkey
         updateCachedHotkey(hotkey)
@@ -57,6 +61,7 @@ class HotkeyManager {
 
         guard let eventTap else {
             logger.error("Failed to create event tap. Check accessibility permissions.")
+            reportHotkeyError("Failed to enable global hotkey. Accessibility permissions may be required.")
             return
         }
 
@@ -66,7 +71,6 @@ class HotkeyManager {
 
         hotkeyLock.lock()
         cachedEventTap = eventTap
-        cachedHotkeyDisabledHandler = onHotkeyDisabled
         hotkeyLock.unlock()
     }
 
@@ -104,9 +108,7 @@ class HotkeyManager {
                 CGEvent.tapEnable(tap: tap, enable: true)
             } else {
                 logger.error("Cannot re-enable event tap: tap is nil")
-                Task { @MainActor in
-                    onHotkeyDisabled?("Hotkey stopped working and could not be restored. Please restart the app.")
-                }
+                reportHotkeyError("Hotkey stopped working and could not be restored. Please restart the app.")
             }
             return Unmanaged.passUnretained(event)
         case .keyDown:
@@ -133,6 +135,16 @@ class HotkeyManager {
         }
 
         return Unmanaged.passUnretained(event)
+    }
+
+    private func reportHotkeyError(_ message: String) {
+        hotkeyLock.lock()
+        let handler = cachedHotkeyDisabledHandler
+        hotkeyLock.unlock()
+
+        Task { @MainActor in
+            handler?(message)
+        }
     }
 
     func hasAccessibilityPermission() -> Bool {

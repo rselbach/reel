@@ -26,6 +26,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if let observer = hotkeyObserver {
             NotificationCenter.default.removeObserver(observer)
         }
+        HotkeyManager.shared.stop()
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
