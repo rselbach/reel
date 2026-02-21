@@ -98,7 +98,11 @@ jobs:
         run: |
           SIGN_UPDATE=".build/artifacts/sparkle/Sparkle/bin/sign_update"
           SIGNATURE=$("$SIGN_UPDATE" .build/Reel.dmg --ed-key-file <(echo "$SPARKLE_PRIVATE_KEY"))
-          echo "SPARKLE_SIGNATURE=$SIGNATURE" >> $GITHUB_ENV
+          {
+            echo "SPARKLE_SIGNATURE<<EOF"
+            printf '%s\n' "$SIGNATURE"
+            echo EOF
+          } >> "$GITHUB_ENV"
           echo "Sparkle signature generated"
       
       - name: Generate appcast.xml
