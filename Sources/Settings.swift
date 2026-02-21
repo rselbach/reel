@@ -76,6 +76,25 @@ class AppSettings: ObservableObject {
 
     private var isSyncingLaunchAtLogin = false
 
+    private enum DefaultsKey {
+        static let launchAtLogin = "launchAtLogin"
+        static let showCursor = "showCursor"
+        static let frameRate = "frameRate"
+        static let videoQuality = "videoQuality"
+        static let outputDirectory = "outputDirectory"
+        static let askWhereToSave = "askWhereToSave"
+        static let openFinderAfterRecording = "openFinderAfterRecording"
+        static let showPreviewAfterRecording = "showPreviewAfterRecording"
+        static let recordingHotkey = "recordingHotkey"
+        static let recordAudio = "recordAudio"
+        static let audioDeviceID = "audioDeviceID"
+        static let recordCamera = "recordCamera"
+        static let cameraDeviceID = "cameraDeviceID"
+        static let cameraPosition = "cameraPosition"
+        static let cameraSize = "cameraSize"
+        static let cameraShape = "cameraShape"
+    }
+
     private func persist(_ value: Any?, key: String) {
         if let value {
             UserDefaults.standard.set(value, forKey: key)
@@ -86,7 +105,7 @@ class AppSettings: ObservableObject {
 
     @Published var launchAtLogin: Bool {
         didSet {
-            persist(launchAtLogin, key: "launchAtLogin")
+            persist(launchAtLogin, key: DefaultsKey.launchAtLogin)
             if !isSyncingLaunchAtLogin {
                 updateLaunchAtLogin()
             }
@@ -96,7 +115,7 @@ class AppSettings: ObservableObject {
     @Published var launchAtLoginError: String?
 
     @Published var showCursor: Bool {
-        didSet { persist(showCursor, key: "showCursor") }
+        didSet { persist(showCursor, key: DefaultsKey.showCursor) }
     }
 
     @Published var frameRate: Int {
@@ -106,30 +125,30 @@ class AppSettings: ObservableObject {
                 frameRate = sanitized
                 return
             }
-            persist(frameRate, key: "frameRate")
+            persist(frameRate, key: DefaultsKey.frameRate)
         }
     }
 
     @Published var videoQuality: VideoQuality {
-        didSet { persist(videoQuality.rawValue, key: "videoQuality") }
+        didSet { persist(videoQuality.rawValue, key: DefaultsKey.videoQuality) }
     }
 
     @Published var outputDirectory: URL {
         didSet {
-            persist(outputDirectory.path(), key: "outputDirectory")
+            persist(outputDirectory.path(), key: DefaultsKey.outputDirectory)
         }
     }
 
     @Published var askWhereToSave: Bool {
-        didSet { persist(askWhereToSave, key: "askWhereToSave") }
+        didSet { persist(askWhereToSave, key: DefaultsKey.askWhereToSave) }
     }
 
     @Published var openFinderAfterRecording: Bool {
-        didSet { persist(openFinderAfterRecording, key: "openFinderAfterRecording") }
+        didSet { persist(openFinderAfterRecording, key: DefaultsKey.openFinderAfterRecording) }
     }
 
     @Published var showPreviewAfterRecording: Bool {
-        didSet { persist(showPreviewAfterRecording, key: "showPreviewAfterRecording") }
+        didSet { persist(showPreviewAfterRecording, key: DefaultsKey.showPreviewAfterRecording) }
     }
 
     static let hotkeyChangedNotification = Notification.Name("AppSettingsHotkeyChanged")
@@ -137,7 +156,7 @@ class AppSettings: ObservableObject {
     @Published var recordingHotkey: HotkeyCombo {
         didSet {
             if let data = try? JSONEncoder().encode(recordingHotkey) {
-                UserDefaults.standard.set(data, forKey: "recordingHotkey")
+                UserDefaults.standard.set(data, forKey: DefaultsKey.recordingHotkey)
             }
             HotkeyManager.shared.updateCachedHotkey(recordingHotkey)
             NotificationCenter.default.post(name: Self.hotkeyChangedNotification, object: nil)
@@ -145,31 +164,31 @@ class AppSettings: ObservableObject {
     }
 
     @Published var recordAudio: Bool {
-        didSet { persist(recordAudio, key: "recordAudio") }
+        didSet { persist(recordAudio, key: DefaultsKey.recordAudio) }
     }
 
     @Published var audioDeviceID: String? {
-        didSet { persist(audioDeviceID, key: "audioDeviceID") }
+        didSet { persist(audioDeviceID, key: DefaultsKey.audioDeviceID) }
     }
 
     @Published var recordCamera: Bool {
-        didSet { persist(recordCamera, key: "recordCamera") }
+        didSet { persist(recordCamera, key: DefaultsKey.recordCamera) }
     }
 
     @Published var cameraDeviceID: String? {
-        didSet { persist(cameraDeviceID, key: "cameraDeviceID") }
+        didSet { persist(cameraDeviceID, key: DefaultsKey.cameraDeviceID) }
     }
 
     @Published var cameraPosition: CameraOverlayPosition {
-        didSet { persist(cameraPosition.rawValue, key: "cameraPosition") }
+        didSet { persist(cameraPosition.rawValue, key: DefaultsKey.cameraPosition) }
     }
 
     @Published var cameraSize: CameraOverlaySize {
-        didSet { persist(cameraSize.rawValue, key: "cameraSize") }
+        didSet { persist(cameraSize.rawValue, key: DefaultsKey.cameraSize) }
     }
 
     @Published var cameraShape: CameraOverlayShape {
-        didSet { persist(cameraShape.rawValue, key: "cameraShape") }
+        didSet { persist(cameraShape.rawValue, key: DefaultsKey.cameraShape) }
     }
 
     enum CameraOverlayPosition: String, CaseIterable {
@@ -326,7 +345,7 @@ class AppSettings: ObservableObject {
     }
 
     private static func loadRecordingHotkey(from defaults: UserDefaults) -> HotkeyCombo {
-        if let data = defaults.data(forKey: "recordingHotkey"),
+        if let data = defaults.data(forKey: DefaultsKey.recordingHotkey),
            let combo = try? JSONDecoder().decode(HotkeyCombo.self, from: data) {
             // Migrate old broken default modifier value (0x180500) to new correct value (0x120000)
             // Old value masked to 0x100000 (Cmd only), new value masks to 0x120000 (Cmd+Shift)
@@ -343,14 +362,14 @@ class AppSettings: ObservableObject {
     private init() {
         let defaults = UserDefaults.standard
 
-        self.launchAtLogin = defaults.bool(forKey: "launchAtLogin")
-        self.showCursor = defaults.object(forKey: "showCursor") as? Bool ?? true
-        self.frameRate = Self.sanitizedFrameRate(defaults.object(forKey: "frameRate") as? Int ?? 60)
-        self.videoQuality = VideoQuality(rawValue: defaults.string(forKey: "videoQuality") ?? "") ?? .medium
-        self.openFinderAfterRecording = defaults.object(forKey: "openFinderAfterRecording") as? Bool ?? true
-        self.showPreviewAfterRecording = defaults.object(forKey: "showPreviewAfterRecording") as? Bool ?? true
+        self.launchAtLogin = defaults.bool(forKey: DefaultsKey.launchAtLogin)
+        self.showCursor = defaults.object(forKey: DefaultsKey.showCursor) as? Bool ?? true
+        self.frameRate = Self.sanitizedFrameRate(defaults.object(forKey: DefaultsKey.frameRate) as? Int ?? 60)
+        self.videoQuality = VideoQuality(rawValue: defaults.string(forKey: DefaultsKey.videoQuality) ?? "") ?? .medium
+        self.openFinderAfterRecording = defaults.object(forKey: DefaultsKey.openFinderAfterRecording) as? Bool ?? true
+        self.showPreviewAfterRecording = defaults.object(forKey: DefaultsKey.showPreviewAfterRecording) as? Bool ?? true
 
-        if let path = defaults.string(forKey: "outputDirectory") {
+        if let path = defaults.string(forKey: DefaultsKey.outputDirectory) {
             let candidate = URL(fileURLWithPath: path, isDirectory: true)
             if let values = try? candidate.resourceValues(forKeys: [.isDirectoryKey]),
                values.isDirectory == true {
@@ -366,18 +385,18 @@ class AppSettings: ObservableObject {
                 ?? URL(fileURLWithPath: NSHomeDirectory())
         }
 
-        self.askWhereToSave = defaults.bool(forKey: "askWhereToSave")
+        self.askWhereToSave = defaults.bool(forKey: DefaultsKey.askWhereToSave)
 
         self.recordingHotkey = Self.loadRecordingHotkey(from: defaults)
 
-        self.recordAudio = defaults.bool(forKey: "recordAudio")
-        self.audioDeviceID = defaults.string(forKey: "audioDeviceID")
+        self.recordAudio = defaults.bool(forKey: DefaultsKey.recordAudio)
+        self.audioDeviceID = defaults.string(forKey: DefaultsKey.audioDeviceID)
 
-        self.recordCamera = defaults.bool(forKey: "recordCamera")
-        self.cameraDeviceID = defaults.string(forKey: "cameraDeviceID")
-        self.cameraPosition = CameraOverlayPosition(rawValue: defaults.string(forKey: "cameraPosition") ?? "") ?? .bottomRight
-        self.cameraSize = CameraOverlaySize(rawValue: defaults.string(forKey: "cameraSize") ?? "") ?? .medium
-        self.cameraShape = CameraOverlayShape(rawValue: defaults.string(forKey: "cameraShape") ?? "") ?? .circle
+        self.recordCamera = defaults.bool(forKey: DefaultsKey.recordCamera)
+        self.cameraDeviceID = defaults.string(forKey: DefaultsKey.cameraDeviceID)
+        self.cameraPosition = CameraOverlayPosition(rawValue: defaults.string(forKey: DefaultsKey.cameraPosition) ?? "") ?? .bottomRight
+        self.cameraSize = CameraOverlaySize(rawValue: defaults.string(forKey: DefaultsKey.cameraSize) ?? "") ?? .medium
+        self.cameraShape = CameraOverlayShape(rawValue: defaults.string(forKey: DefaultsKey.cameraShape) ?? "") ?? .circle
     }
 
     private func updateLaunchAtLogin() {
