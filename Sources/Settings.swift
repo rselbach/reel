@@ -178,8 +178,11 @@ class AppSettings: ObservableObject {
 
     @Published var recordingHotkey: HotkeyCombo {
         didSet {
-            if let data = try? JSONEncoder().encode(recordingHotkey) {
+            do {
+                let data = try JSONEncoder().encode(recordingHotkey)
                 UserDefaults.standard.set(data, forKey: DefaultsKey.recordingHotkey)
+            } catch {
+                logger.warning("Failed to persist recording hotkey: \(error.localizedDescription)")
             }
             HotkeyManager.shared.updateCachedHotkey(recordingHotkey)
             NotificationCenter.default.post(name: Self.hotkeyChangedNotification, object: nil)
