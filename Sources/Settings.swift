@@ -103,7 +103,7 @@ class AppSettings: ObservableObject {
         }
     }
 
-    private static func defaultOutputDirectory() -> URL {
+    static func defaultOutputDirectory() -> URL {
         FileManager.default.urls(for: .moviesDirectory, in: .userDomainMask).first
             ?? URL(fileURLWithPath: NSHomeDirectory())
     }

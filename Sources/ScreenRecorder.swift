@@ -357,8 +357,7 @@ class ScreenRecorder: NSObject, ObservableObject {
             return try makeOutputURL(in: outputDir)
         } catch {
             logger.warning("Configured output directory unavailable (\(outputDir.path()), using fallback: \(error.localizedDescription))")
-            let fallback = FileManager.default.urls(for: .moviesDirectory, in: .userDomainMask).first
-                ?? URL(fileURLWithPath: NSHomeDirectory())
+            let fallback = AppSettings.defaultOutputDirectory()
             persistSettingOutputDirectory(fallback)
             return try makeOutputURL(in: fallback)
         }
