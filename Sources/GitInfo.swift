@@ -14,8 +14,8 @@ struct GitInfo {
     }
 
     static func normalizedCommit(_ commit: String) -> String? {
-        let trimmed = commit.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard trimmed.lowercased() != "dev" else { return nil }
+        let trimmed = commit.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard trimmed != "dev" else { return nil }
         guard isValidCommitSHA(trimmed) else { return nil }
         return trimmed
     }
