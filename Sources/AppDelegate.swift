@@ -163,6 +163,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             errorItem.isEnabled = false
             menu.addItem(errorItem)
         }
+        if let launchError = AppSettings.shared.launchAtLoginError {
+            menu.addItem(NSMenuItem.separator())
+            let launchErrorItem = NSMenuItem(title: launchError, action: nil, keyEquivalent: "")
+            launchErrorItem.isEnabled = false
+            menu.addItem(launchErrorItem)
+        }
     }
 
     private func addStandardItems(to menu: NSMenu) {

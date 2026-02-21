@@ -93,6 +93,8 @@ class AppSettings: ObservableObject {
         }
     }
 
+    @Published var launchAtLoginError: String?
+
     @Published var showCursor: Bool {
         didSet { persist(showCursor, key: "showCursor") }
     }
@@ -379,6 +381,7 @@ class AppSettings: ObservableObject {
     }
 
     private func updateLaunchAtLogin() {
+        launchAtLoginError = nil
         do {
             if launchAtLogin {
                 try SMAppService.mainApp.register()
@@ -387,10 +390,15 @@ class AppSettings: ObservableObject {
             }
         } catch {
             logger.error("Failed to update launch at login: \(error)")
+            launchAtLoginError = "Failed to update launch at login"
+            isSyncingLaunchAtLogin = true
+            launchAtLogin = false
+            isSyncingLaunchAtLogin = false
         }
     }
 
     func checkLaunchAtLoginStatus() {
+        launchAtLoginError = nil
         let isEnabled = SMAppService.mainApp.status == .enabled
         // Only update if different, and skip the registration call since we're just syncing state
         if launchAtLogin != isEnabled {
