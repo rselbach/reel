@@ -218,9 +218,22 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func openSettings() {
         guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") else {
             logger.error("Failed to create System Settings URL for screen capture privacy settings")
+            showErrorAlert(title: "Unable to open settings", message: "Failed to open system privacy settings.")
             return
         }
-        NSWorkspace.shared.open(url)
+        let opened = NSWorkspace.shared.open(url)
+        if !opened {
+            showErrorAlert(title: "Unable to open settings", message: "Could not open System Preferences.")
+        }
+    }
+
+    private func showErrorAlert(title: String, message: String) {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = message
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "OK")
+        alert.runModal()
     }
 
     @objc private func checkPermission() {
