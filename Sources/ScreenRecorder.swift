@@ -632,6 +632,7 @@ class ScreenRecorder: NSObject, ObservableObject {
         audioOutput = nil
         cameraCaptureSession = nil
         cameraOutput = nil
+        circularMaskCache.removeAllObjects()
         withFrameLock {
             latestCameraPixelBuffer = nil
             frameWriter = nil
