@@ -13,8 +13,20 @@ fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SAFE_VERSION="$("$SCRIPT_DIR/validate-release-tag.sh" "$VERSION")"
+SAFE_SIGNATURE=$(printf '%s' "$SPARKLE_SIGNATURE" | /usr/bin/python3 - <<'PY'
+import html
+import sys
+
+print(html.escape(sys.stdin.read(), quote=True), end="")
+PY
+)
 
 mkdir -p "$(dirname "$OUTPUT_FILE")"
+if [[ ! -f "$OUTPUT_FILE" ]] && [[ -e "$OUTPUT_FILE" ]]; then
+    echo "Output path is not writable: $OUTPUT_FILE"
+    exit 1
+fi
+
 DATE=$(date -R)
 
 cat > "$OUTPUT_FILE" <<XML
@@ -30,7 +42,7 @@ cat > "$OUTPUT_FILE" <<XML
       <pubDate>${DATE}</pubDate>
       <sparkle:version>${SAFE_VERSION}</sparkle:version>
       <sparkle:shortVersionString>${SAFE_VERSION}</sparkle:shortVersionString>
-      <enclosure url="https://github.com/rselbach/reel/releases/download/v${VERSION}/Reel.dmg" ${SPARKLE_SIGNATURE} type="application/octet-stream"/>
+      <enclosure url="https://github.com/rselbach/reel/releases/download/v${SAFE_VERSION}/Reel.dmg" ${SAFE_SIGNATURE} type="application/octet-stream"/>
     </item>
   </channel>
 </rss>

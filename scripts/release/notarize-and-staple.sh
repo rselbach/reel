@@ -11,6 +11,16 @@ if [[ -z "$APP_PATH" || -z "$ZIP_PATH" ]]; then
     exit 1
 fi
 
+if [[ ! -e "$APP_PATH" ]]; then
+    echo "App path not found: $APP_PATH"
+    exit 1
+fi
+
+if [[ ! -f "$ZIP_PATH" ]]; then
+    echo "Zip path not found: $ZIP_PATH"
+    exit 1
+fi
+
 SUBMIT_OUTPUT=$(xcrun notarytool submit "$ZIP_PATH" \
     --keychain-profile "$PROFILE" \
     --wait \

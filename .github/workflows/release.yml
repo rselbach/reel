@@ -102,8 +102,6 @@ jobs:
           echo "Sparkle signature generated"
       
       - name: Generate appcast.xml
-        env:
-          SPARKLE_SIG: ${{ env.SPARKLE_SIGNATURE }}
         run: |
           VERSION=${GITHUB_REF#refs/tags/v}
           ./scripts/release/generate-appcast.sh "$VERSION" "$SPARKLE_SIGNATURE"

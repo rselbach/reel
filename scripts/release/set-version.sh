@@ -10,6 +10,11 @@ if [[ -z "${VERSION}" ]]; then
     exit 1
 fi
 
+if [[ ! -f "$INFO_PLIST" ]]; then
+    echo "Info.plist not found: $INFO_PLIST"
+    exit 1
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SAFE_VERSION="$("$SCRIPT_DIR/validate-release-tag.sh" "$VERSION")"
 
