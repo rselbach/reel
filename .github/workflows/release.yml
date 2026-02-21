@@ -59,8 +59,7 @@ jobs:
       - name: Set version from tag
         run: |
           VERSION=${GITHUB_REF#refs/tags/v}
-          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" Sources/Info.plist
-          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion $VERSION" Sources/Info.plist
+          ./scripts/release/set-version.sh "$VERSION" Sources/Info.plist
       
       - name: Build and sign
         env:
@@ -72,6 +71,7 @@ jobs:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+          NOTARIZE_PROFILE: NOTARIZE_PROFILE
         run: |
           set -euo pipefail
 
@@ -85,27 +85,7 @@ jobs:
           ditto -c -k --keepParent .build/Reel.app .build/Reel.zip
           
           # Submit and wait, capture submission ID
-          SUBMIT_OUTPUT=$(xcrun notarytool submit .build/Reel.zip \
-            --keychain-profile "NOTARIZE_PROFILE" \
-            --wait 2>&1) || true
-          echo "$SUBMIT_OUTPUT"
-          
-          # Extract submission ID and validate notarization status
-          SUBMISSION_ID=$(echo "$SUBMIT_OUTPUT" | awk -F'[: ]+' '/^ *id:/ {print $3; exit}')
-          if [[ -z "$SUBMISSION_ID" ]]; then
-            echo "Failed to parse notarytool submission ID."
-            echo "$SUBMIT_OUTPUT"
-            exit 1
-          fi
-
-          if ! echo "$SUBMIT_OUTPUT" | grep -q "status: Accepted"; then
-            echo "Notarization failed. Fetching log..."
-            xcrun notarytool log "$SUBMISSION_ID" --keychain-profile "NOTARIZE_PROFILE"
-            exit 1
-          fi
-          
-          # Staple
-          xcrun stapler staple .build/Reel.app
+          ./scripts/release/notarize-and-staple.sh .build/Reel.app .build/Reel.zip
       
       - name: Create DMG
         env:
@@ -126,30 +106,7 @@ jobs:
           SPARKLE_SIG: ${{ env.SPARKLE_SIGNATURE }}
         run: |
           VERSION=${GITHUB_REF#refs/tags/v}
-          DATE=$(date -R)
-          SAFE_VERSION=$(printf '%s' "$VERSION" | tr -cd 'A-Za-z0-9._-')
-          if [ -z "$SAFE_VERSION" ] || [ "$SAFE_VERSION" != "$VERSION" ]; then
-            echo "Invalid release tag: $VERSION"
-            exit 1
-          fi
-          
-          mkdir -p _site
-          printf '%s\n' '<?xml version="1.0" encoding="utf-8"?>' > _site/appcast.xml
-          printf '%s\n' '<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" xmlns:dc="http://purl.org/dc/elements/1.1/">' >> _site/appcast.xml
-          printf '%s\n' '  <channel>' >> _site/appcast.xml
-          printf '%s\n' '    <title>Reel Updates</title>' >> _site/appcast.xml
-          printf '%s\n' '    <link>https://rselbach.github.io/reel/appcast.xml</link>' >> _site/appcast.xml
-          printf '%s\n' '    <description>Reel app updates</description>' >> _site/appcast.xml
-          printf '%s\n' '    <language>en</language>' >> _site/appcast.xml
-          printf '%s\n' '    <item>' >> _site/appcast.xml
-          printf '%s\n' "      <title>Version ${SAFE_VERSION}</title>" >> _site/appcast.xml
-          printf '%s\n' "      <pubDate>${DATE}</pubDate>" >> _site/appcast.xml
-          printf '%s\n' "      <sparkle:version>${SAFE_VERSION}</sparkle:version>" >> _site/appcast.xml
-          printf '%s\n' "      <sparkle:shortVersionString>${SAFE_VERSION}</sparkle:shortVersionString>" >> _site/appcast.xml
-          printf '%s\n' "      <enclosure url=\"https://github.com/rselbach/reel/releases/download/v${VERSION}/Reel.dmg\" ${SPARKLE_SIGNATURE} type=\"application/octet-stream\"/>" >> _site/appcast.xml
-          printf '%s\n' '    </item>' >> _site/appcast.xml
-          printf '%s\n' '  </channel>' >> _site/appcast.xml
-          printf '%s\n' '</rss>' >> _site/appcast.xml
+          ./scripts/release/generate-appcast.sh "$VERSION" "$SPARKLE_SIGNATURE"
       
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
