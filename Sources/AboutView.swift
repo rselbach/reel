@@ -15,7 +15,7 @@ struct AboutView: View {
     }
 
     private var gitCommit: String {
-        commitSHA
+        GitInfo.normalizedCommit(commitSHA) ?? commitSHA
     }
 
     private var commitURL: URL? {
