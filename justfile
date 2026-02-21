@@ -68,16 +68,14 @@ sign: build-app
 notarize: sign
     #!/usr/bin/env bash
     set -e
+    if [[ -z "${NOTARIZE_PROFILE:-}" ]]; then
+        echo "Error: NOTARIZE_PROFILE is not set"
+        exit 1
+    fi
     zip_path=".build/{{ app_name }}.zip"
-    profile="${NOTARIZE_PROFILE:-NOTARIZE_PROFILE}"
     echo "Creating zip for notarization..."
     ditto -c -k --keepParent "{{ app_dir }}" "$zip_path"
-    echo "Submitting for notarization..."
-    xcrun notarytool submit "$zip_path" \
-        --keychain-profile "$profile" \
-        --wait
-    echo "Stapling notarization ticket..."
-    xcrun stapler staple "{{ app_dir }}"
+    ./scripts/release/notarize-and-staple.sh "{{ app_dir }}" "$zip_path"
     rm "$zip_path"
     echo "Notarization complete!"
 
