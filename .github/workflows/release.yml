@@ -30,6 +30,10 @@ jobs:
           CERTIFICATE_P12: ${{ secrets.CERTIFICATE_P12 }}
           CERTIFICATE_PASSWORD: ${{ secrets.CERTIFICATE_PASSWORD }}
         run: |
+          set -euo pipefail
+          CERTIFICATE_P12_PATH="$RUNNER_TEMP/certificate.p12"
+          trap 'shred -u "$CERTIFICATE_P12_PATH" 2>/dev/null || rm -f "$CERTIFICATE_P12_PATH"' EXIT
+
           # Create temporary keychain
           KEYCHAIN_PATH=$RUNNER_TEMP/signing.keychain-db
           KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
@@ -39,8 +43,9 @@ jobs:
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
           
           # Import certificate
-          echo "$CERTIFICATE_P12" | base64 --decode > $RUNNER_TEMP/certificate.p12
-          security import $RUNNER_TEMP/certificate.p12 \
+          echo "$CERTIFICATE_P12" | base64 --decode > "$CERTIFICATE_P12_PATH"
+          chmod 600 "$CERTIFICATE_P12_PATH"
+          security import "$CERTIFICATE_P12_PATH" \
             -P "$CERTIFICATE_PASSWORD" \
             -A \
             -t cert \
@@ -68,6 +73,8 @@ jobs:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
         run: |
+          set -euo pipefail
+
           # Store credentials for notarytool
           xcrun notarytool store-credentials "NOTARIZE_PROFILE" \
             --apple-id "$APPLE_ID" \
@@ -83,9 +90,15 @@ jobs:
             --wait 2>&1) || true
           echo "$SUBMIT_OUTPUT"
           
-          # Extract submission ID and check status
-          SUBMISSION_ID=$(echo "$SUBMIT_OUTPUT" | grep "id:" | head -1 | awk '{print $2}')
-          if echo "$SUBMIT_OUTPUT" | grep -q "status: Invalid"; then
+          # Extract submission ID and validate notarization status
+          SUBMISSION_ID=$(echo "$SUBMIT_OUTPUT" | awk -F'[: ]+' '/^ *id:/ {print $3; exit}')
+          if [[ -z "$SUBMISSION_ID" ]]; then
+            echo "Failed to parse notarytool submission ID."
+            echo "$SUBMIT_OUTPUT"
+            exit 1
+          fi
+
+          if ! echo "$SUBMIT_OUTPUT" | grep -q "status: Accepted"; then
             echo "Notarization failed. Fetching log..."
             xcrun notarytool log "$SUBMISSION_ID" --keychain-profile "NOTARIZE_PROFILE"
             exit 1
