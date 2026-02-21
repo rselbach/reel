@@ -37,4 +37,18 @@ import XCTest
         XCTAssertEqual(AppSettings.sanitizedFrameRate(60), 60)
         XCTAssertEqual(AppSettings.sanitizedFrameRate(45), 30)
     }
+
+    func testGitInfoURLValidation() {
+        XCTAssertNotNil(GitInfo.commitURL(for: "abc1234"))
+        XCTAssertNil(GitInfo.commitURL(for: "dev"))
+        XCTAssertNil(GitInfo.commitURL(for: ""))
+        XCTAssertNil(GitInfo.commitURL(for: "zzzzzzzz"))
+        XCTAssertNil(GitInfo.commitURL(for: "   deadbeef   \n"))
+    }
+
+    func testGitInfoNormalizesWhitespaceBeforeValidation() {
+        let url = GitInfo.commitURL(for: "   deadbeef   ")
+        XCTAssertNotNil(url)
+        XCTAssertEqual(url?.absoluteString, "https://github.com/rselbach/reel/commit/deadbeef")
+    }
 }

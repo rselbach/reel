@@ -10,24 +10,16 @@ struct AboutView: View {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "Unknown"
     }
 
-    private var gitCommit: String {
+    private var commitSHA: String {
         Bundle.main.object(forInfoDictionaryKey: "GitCommit") as? String ?? "dev"
     }
 
-    private var commitURL: URL? {
-        let commit = gitCommit.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard commit != "dev", isValidCommitSHA(commit) else { return nil }
-        
-        var components = URLComponents()
-        components.scheme = "https"
-        components.host = "github.com"
-        components.path = "/rselbach/reel/commit/\(commit)"
-        return components.url
+    private var gitCommit: String {
+        commitSHA
     }
 
-    private func isValidCommitSHA(_ commit: String) -> Bool {
-        guard (7...40).contains(commit.count) else { return false }
-        return commit.unicodeScalars.allSatisfy { CharacterSet.hexadecimalDigits.contains($0) }
+    private var commitURL: URL? {
+        GitInfo.commitURL(for: commitSHA)
     }
 
     var body: some View {
