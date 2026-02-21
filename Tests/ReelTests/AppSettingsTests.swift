@@ -1,7 +1,7 @@
 import XCTest
 @testable import Reel
 
-    final class AppSettingsTests: XCTestCase {
+final class AppSettingsTests: XCTestCase {
     @MainActor
     func testCameraOverlayPositionNormalizedCoordinates() {
         XCTAssertEqual(AppSettings.CameraOverlayPosition.bottomLeft.normalizedCoordinates.x, 0.0)
@@ -43,7 +43,7 @@ import XCTest
         XCTAssertNil(GitInfo.commitURL(for: "dev"))
         XCTAssertNil(GitInfo.commitURL(for: ""))
         XCTAssertNil(GitInfo.commitURL(for: "zzzzzzzz"))
-        XCTAssertNil(GitInfo.commitURL(for: "   deadbeef   \n"))
+        XCTAssertNil(GitInfo.commitURL(for: "   dev   \n"))
     }
 
     func testGitInfoNormalizesWhitespaceBeforeValidation() {
