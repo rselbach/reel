@@ -149,6 +149,8 @@ class ScreenRecorder: NSObject, ObservableObject {
                 errorMessage = nil
             }
         } catch {
+            availableDisplays = []
+            availableWindows = []
             if updatePermissionState {
                 hasPermission = false
             }
