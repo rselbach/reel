@@ -28,6 +28,7 @@ struct SettingsView: View {
 
 struct GeneralTab: View {
     @ObservedObject var settings: AppSettings
+    @State private var outputDirectoryError: String?
 
     var body: some View {
         Form {
@@ -51,10 +52,22 @@ struct GeneralTab: View {
                         selectOutputDirectory()
                     }
                 }
+                if let outputDirectoryError {
+                    Text(outputDirectoryError)
+                        .font(.caption)
+                        .foregroundColor(.red)
+                        .lineLimit(2)
+                }
             }
 
             Toggle("Open Finder after recording", isOn: $settings.openFinderAfterRecording)
             Toggle("Show preview after recording", isOn: $settings.showPreviewAfterRecording)
+            if let launchError = settings.launchAtLoginError {
+                Text(launchError)
+                    .font(.caption)
+                    .foregroundColor(.orange)
+                    .lineLimit(2)
+            }
         }
         .padding()
     }
@@ -68,8 +81,23 @@ struct GeneralTab: View {
         panel.directoryURL = settings.outputDirectory
 
         if panel.runModal() == .OK, let url = panel.url {
+            guard isValidWritableDirectory(url) else {
+                outputDirectoryError = "Cannot write to selected folder. Pick another location."
+                return
+            }
+            outputDirectoryError = nil
             settings.outputDirectory = url
         }
+    }
+
+    private func isValidWritableDirectory(_ url: URL) -> Bool {
+        guard
+            let values = try? url.resourceValues(forKeys: [.isDirectoryKey]),
+            values.isDirectory == true
+        else {
+            return false
+        }
+        return FileManager.default.isWritableFile(atPath: url.path())
     }
 }
 
