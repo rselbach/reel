@@ -381,7 +381,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         Task { @MainActor in
             let maxAttempts = 60  // 30 seconds at 0.5s intervals
             for _ in 0..<maxAttempts {
-                try? await Task.sleep(for: .milliseconds(500))
+                do {
+                    try await Task.sleep(for: .milliseconds(500))
+                } catch {
+                    logger.warning("Accessibility permission polling interrupted: \(error.localizedDescription)")
+                    return
+                }
                 if HotkeyManager.shared.hasAccessibilityPermission() {
                     HotkeyManager.shared.start()
                     rebuildMenu()

@@ -103,6 +103,19 @@ struct RecordingDialog: View {
                     .padding(.bottom, 16)
                 }
             }
+
+            if availableDisplays.isEmpty && availableWindows.isEmpty {
+                VStack(spacing: 6) {
+                    Text("No recordable displays or windows found")
+                        .font(.subheadline)
+                    Text("Check screen recording permission and try again.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 16)
+            }
             
             Divider()
             

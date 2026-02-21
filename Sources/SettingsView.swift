@@ -1,5 +1,8 @@
 import AVFoundation
 import SwiftUI
+import os.log
+
+private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "com.rselbach.reel", category: "SettingsView")
 
 struct SettingsView: View {
     @ObservedObject var settings = AppSettings.shared
@@ -91,13 +94,14 @@ struct GeneralTab: View {
     }
 
     private func isValidWritableDirectory(_ url: URL) -> Bool {
-        guard
-            let values = try? url.resourceValues(forKeys: [.isDirectoryKey]),
-            values.isDirectory == true
-        else {
+        do {
+            let values = try url.resourceValues(forKeys: [.isDirectoryKey])
+            guard values.isDirectory == true else { return false }
+            return FileManager.default.isWritableFile(atPath: url.path())
+        } catch {
+            logger.warning("Failed to read directory attributes for \(url.path()): \(error.localizedDescription)")
             return false
         }
-        return FileManager.default.isWritableFile(atPath: url.path())
     }
 }
 

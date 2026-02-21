@@ -368,15 +368,22 @@ class AppSettings: ObservableObject {
     }
 
     private static func loadRecordingHotkey(from defaults: UserDefaults) -> HotkeyCombo {
-        if let data = defaults.data(forKey: DefaultsKey.recordingHotkey),
-           let combo = try? JSONDecoder().decode(HotkeyCombo.self, from: data) {
-            // Migrate old broken default modifier value (0x180500) to new correct value (0x120000)
-            // Old value masked to 0x100000 (Cmd only), new value masks to 0x120000 (Cmd+Shift)
-            if combo.keyCode == HotkeyCombo.default.keyCode && combo.modifiers == 0x180500 {
-                logger.info("Migrating hotkey from old modifier format")
-                return .default
+        if let data = defaults.data(forKey: DefaultsKey.recordingHotkey) {
+            do {
+                let combo = try JSONDecoder().decode(HotkeyCombo.self, from: data)
+                // Migrate old broken default modifier value (0x180500) to new correct value (0x120000)
+                // Old value masked to 0x100000 (Cmd only), new value masks to 0x120000 (Cmd+Shift)
+                if combo.keyCode == HotkeyCombo.default.keyCode && combo.modifiers == 0x180500 {
+                    logger.info("Migrating hotkey from old modifier format")
+                    return .default
+                }
+                return combo
+            } catch {
+                logger.warning("Failed to decode stored recording hotkey: \(error.localizedDescription)")
             }
-            return combo
+        }
+        if defaults.data(forKey: DefaultsKey.recordingHotkey) != nil {
+            logger.warning("Falling back to default hotkey after decode failure")
         }
 
         return .default
