@@ -25,6 +25,20 @@ private enum RecordingConstants {
     static let cameraOverlayPadding: CGFloat = 40
 }
 
+private enum RecordingError: LocalizedError {
+    case outputDirectoryCreationFailed(URL, Error)
+    case outputDirectoryNotWritable(URL)
+
+    var errorDescription: String? {
+        switch self {
+        case .outputDirectoryCreationFailed(let url, let error):
+            "Unable to prepare output directory \(url.path()): \(error.localizedDescription)"
+        case .outputDirectoryNotWritable(let url):
+            "Output directory is not writable: \(url.path())"
+        }
+    }
+}
+
 @MainActor
 class ScreenRecorder: NSObject, ObservableObject {
     @Published private(set) var isRecording = false {
@@ -351,8 +365,24 @@ class ScreenRecorder: NSObject, ObservableObject {
     }
 
     private func makeOutputURL(in outputDir: URL) throws -> URL {
-        if !FileManager.default.fileExists(atPath: outputDir.path()) {
+        do {
             try FileManager.default.createDirectory(at: outputDir, withIntermediateDirectories: true)
+        } catch {
+            throw RecordingError.outputDirectoryCreationFailed(outputDir, error)
+        }
+
+        guard
+            let values = try? outputDir.resourceValues(forKeys: [.isDirectoryKey, .isWritableKey]),
+            values.isDirectory == true
+        else {
+            throw RecordingError.outputDirectoryCreationFailed(
+                outputDir,
+                NSError(domain: "ScreenRecorder", code: 6, userInfo: [NSLocalizedDescriptionKey: "Output path is not a directory"])
+            )
+        }
+
+        if values.isWritable != true {
+            throw RecordingError.outputDirectoryNotWritable(outputDir)
         }
 
         let timestamp = ISO8601DateFormatter().string(from: Date())

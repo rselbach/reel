@@ -103,6 +103,29 @@ class AppSettings: ObservableObject {
         }
     }
 
+    private static func defaultOutputDirectory() -> URL {
+        FileManager.default.urls(for: .moviesDirectory, in: .userDomainMask).first
+            ?? URL(fileURLWithPath: NSHomeDirectory())
+    }
+
+    private static func isWritableDirectory(_ url: URL) -> Bool {
+        if FileManager.default.fileExists(atPath: url.path()) {
+            var isDirectory = ObjCBool(false)
+            guard FileManager.default.fileExists(atPath: url.path(), isDirectory: &isDirectory),
+                  isDirectory.boolValue else {
+                return false
+            }
+            return FileManager.default.isWritableFile(atPath: url.path())
+        }
+
+        let parent = url.deletingLastPathComponent()
+        guard parent.path != "/" && parent.path != url.path else {
+            return false
+        }
+        return FileManager.default.fileExists(atPath: parent.path()) &&
+            FileManager.default.isWritableFile(atPath: parent.path())
+    }
+
     @Published var launchAtLogin: Bool {
         didSet {
             persist(launchAtLogin, key: DefaultsKey.launchAtLogin)
@@ -371,18 +394,15 @@ class AppSettings: ObservableObject {
 
         if let path = defaults.string(forKey: DefaultsKey.outputDirectory) {
             let candidate = URL(fileURLWithPath: path, isDirectory: true)
-            if let values = try? candidate.resourceValues(forKeys: [.isDirectoryKey]),
-               values.isDirectory == true {
+            if Self.isWritableDirectory(candidate) {
                 self.outputDirectory = candidate
             } else {
                 logger.warning("Stored outputDirectory is invalid, using default: \(path)")
-                self.outputDirectory = FileManager.default.urls(for: .moviesDirectory, in: .userDomainMask).first
-                    ?? URL(fileURLWithPath: NSHomeDirectory())
-                persist(self.outputDirectory.path(), key: "outputDirectory")
+                self.outputDirectory = Self.defaultOutputDirectory()
+                persist(self.outputDirectory.path(), key: DefaultsKey.outputDirectory)
             }
         } else {
-            self.outputDirectory = FileManager.default.urls(for: .moviesDirectory, in: .userDomainMask).first
-                ?? URL(fileURLWithPath: NSHomeDirectory())
+            self.outputDirectory = Self.defaultOutputDirectory()
         }
 
         self.askWhereToSave = defaults.bool(forKey: DefaultsKey.askWhereToSave)
