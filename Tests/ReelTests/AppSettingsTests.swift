@@ -51,4 +51,17 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertNotNil(url)
         XCTAssertEqual(url?.absoluteString, "https://github.com/rselbach/reel/commit/deadbeef")
     }
+
+    @MainActor
+    func testGitInfoNormalizesUppercaseCommits() {
+        let uppercase = "ABCDEF1234567890"
+        XCTAssertEqual(GitInfo.normalizedCommit(uppercase), uppercase.lowercased())
+        XCTAssertEqual(GitInfo.commitURL(for: uppercase)?.absoluteString, "https://github.com/rselbach/reel/commit/abcdef1234567890")
+    }
+
+    @MainActor
+    func testGitInfoAcceptsFullSHA() {
+        let fullSHA = "0123456789abcdefABCDEF0123456789abcdef0123"
+        XCTAssertEqual(GitInfo.normalizedCommit(fullSHA), fullSHA.lowercased())
+    }
 }
