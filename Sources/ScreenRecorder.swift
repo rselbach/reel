@@ -759,13 +759,19 @@ class ScreenRecorder: NSObject, ObservableObject {
 
         let srcBytesPerRow = CVPixelBufferGetBytesPerRow(source)
         let destBytesPerRow = CVPixelBufferGetBytesPerRow(dest)
+        let totalBytes = srcBytesPerRow * height
 
-        // Copy row by row to handle different bytesPerRow (padding) between buffers
-        let bytesToCopy = min(srcBytesPerRow, destBytesPerRow)
-        for row in 0..<height {
-            let srcRow = srcBase.advanced(by: row * srcBytesPerRow)
-            let destRow = destBase.advanced(by: row * destBytesPerRow)
-            memcpy(destRow, srcRow, bytesToCopy)
+        if srcBytesPerRow == destBytesPerRow {
+            // Fast path for identical row layouts
+            memcpy(destBase, srcBase, totalBytes)
+        } else {
+            // Copy row by row to handle different bytesPerRow (padding) between buffers
+            let bytesToCopy = min(srcBytesPerRow, destBytesPerRow)
+            for row in 0..<height {
+                let srcRow = srcBase.advanced(by: row * srcBytesPerRow)
+                let destRow = destBase.advanced(by: row * destBytesPerRow)
+                memcpy(destRow, srcRow, bytesToCopy)
+            }
         }
 
         return dest
