@@ -661,7 +661,12 @@ class ScreenRecorder: NSObject, ObservableObject {
             do {
                 try FileManager.default.copyItem(at: tempURL, to: finalURL)
                 if FileManager.default.fileExists(atPath: tempURL.path()) {
-                    try? FileManager.default.removeItem(at: tempURL)
+                    do {
+                        try FileManager.default.removeItem(at: tempURL)
+                    } catch {
+                        logger.warning("Failed to remove temporary recording after copy: \(error.localizedDescription)")
+                        throw error
+                    }
                 }
             } catch {
                 throw error
