@@ -15,6 +15,18 @@ default: build-app
 build:
     swift build -c release
 
+# Build aliases with explicit intent for common workflows
+build-release: build
+    # no-op: kept as a clear command alias
+
+run-release: run
+
+# Create signed installer package
+package: dmg-signed
+
+# Create unsigned installer package
+package-unsigned: dmg
+
 # Build the .app bundle
 build-app: build
     #!/usr/bin/env bash
