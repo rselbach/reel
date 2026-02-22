@@ -22,6 +22,7 @@ struct GitInfo {
 
     static func isValidCommitSHA(_ commit: String) -> Bool {
         guard (7...40).contains(commit.count) else { return false }
-        return commit.unicodeScalars.allSatisfy { CharacterSet.hexadecimalDigits.contains($0) }
+        let hexDigits = CharacterSet(charactersIn: "0123456789abcdefABCDEF")
+        return commit.unicodeScalars.allSatisfy { hexDigits.contains($0) }
     }
 }

@@ -408,8 +408,9 @@ class AppSettings: ObservableObject {
                 self.outputDirectory = candidate
             } else {
                 logger.warning("Stored outputDirectory is invalid, using default: \(path)")
-                self.outputDirectory = Self.defaultOutputDirectory()
-                persist(self.outputDirectory.path(), key: DefaultsKey.outputDirectory)
+                let fallbackDirectory = Self.defaultOutputDirectory()
+                self.outputDirectory = fallbackDirectory
+                defaults.set(fallbackDirectory.path(), forKey: DefaultsKey.outputDirectory)
             }
         } else {
             self.outputDirectory = Self.defaultOutputDirectory()

@@ -27,7 +27,7 @@ class ThumbnailCapture {
             let config = SCStreamConfiguration()
 
             guard sourceSize.width > 0, sourceSize.height > 0 else {
-                logger.warning("Cannot capture thumbnail for zero-size source: \(sourceSize)")
+                logger.warning("Cannot capture thumbnail for zero-size source: \(sourceSize.width)x\(sourceSize.height)")
                 return nil
             }
 

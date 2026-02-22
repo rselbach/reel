@@ -103,9 +103,9 @@ class ScreenRecorder: NSObject, ObservableObject {
     private let captureSessionQueue = DispatchQueue(label: "com.rselbach.reel.capture")
 
     // Thread-safe state for frame processing (accessed from ScreenCaptureKit callback queue)
-    private let frameState = FrameCaptureState()
+    private nonisolated(unsafe) let frameState = FrameCaptureState()
     private let frameLock = NSLock()
-    private let circularMaskCache: NSCache<NSString, CIImage> = {
+    private nonisolated(unsafe) let circularMaskCache: NSCache<NSString, CIImage> = {
         let cache = NSCache<NSString, CIImage>()
         cache.countLimit = 4
         return cache

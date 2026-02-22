@@ -101,7 +101,6 @@ class HotkeyManager {
 
             hotkeyLock.lock()
             let tap = cachedEventTap
-            let onHotkeyDisabled = cachedHotkeyDisabledHandler
             hotkeyLock.unlock()
 
             if let tap {
@@ -137,7 +136,7 @@ class HotkeyManager {
         return Unmanaged.passUnretained(event)
     }
 
-    private func reportHotkeyError(_ message: String) {
+    private nonisolated func reportHotkeyError(_ message: String) {
         hotkeyLock.lock()
         let handler = cachedHotkeyDisabledHandler
         hotkeyLock.unlock()
