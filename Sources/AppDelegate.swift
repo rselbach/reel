@@ -112,6 +112,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     func rebuildMenu() {
         let menu = NSMenu()
+        menu.autoenablesItems = false
 
         addPermissionOrRecordingItems(to: menu)
         addAccessibilityItems(to: menu)
@@ -196,8 +197,19 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func presentWindow(_ window: NSWindow?) {
-        window?.makeKeyAndOrderFront(nil)
+        guard let window else { return }
+
+        NSApp.setActivationPolicy(.accessory)
         NSApp.activate(ignoringOtherApps: true)
+        window.orderFrontRegardless()
+        window.makeKeyAndOrderFront(nil)
+        window.makeMain()
+
+        DispatchQueue.main.async {
+            NSApp.activate(ignoringOtherApps: true)
+            window.makeKeyAndOrderFront(nil)
+            window.makeMain()
+        }
     }
 
     @objc private func showAbout() {
@@ -296,8 +308,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func showRecordingDialog() {
         if recordingDialogWindow != nil {
-            recordingDialogWindow?.makeKeyAndOrderFront(nil)
-            NSApp.activate(ignoringOtherApps: true)
+            presentWindow(recordingDialogWindow)
             return
         }
         

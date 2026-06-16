@@ -6,6 +6,7 @@ A lightweight macOS screen recording app built with Swift and ScreenCaptureKit.
 
 - Record full screen or individual windows
 - Optional camera overlay (circle or rectangle, configurable position and size)
+- Optional text overlay for watermark-style labels
 - Microphone audio capture
 - Configurable frame rate and video quality
 - Global hotkey support

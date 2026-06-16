@@ -24,7 +24,7 @@ struct SettingsView: View {
                     Label("Shortcuts", systemImage: "keyboard")
                 }
         }
-        .frame(width: 450, height: 320)
+        .frame(width: 460, height: 420)
         .padding()
     }
 }
@@ -177,6 +177,23 @@ struct RecordingTab: View {
                 Picker("Shape:", selection: $settings.cameraShape) {
                     ForEach(AppSettings.CameraOverlayShape.allCases, id: \.self) { shape in
                         Text(shape.rawValue).tag(shape)
+                    }
+                }
+            }
+
+            Divider()
+
+            Toggle("Add text overlay", isOn: $settings.textOverlayEnabled)
+
+            if settings.textOverlayEnabled {
+                HStack {
+                    Text("Text:")
+                    TextField("CONFIDENTIAL. DO NOT SHARE", text: $settings.textOverlayText)
+                }
+
+                Picker("Position:", selection: $settings.textOverlayPosition) {
+                    ForEach(AppSettings.TextOverlayPosition.allCases, id: \.self) { position in
+                        Text(position.rawValue).tag(position)
                     }
                 }
             }

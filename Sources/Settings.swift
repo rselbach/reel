@@ -93,6 +93,9 @@ class AppSettings: ObservableObject {
         static let cameraPosition = "cameraPosition"
         static let cameraSize = "cameraSize"
         static let cameraShape = "cameraShape"
+        static let textOverlayEnabled = "textOverlayEnabled"
+        static let textOverlayText = "textOverlayText"
+        static let textOverlayPosition = "textOverlayPosition"
     }
 
     private func persist(_ value: Any?, key: String) {
@@ -217,6 +220,18 @@ class AppSettings: ObservableObject {
         didSet { persist(cameraShape.rawValue, key: DefaultsKey.cameraShape) }
     }
 
+    @Published var textOverlayEnabled: Bool {
+        didSet { persist(textOverlayEnabled, key: DefaultsKey.textOverlayEnabled) }
+    }
+
+    @Published var textOverlayText: String {
+        didSet { persist(textOverlayText, key: DefaultsKey.textOverlayText) }
+    }
+
+    @Published var textOverlayPosition: TextOverlayPosition {
+        didSet { persist(textOverlayPosition.rawValue, key: DefaultsKey.textOverlayPosition) }
+    }
+
     enum CameraOverlayPosition: String, CaseIterable {
         case bottomLeft = "Bottom Left"
         case bottomRight = "Bottom Right"
@@ -253,6 +268,18 @@ class AppSettings: ObservableObject {
     enum CameraOverlayShape: String, CaseIterable {
         case rectangle = "Rectangle"
         case circle = "Circle"
+    }
+
+    enum TextOverlayPosition: String, CaseIterable {
+        case top = "Top"
+        case center = "Center"
+        case bottom = "Bottom"
+    }
+
+    var activeTextOverlayText: String? {
+        guard textOverlayEnabled else { return nil }
+        let text = textOverlayText.trimmingCharacters(in: .whitespacesAndNewlines)
+        return text.isEmpty ? nil : text
     }
 
     var availableAudioDevices: [AVCaptureDevice] {
@@ -428,6 +455,10 @@ class AppSettings: ObservableObject {
         self.cameraPosition = CameraOverlayPosition(rawValue: defaults.string(forKey: DefaultsKey.cameraPosition) ?? "") ?? .bottomRight
         self.cameraSize = CameraOverlaySize(rawValue: defaults.string(forKey: DefaultsKey.cameraSize) ?? "") ?? .medium
         self.cameraShape = CameraOverlayShape(rawValue: defaults.string(forKey: DefaultsKey.cameraShape) ?? "") ?? .circle
+
+        self.textOverlayEnabled = defaults.bool(forKey: DefaultsKey.textOverlayEnabled)
+        self.textOverlayText = defaults.string(forKey: DefaultsKey.textOverlayText) ?? ""
+        self.textOverlayPosition = TextOverlayPosition(rawValue: defaults.string(forKey: DefaultsKey.textOverlayPosition) ?? "") ?? .center
     }
 
     private func updateLaunchAtLogin() {
