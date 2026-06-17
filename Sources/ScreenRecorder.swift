@@ -259,6 +259,23 @@ class ScreenRecorder: NSObject, ObservableObject {
             config.showsCursor = settings.showCursor
             config.pixelFormat = kCVPixelFormatType_32BGRA
 
+            // Request AVFoundation permissions before allocating any recording
+            // resources, so a denial surfaces a clear message instead of a
+            // generic "Failed to start" and leaves no temp file behind.
+            if settings.recordAudio {
+                guard await ensureAVPermission(for: .audio) else {
+                    errorMessage = "Microphone access denied. Enable it in System Settings → Privacy & Security → Microphone."
+                    return
+                }
+            }
+
+            if settings.recordCamera {
+                guard await ensureAVPermission(for: .video) else {
+                    errorMessage = "Camera access denied. Enable it in System Settings → Privacy & Security → Camera."
+                    return
+                }
+            }
+
             try setupAssetWriter(width: config.width, height: config.height)
 
             if settings.recordAudio {
@@ -578,6 +595,19 @@ class ScreenRecorder: NSObject, ObservableObject {
 
         session.commitConfiguration()
         return session
+    }
+
+    private func ensureAVPermission(for mediaType: AVMediaType) async -> Bool {
+        switch AVCaptureDevice.authorizationStatus(for: mediaType) {
+        case .authorized:
+            return true
+        case .notDetermined:
+            return await AVCaptureDevice.requestAccess(for: mediaType)
+        case .denied, .restricted:
+            return false
+        @unknown default:
+            return false
+        }
     }
 
     private func setupAudioCapture() throws {
