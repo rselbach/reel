@@ -61,7 +61,9 @@ final class AppSettingsTests: XCTestCase {
 
     @MainActor
     func testGitInfoAcceptsFullSHA() {
-        let fullSHA = "0123456789abcdefABCDEF0123456789abcdef0123"
+        // A git SHA is exactly 40 hex chars; the previous value was 42 and
+        // was correctly rejected by isValidCommitSHA, failing the test.
+        let fullSHA = "0123456789abcdefabcdef0123456789abcdef01"
         XCTAssertEqual(GitInfo.normalizedCommit(fullSHA), fullSHA.lowercased())
     }
 }
