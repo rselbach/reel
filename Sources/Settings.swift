@@ -299,13 +299,9 @@ class AppSettings: ObservableObject {
     }
 
     var availableCameras: [AVCaptureDevice] {
-        var deviceTypes: [AVCaptureDevice.DeviceType] = [.builtInWideAngleCamera, .external]
-        if #available(macOS 13.0, *) {
-            deviceTypes.append(.deskViewCamera)
-        }
-        if #available(macOS 14.0, *) {
-            deviceTypes.append(.continuityCamera)
-        }
+        // Deployment target is macOS 26, so .deskViewCamera (macOS 13) and
+        // .continuityCamera (macOS 14) are always available.
+        let deviceTypes: [AVCaptureDevice.DeviceType] = [.builtInWideAngleCamera, .external, .deskViewCamera, .continuityCamera]
         return AVCaptureDevice.DiscoverySession(
             deviceTypes: deviceTypes,
             mediaType: .video,
