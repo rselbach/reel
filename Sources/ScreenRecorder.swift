@@ -108,6 +108,10 @@ class ScreenRecorder: NSObject, ObservableObject {
     private var cameraOutput: AVCaptureVideoDataOutput?
     private var outputURL: URL?
     private let captureSessionQueue = DispatchQueue(label: "com.rselbach.reel.capture")
+    // Serial queue for SCStream frame output. Apple requires a serial queue;
+    // a concurrent queue can deliver frames out of presentation-time order,
+    // which corrupts AVAssetWriterInput appends (timestamps must be monotonic).
+    private let streamOutputQueue = DispatchQueue(label: "com.rselbach.reel.stream-output")
 
     // Thread-safe state for frame processing (accessed from ScreenCaptureKit callback queue)
     private nonisolated(unsafe) let frameState = FrameCaptureState()
@@ -262,7 +266,7 @@ class ScreenRecorder: NSObject, ObservableObject {
 
             stream = SCStream(filter: filter, configuration: config, delegate: self)
 
-            try stream?.addStreamOutput(self, type: .screen, sampleHandlerQueue: .global())
+            try stream?.addStreamOutput(self, type: .screen, sampleHandlerQueue: streamOutputQueue)
 
             try await stream?.startCapture()
             let failures = startCaptureSessions()
