@@ -22,6 +22,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         userDriverDelegate: nil
     )
 
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard screenRecorder.isRecording else { return .terminateNow }
+        // Finalize the in-flight recording before quitting so it isn't lost.
+        Task { @MainActor in
+            hideCameraOverlay()
+            await screenRecorder.stopRecording()
+            NSApp.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         if let observer = hotkeyObserver {
             NotificationCenter.default.removeObserver(observer)
