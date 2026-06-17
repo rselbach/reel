@@ -104,6 +104,10 @@ class ScreenRecorder: NSObject, ObservableObject {
     private var audioInput: AVAssetWriterInput?
     private var audioCaptureSession: AVCaptureSession?
     private var audioOutput: AVCaptureAudioDataOutput?
+    // Recommended audio settings captured from the configured AVCaptureSession;
+    // used to build the asset writer input so it matches the source format
+    // instead of a hardcoded 44100/2ch/128k.
+    private var audioOutputSettings: [String: Any]?
     private var cameraCaptureSession: AVCaptureSession?
     private var cameraOutput: AVCaptureVideoDataOutput?
     private var outputURL: URL?
@@ -276,8 +280,8 @@ class ScreenRecorder: NSObject, ObservableObject {
                 }
             }
 
-            try setupAssetWriter(width: config.width, height: config.height)
-
+            // Set up capture sessions before the asset writer so the audio
+            // input can use the source's recommended settings (makeAudioInput).
             if settings.recordAudio {
                 try setupAudioCapture()
             }
@@ -285,6 +289,8 @@ class ScreenRecorder: NSObject, ObservableObject {
             if settings.recordCamera {
                 try setupCameraCapture()
             }
+
+            try setupAssetWriter(width: config.width, height: config.height)
 
             stream = SCStream(filter: filter, configuration: config, delegate: self)
 
@@ -514,12 +520,18 @@ class ScreenRecorder: NSObject, ObservableObject {
     }
 
     private func makeAudioInput(assetWriter: AVAssetWriter) -> AVAssetWriterInput? {
-        let audioSettings: [String: Any] = [
-            AVFormatIDKey: kAudioFormatMPEG4AAC,
-            AVSampleRateKey: 44100,
-            AVNumberOfChannelsKey: 2,
-            AVEncoderBitRateKey: 128000
-        ]
+        let audioSettings: [String: Any]
+        if let recommended = audioOutputSettings, !recommended.isEmpty {
+            audioSettings = recommended
+        } else {
+            // Fallback when no source format is known.
+            audioSettings = [
+                AVFormatIDKey: kAudioFormatMPEG4AAC,
+                AVSampleRateKey: 44100,
+                AVNumberOfChannelsKey: 2,
+                AVEncoderBitRateKey: 128000
+            ]
+        }
         let input = AVAssetWriterInput(mediaType: .audio, outputSettings: audioSettings)
         input.expectsMediaDataInRealTime = true
 
@@ -624,6 +636,10 @@ class ScreenRecorder: NSObject, ObservableObject {
 
         audioCaptureSession = session
         audioOutput = output
+        // recommendedAudioSettingsForAssetWriter requires the output to be
+        // attached to a configured session; capture it now so the writer input
+        // matches the actual source sample rate/channels.
+        audioOutputSettings = output.recommendedAudioSettingsForAssetWriter(writingTo: .mp4)
     }
 
     private func setupCameraCapture() throws {
@@ -750,6 +766,7 @@ class ScreenRecorder: NSObject, ObservableObject {
         audioInput = nil
         audioCaptureSession = nil
         audioOutput = nil
+        audioOutputSettings = nil
         cameraCaptureSession = nil
         cameraOutput = nil
         circularMaskCache.removeAllObjects()
