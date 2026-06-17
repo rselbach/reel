@@ -13,13 +13,11 @@ fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SAFE_VERSION="$("$SCRIPT_DIR/validate-release-tag.sh" "$VERSION")"
-SAFE_SIGNATURE=$(printf '%s' "$SPARKLE_SIGNATURE" | /usr/bin/python3 - <<'PY'
-import html
-import sys
 
-print(html.escape(sys.stdin.read(), quote=True), end="")
-PY
-)
+# sign_update emits attribute-ready output (e.g.
+# 'sparkle:edSignature="..." length="..."'), so it can be interpolated into
+# the enclosure tag verbatim. Do NOT pipe it through stdin to python3: a
+# heredoc consumes stdin as the program, silently dropping the signature.
 
 mkdir -p "$(dirname "$OUTPUT_FILE")"
 if [[ -e "$OUTPUT_FILE" && ! -f "$OUTPUT_FILE" ]]; then
@@ -42,7 +40,7 @@ cat > "$OUTPUT_FILE" <<XML
       <pubDate>${DATE}</pubDate>
       <sparkle:version>${SAFE_VERSION}</sparkle:version>
       <sparkle:shortVersionString>${SAFE_VERSION}</sparkle:shortVersionString>
-      <enclosure url="https://github.com/rselbach/reel/releases/download/v${SAFE_VERSION}/Reel.dmg" ${SAFE_SIGNATURE} type="application/octet-stream"/>
+      <enclosure url="https://github.com/rselbach/reel/releases/download/v${SAFE_VERSION}/Reel.dmg" ${SPARKLE_SIGNATURE} type="application/octet-stream"/>
     </item>
   </channel>
 </rss>
