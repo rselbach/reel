@@ -112,6 +112,9 @@ class ScreenRecorder: NSObject, ObservableObject {
     private var cameraOutput: AVCaptureVideoDataOutput?
     private var outputURL: URL?
     private let captureSessionQueue = DispatchQueue(label: "com.rselbach.reel.capture")
+    // Reused across recordings; CIContext is cheap to hold but unnecessary
+    // to recreate per recording.
+    private let ciContext = CIContext()
     // Serial queue for SCStream frame output. Apple requires a serial queue;
     // a concurrent queue can deliver frames out of presentation-time order,
     // which corrupts AVAssetWriterInput appends (timestamps must be monotonic).
@@ -373,7 +376,6 @@ class ScreenRecorder: NSObject, ObservableObject {
         assetWriter.add(videoInput)
 
         let adaptor = makePixelBufferAdaptor(videoInput: videoInput, width: width, height: height)
-        let context = CIContext()
         let bufferPool = makeBufferPool(width: width, height: height)
         let audioInput = settings.recordAudio ? makeAudioInput(assetWriter: assetWriter) : nil
 
@@ -382,7 +384,7 @@ class ScreenRecorder: NSObject, ObservableObject {
             videoInput: videoInput,
             audioInput: audioInput,
             assetWriter: assetWriter,
-            context: context,
+            context: ciContext,
             bufferPool: bufferPool
         )
 
