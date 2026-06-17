@@ -188,7 +188,7 @@ struct RecordingTab: View {
             if settings.textOverlayEnabled {
                 HStack {
                     Text("Text:")
-                    TextField("CONFIDENTIAL. DO NOT SHARE", text: $settings.textOverlayText)
+                    TextField("", text: $settings.textOverlayText)
                 }
 
                 Picker("Position:", selection: $settings.textOverlayPosition) {
