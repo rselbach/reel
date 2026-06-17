@@ -13,30 +13,12 @@ class CountdownOverlay {
     private var label: NSTextField?
     private var cancelled = false
 
-    /// Converts Quartz coordinates (origin top-left, Y down) to Cocoa coordinates (origin bottom-left, Y up)
-    private func quartzToCocoa(_ frame: CGRect) -> NSRect? {
-        guard !NSScreen.screens.isEmpty else {
-            logger.warning("No screens available for coordinate conversion")
-            return nil
-        }
-        let desktopBounds = NSScreen.screens.reduce(into: CGRect.null) { partial, screen in
-            partial = partial.union(screen.frame)
-        }
-        return NSRect(
-            x: frame.origin.x,
-            // Use full virtual desktop height so placement works on vertically stacked displays.
-            y: desktopBounds.maxY - frame.origin.y - frame.height,
-            width: frame.width,
-            height: frame.height
-        )
-    }
-
     func show(targetFrame: CGRect? = nil) async -> Bool {
         cancelled = false
 
         let referenceFrame: NSRect
         if let targetFrame {
-            guard let converted = quartzToCocoa(targetFrame) else {
+            guard let converted = cocoaRect(fromQuartz: targetFrame) else {
                 logger.error("Cannot show countdown: no screens available for coordinate conversion")
                 return false
             }

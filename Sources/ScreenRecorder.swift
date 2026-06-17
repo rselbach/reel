@@ -142,9 +142,14 @@ class ScreenRecorder: NSObject, ObservableObject {
     /// Used by CameraOverlayController to display live preview.
     var activeCameraCaptureSession: AVCaptureSession? { cameraCaptureSession }
     
-    /// The bounds of the area being recorded (display or window frame).
-    /// Used to position and constrain the camera overlay.
-    var recordingBounds: CGRect? { countdownTargetFrame }
+    /// The bounds of the area being recorded, in Cocoa coordinates (origin
+    /// bottom-left), for positioning and constraining the camera overlay.
+    /// `SCDisplay.frame`/`SCWindow.frame` are Quartz coords (origin top-left);
+    /// converting here keeps the overlay correct on non-main displays.
+    var recordingBounds: CGRect? {
+        guard let quartzFrame = countdownTargetFrame else { return nil }
+        return cocoaRect(fromQuartz: quartzFrame)
+    }
 
     func requestPermission() async {
         await updateShareableContent(updatePermissionState: true, failureMessage: "Permission denied")
