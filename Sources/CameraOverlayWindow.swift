@@ -29,7 +29,10 @@ final class CameraOverlayWindow: NSWindow {
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         hasShadow = true
         isReleasedWhenClosed = false
-        isMovableByWindowBackground = true
+        // Dragging is handled by mouseDown/mouseDragged below, which clamp to
+        // dragBounds. Enabling isMovableByWindowBackground would let AppKit
+        // also move the window without clamping, fighting the manual override.
+        isMovableByWindowBackground = false
     }
     
     override var canBecomeKey: Bool { false }
