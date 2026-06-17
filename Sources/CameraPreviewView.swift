@@ -12,27 +12,38 @@ final class CameraPreviewNSView: NSView {
         get { previewLayer?.session }
         set {
             previewLayer?.session = newValue
+            updateMirroring(for: newValue)
         }
     }
-    
+
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
         setupLayer()
     }
-    
+
     required init?(coder: NSCoder) {
         super.init(coder: coder)
         setupLayer()
     }
-    
+
     private func setupLayer() {
         wantsLayer = true
         let layer = AVCaptureVideoPreviewLayer()
         layer.videoGravity = .resizeAspectFill
-        // Mirror horizontally for front-facing camera (feels more natural)
-        layer.setAffineTransform(CGAffineTransform(scaleX: -1, y: 1))
         self.layer = layer
         self.previewLayer = layer
+    }
+
+    /// Mirrors the preview horizontally only for a front-facing camera
+    /// (e.g. the built-in FaceTime camera). External/continuity cameras report
+    /// `.unspecified` and should not be mirrored.
+    private func updateMirroring(for session: AVCaptureSession?) {
+        let isFrontFacing = session?.inputs
+            .compactMap { $0 as? AVCaptureDeviceInput }
+            .contains { $0.device.position == .front } ?? false
+        previewLayer?.setAffineTransform(
+            isFrontFacing ? CGAffineTransform(scaleX: -1, y: 1) : .identity
+        )
     }
     
     override func layout() {
