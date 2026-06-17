@@ -223,7 +223,9 @@ struct PostRecordingView: View {
         let endTime = CMTime(seconds: trimEnd, preferredTimescale: 600)
         let timeRange = CMTimeRange(start: startTime, end: endTime)
 
-        let session = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetHighestQuality)
+        // Passthrough re-muxes without re-encoding: lossless and near-instant for
+        // a pure trim, whereas HighestQuality would re-encode the whole video.
+        let session = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetPassthrough)
         guard let session else {
             throw ExportError.sessionCreationFailed
         }
