@@ -24,6 +24,29 @@ private enum RecordingConstants {
     static let minimumWindowSize: CGFloat = 100
     /// Padding from screen edge for camera overlay (in points, doubled for Retina)
     static let cameraOverlayPadding: CGFloat = 40
+    /// Conservative H.264 dimensions for broad AVAssetWriter compatibility.
+    static let maxH264Size = CGSize(width: 4096, height: 2304)
+}
+
+enum RecordingFileNaming {
+    static func sanitizedTimestamp(from date: Date) -> String {
+        ISO8601DateFormatter().string(from: date)
+            .replacingOccurrences(of: ":", with: "-")
+    }
+
+    static func fileName(date: Date, randomID: String) -> String {
+        "Reel-\(sanitizedTimestamp(from: date))-\(randomID).mp4"
+    }
+}
+
+enum RecordingFinalizationLogic {
+    static func shouldRevealInFinder(openFinderAfterRecording: Bool, showPreviewAfterRecording: Bool) -> Bool {
+        openFinderAfterRecording && !showPreviewAfterRecording
+    }
+
+    static func finderRevealFailureMessage(for url: URL) -> String {
+        "Recording saved, but Finder could not reveal it: \(url.path())"
+    }
 }
 
 private enum RecordingError: LocalizedError {
@@ -43,6 +66,55 @@ private enum RecordingError: LocalizedError {
 private struct TextOverlay {
     let text: String
     let position: AppSettings.TextOverlayPosition
+}
+
+enum TextOverlayLayout {
+    static let maxHeightFraction: CGFloat = 0.35
+
+    static func imageSize(
+        suggestedTextSize: CGSize,
+        fontSize: CGFloat,
+        maxWidth: CGFloat,
+        maxImageHeight: CGFloat
+    ) -> (imageSize: CGSize, textRect: CGRect) {
+        let horizontalPadding = ceil(fontSize * 0.6)
+        let verticalPadding = ceil(fontSize * 0.35)
+        let availableTextWidth = max(1, maxWidth - horizontalPadding * 2)
+        let availableTextHeight = max(fontSize, maxImageHeight - verticalPadding * 2)
+        let textWidth = ceil(min(availableTextWidth, max(1, suggestedTextSize.width)))
+        let textHeight = ceil(min(availableTextHeight, max(fontSize * 1.25, suggestedTextSize.height)))
+        let imageWidth = ceil(textWidth + horizontalPadding * 2)
+        let imageHeight = ceil(textHeight + verticalPadding * 2)
+
+        return (
+            imageSize: CGSize(width: imageWidth, height: imageHeight),
+            textRect: CGRect(
+                x: horizontalPadding,
+                y: verticalPadding,
+                width: textWidth,
+                height: textHeight
+            )
+        )
+    }
+
+    static func yOffset(
+        screenHeight: CGFloat,
+        overlayHeight: CGFloat,
+        margin: CGFloat,
+        position: AppSettings.TextOverlayPosition
+    ) -> CGFloat {
+        let rawOffset: CGFloat
+        switch position {
+        case .top:
+            rawOffset = screenHeight - overlayHeight - margin
+        case .center:
+            rawOffset = (screenHeight - overlayHeight) / 2
+        case .bottom:
+            rawOffset = margin
+        }
+
+        return min(max(margin, rawOffset), max(margin, screenHeight - overlayHeight - margin))
+    }
 }
 
 private struct FrameWriter {
@@ -202,7 +274,7 @@ class ScreenRecorder: NSObject, ObservableObject {
 
     private func captureDimensions(for display: SCDisplay) -> (width: Int, height: Int) {
         let scale = NSScreen.screens.first { $0.displayID == display.displayID }?.backingScaleFactor ?? 2.0
-        return (
+        return Self.dimensionsFittingH264Limits(
             width: Int(CGFloat(display.width) * scale),
             height: Int(CGFloat(display.height) * scale)
         )
@@ -211,9 +283,28 @@ class ScreenRecorder: NSObject, ObservableObject {
     private func captureDimensions(for window: SCWindow) -> (width: Int, height: Int) {
         let windowScreen = NSScreen.screens.first { $0.frame.intersects(window.frame) }
         let scale = windowScreen?.backingScaleFactor ?? 2.0
-        return (
+        return Self.dimensionsFittingH264Limits(
             width: Int(window.frame.width * scale),
             height: Int(window.frame.height * scale)
+        )
+    }
+
+    static func dimensionsFittingH264Limits(width: Int, height: Int) -> (width: Int, height: Int) {
+        guard width > 0, height > 0 else { return (width, height) }
+
+        let scale = min(
+            1,
+            min(
+                RecordingConstants.maxH264Size.width / CGFloat(width),
+                RecordingConstants.maxH264Size.height / CGFloat(height)
+            )
+        )
+        let scaledWidth = max(2, Int((CGFloat(width) * scale).rounded(.down)))
+        let scaledHeight = max(2, Int((CGFloat(height) * scale).rounded(.down)))
+
+        return (
+            width: scaledWidth - (scaledWidth % 2),
+            height: scaledHeight - (scaledHeight % 2)
         )
     }
 
@@ -304,6 +395,9 @@ class ScreenRecorder: NSObject, ObservableObject {
             isRecording = true
 
             // Surface capture session failures as warnings (recording continues without them)
+            if failures.cameraFailed {
+                disableCameraCaptureAfterStartFailure()
+            }
             if failures.audioFailed && failures.cameraFailed {
                 errorMessage = "Audio and camera failed to start"
             } else if failures.audioFailed {
@@ -440,11 +534,12 @@ class ScreenRecorder: NSObject, ObservableObject {
             throw RecordingError.outputDirectoryNotWritable(outputDir)
         }
 
-        let timestamp = ISO8601DateFormatter().string(from: Date())
-            .replacingOccurrences(of: ":", with: "-")
+        let date = Date()
         for _ in 0..<64 {
-            let randomID = UUID().uuidString.prefix(8)
-            let candidate = outputDir.appendingPathComponent("Reel-\(timestamp)-\(randomID).mp4")
+            let randomID = String(UUID().uuidString.prefix(8))
+            let candidate = outputDir.appendingPathComponent(
+                RecordingFileNaming.fileName(date: date, randomID: randomID)
+            )
             if !FileManager.default.fileExists(atPath: candidate.path()) {
                 return candidate
             }
@@ -696,25 +791,35 @@ class ScreenRecorder: NSObject, ObservableObject {
             } else {
                 response = panel.runModal()
             }
-            if response == .OK, let url = panel.url {
-                finalURL = url
-                do {
-                    try moveTempRecording(from: tempURL, to: finalURL)
-                } catch {
-                    errorMessage = "Failed to save: \(error.localizedDescription)"
-                    discardTempRecording(tempURL)
-                    return
-                }
-            } else {
-                finalURL = tempURL
+            guard response == .OK, let url = panel.url else {
+                logger.info("Save cancelled; discarding temporary recording")
+                discardTempRecording(tempURL)
+                lastRecordedURL = nil
+                errorMessage = nil
+                return
+            }
+
+            finalURL = url
+            do {
+                try moveTempRecording(from: tempURL, to: finalURL)
+            } catch {
+                errorMessage = "Failed to save: \(error.localizedDescription)"
+                discardTempRecording(tempURL)
+                return
             }
         }
 
         logger.info("Recording saved to: \(finalURL.path())")
         lastRecordedURL = finalURL
 
-        if settings.openFinderAfterRecording && !settings.showPreviewAfterRecording {
-            NSWorkspace.shared.selectFile(finalURL.path(), inFileViewerRootedAtPath: "")
+        if RecordingFinalizationLogic.shouldRevealInFinder(
+            openFinderAfterRecording: settings.openFinderAfterRecording,
+            showPreviewAfterRecording: settings.showPreviewAfterRecording
+        ) {
+            let revealed = NSWorkspace.shared.selectFile(finalURL.path(), inFileViewerRootedAtPath: "")
+            if !revealed {
+                errorMessage = RecordingFinalizationLogic.finderRevealFailureMessage(for: finalURL)
+            }
         }
     }
 
@@ -724,27 +829,7 @@ class ScreenRecorder: NSObject, ObservableObject {
             return
         }
 
-        if FileManager.default.fileExists(atPath: finalURL.path()) {
-            try FileManager.default.removeItem(at: finalURL)
-        }
-        do {
-            try FileManager.default.moveItem(at: tempURL, to: finalURL)
-        } catch {
-            logger.warning("Move failed for recording file, attempting copy fallback: \(error.localizedDescription)")
-            do {
-                try FileManager.default.copyItem(at: tempURL, to: finalURL)
-                if FileManager.default.fileExists(atPath: tempURL.path()) {
-                    do {
-                        try FileManager.default.removeItem(at: tempURL)
-                    } catch {
-                        logger.warning("Failed to remove temporary recording after copy: \(error.localizedDescription)")
-                        throw error
-                    }
-                }
-            } catch {
-                throw error
-            }
-        }
+        try FileReplacement.commit(tempURL: tempURL, to: finalURL)
     }
 
     private func discardTempRecording(_ tempURL: URL) {
@@ -779,6 +864,18 @@ class ScreenRecorder: NSObject, ObservableObject {
         }
     }
 
+    private func abortRecordingAfterStreamError(_ error: Error) {
+        errorMessage = "Stream stopped: \(error.localizedDescription)"
+        signalCaptureStop()
+        stopCaptureSessions()
+        assetWriter?.cancelWriting()
+        if let outputURL {
+            discardTempRecording(outputURL)
+        }
+        cleanup()
+        isRecording = false
+    }
+
     private func startCaptureSessions() -> (audioFailed: Bool, cameraFailed: Bool) {
         let audioSession = audioCaptureSession
         let cameraSession = cameraCaptureSession
@@ -811,6 +908,18 @@ class ScreenRecorder: NSObject, ObservableObject {
         captureSessionQueue.sync {
             audioSession?.stopRunning()
             cameraSession?.stopRunning()
+        }
+    }
+
+    private func disableCameraCaptureAfterStartFailure() {
+        let cameraSession = cameraCaptureSession
+        captureSessionQueue.sync {
+            cameraSession?.stopRunning()
+        }
+        cameraCaptureSession = nil
+        cameraOutput = nil
+        withFrameLock {
+            frameState.latestCameraPixelBuffer = nil
         }
     }
 
@@ -1013,7 +1122,12 @@ class ScreenRecorder: NSObject, ObservableObject {
         if let cached = textOverlayCache.object(forKey: cacheKey as NSString) {
             baseImage = cached
         } else {
-            guard let rendered = renderTextOverlay(text: text, fontSize: fontSize, maxWidth: screenWidth * 0.85) else {
+            guard let rendered = renderTextOverlay(
+                text: text,
+                fontSize: fontSize,
+                maxWidth: screenWidth * 0.85,
+                maxImageHeight: screenHeight * TextOverlayLayout.maxHeightFraction
+            ) else {
                 return nil
             }
             textOverlayCache.setObject(rendered, forKey: cacheKey as NSString)
@@ -1022,15 +1136,12 @@ class ScreenRecorder: NSObject, ObservableObject {
 
         let margin = max(24, min(screenWidth, screenHeight) * 0.04)
         let xOffset = (screenWidth - baseImage.extent.width) / 2
-        let yOffset: CGFloat
-        switch position {
-        case .top:
-            yOffset = screenHeight - baseImage.extent.height - margin
-        case .center:
-            yOffset = (screenHeight - baseImage.extent.height) / 2
-        case .bottom:
-            yOffset = margin
-        }
+        let yOffset = TextOverlayLayout.yOffset(
+            screenHeight: screenHeight,
+            overlayHeight: baseImage.extent.height,
+            margin: margin,
+            position: position
+        )
 
         return baseImage.transformed(by: CGAffineTransform(translationX: xOffset, y: yOffset))
     }
@@ -1038,7 +1149,8 @@ class ScreenRecorder: NSObject, ObservableObject {
     private nonisolated func renderTextOverlay(
         text: String,
         fontSize: CGFloat,
-        maxWidth: CGFloat
+        maxWidth: CGFloat,
+        maxImageHeight: CGFloat
     ) -> CIImage? {
         var alignment = CTTextAlignment.center
         let paragraphStyle = withUnsafePointer(to: &alignment) { pointer in
@@ -1063,7 +1175,12 @@ class ScreenRecorder: NSObject, ObservableObject {
         ) else { return nil }
 
         let framesetter = CTFramesetterCreateWithAttributedString(attributedText)
-        let constraint = CGSize(width: maxWidth, height: CGFloat.greatestFiniteMagnitude)
+        let horizontalPadding = ceil(fontSize * 0.6)
+        let verticalPadding = ceil(fontSize * 0.35)
+        let constraint = CGSize(
+            width: max(1, maxWidth - horizontalPadding * 2),
+            height: max(fontSize, maxImageHeight - verticalPadding * 2)
+        )
         let suggestedSize = CTFramesetterSuggestFrameSizeWithConstraints(
             framesetter,
             CFRange(location: 0, length: 0),
@@ -1071,25 +1188,25 @@ class ScreenRecorder: NSObject, ObservableObject {
             constraint,
             nil
         )
-        let textWidth = ceil(min(maxWidth, max(1, suggestedSize.width)))
-        let textHeight = ceil(max(fontSize * 1.25, suggestedSize.height))
-        let horizontalPadding = ceil(fontSize * 0.6)
-        let verticalPadding = ceil(fontSize * 0.35)
-        let imageWidth = ceil(textWidth + horizontalPadding * 2)
-        let imageHeight = ceil(textHeight + verticalPadding * 2)
+        let layout = TextOverlayLayout.imageSize(
+            suggestedTextSize: suggestedSize,
+            fontSize: fontSize,
+            maxWidth: maxWidth,
+            maxImageHeight: maxImageHeight
+        )
 
         let colorSpace = CGColorSpaceCreateDeviceRGB()
         guard let bitmapContext = CGContext(
             data: nil,
-            width: Int(imageWidth),
-            height: Int(imageHeight),
+            width: Int(layout.imageSize.width),
+            height: Int(layout.imageSize.height),
             bitsPerComponent: 8,
             bytesPerRow: 0,
             space: colorSpace,
             bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
         ) else { return nil }
 
-        let backgroundRect = CGRect(x: 0, y: 0, width: imageWidth, height: imageHeight)
+        let backgroundRect = CGRect(origin: .zero, size: layout.imageSize)
         let backgroundPath = CGMutablePath()
         backgroundPath.addRoundedRect(
             in: backgroundRect,
@@ -1100,14 +1217,8 @@ class ScreenRecorder: NSObject, ObservableObject {
         bitmapContext.addPath(backgroundPath)
         bitmapContext.fillPath()
 
-        let textRect = CGRect(
-            x: horizontalPadding,
-            y: verticalPadding,
-            width: textWidth,
-            height: textHeight
-        )
         let textPath = CGMutablePath()
-        textPath.addRect(textRect)
+        textPath.addRect(layout.textRect)
         let textFrame = CTFramesetterCreateFrame(
             framesetter,
             CFRange(location: 0, length: 0),
@@ -1164,9 +1275,7 @@ class ScreenRecorder: NSObject, ObservableObject {
 extension ScreenRecorder: SCStreamDelegate {
     nonisolated func stream(_ stream: SCStream, didStopWithError error: Error) {
         Task { @MainActor in
-            errorMessage = "Stream stopped: \(error.localizedDescription)"
-            isRecording = false
-            cleanup()
+            abortRecordingAfterStreamError(error)
         }
     }
 }

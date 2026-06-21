@@ -31,6 +31,52 @@ final class AppSettingsTests: XCTestCase {
     }
 
     @MainActor
+    func testHotkeyRequiresCommandControlOrOptionModifier() {
+        XCTAssertTrue(AppSettings.HotkeyCombo(keyCode: KeyCode.r, modifiers: 0x100000).isUsableGlobalShortcut)
+        XCTAssertTrue(AppSettings.HotkeyCombo(keyCode: KeyCode.r, modifiers: 0x40000).isUsableGlobalShortcut)
+        XCTAssertTrue(AppSettings.HotkeyCombo(keyCode: KeyCode.r, modifiers: 0x80000).isUsableGlobalShortcut)
+        XCTAssertTrue(AppSettings.HotkeyCombo.default.isUsableGlobalShortcut)
+    }
+
+    @MainActor
+    func testHotkeyRejectsShiftOnlyShortcut() {
+        XCTAssertFalse(AppSettings.HotkeyCombo(keyCode: KeyCode.r, modifiers: 0x20000).isUsableGlobalShortcut)
+        XCTAssertFalse(AppSettings.HotkeyCombo(keyCode: KeyCode.r, modifiers: 0).isUsableGlobalShortcut)
+    }
+
+    @MainActor
+    func testHotkeyRecorderDecisionCancelsOnEscape() {
+        XCTAssertEqual(
+            HotkeyRecorderLogic.decision(keyCode: KeyCode.escape, modifierFlags: []),
+            .cancel
+        )
+    }
+
+    @MainActor
+    func testHotkeyRecorderDecisionPassesThroughPlainKeys() {
+        XCTAssertEqual(
+            HotkeyRecorderLogic.decision(keyCode: KeyCode.r, modifierFlags: []),
+            .passThrough
+        )
+    }
+
+    @MainActor
+    func testHotkeyRecorderDecisionRejectsShiftOnlyShortcut() {
+        XCTAssertEqual(
+            HotkeyRecorderLogic.decision(keyCode: KeyCode.r, modifierFlags: [.shift]),
+            .reject
+        )
+    }
+
+    @MainActor
+    func testHotkeyRecorderDecisionRecordsUsableShortcutWithMaskedModifiers() {
+        XCTAssertEqual(
+            HotkeyRecorderLogic.decision(keyCode: KeyCode.r, modifierFlags: [.command, .shift, .capsLock]),
+            .record(keyCode: KeyCode.r, modifiers: 0x120000)
+        )
+    }
+
+    @MainActor
     func testFrameRateSanitizationUsesSafeFallback() {
         XCTAssertEqual(AppSettings.sanitizedFrameRate(0), 60)
         XCTAssertEqual(AppSettings.sanitizedFrameRate(30), 30)
@@ -52,6 +98,274 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(url?.absoluteString, "https://github.com/rselbach/reel/commit/deadbeef")
     }
 
+    func testScreenCapturePrivacySettingsLinkTargetsExpectedPane() {
+        let url = SystemSettingsLink.screenCapturePrivacy
+        XCTAssertEqual(url?.scheme, "x-apple.systempreferences")
+        XCTAssertEqual(
+            url?.absoluteString,
+            "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"
+        )
+    }
+
+    func testPermissionMenuTextMatchesExpectedActions() {
+        XCTAssertEqual(AppMenuText.screenRecordingPermissionRequired, "Screen Recording Permission Required")
+        XCTAssertEqual(AppMenuText.openSystemSettings, "Open System Settings...")
+        XCTAssertEqual(AppMenuText.checkPermission, "Check Permission")
+        XCTAssertEqual(AppMenuText.unableToOpenSettings, "Unable to open settings")
+        XCTAssertEqual(AppMenuText.failedToOpenPrivacySettings, "Failed to open system privacy settings.")
+        XCTAssertEqual(AppMenuText.couldNotOpenSystemPreferences, "Could not open System Preferences.")
+    }
+
+    func testAppMenuTextMatchesRecordingAndStandardMenuItems() {
+        XCTAssertEqual(AppMenuText.startRecording, "Start Recording...")
+        XCTAssertEqual(AppMenuText.recordingInProgress, "● Recording...")
+        XCTAssertEqual(AppMenuText.stopRecording, "Stop Recording")
+        XCTAssertEqual(AppMenuText.enableKeyboardShortcuts, "Enable Keyboard Shortcuts...")
+        XCTAssertEqual(AppMenuText.aboutReel, "About Reel")
+        XCTAssertEqual(AppMenuText.settings, "Settings...")
+        XCTAssertEqual(AppMenuText.quitReel, "Quit Reel")
+        XCTAssertEqual(AppMenuText.hotkeyError, "Hotkey Error")
+    }
+
+    func testAppMenuTextMatchesWindowTitlesAndPreviewWarnings() {
+        XCTAssertEqual(AppMenuText.recordingPreviewTitle, "Recording Preview")
+        XCTAssertEqual(AppMenuText.newRecordingTitle, "New Recording")
+        XCTAssertEqual(AppMenuText.settingsWindowTitle, "Reel Settings")
+        XCTAssertEqual(AppMenuText.couldNotRevealRecording, "Could not reveal recording")
+        XCTAssertEqual(AppMenuText.couldNotDeleteRecording, "Could not delete recording")
+    }
+
+    func testPostRecordingTextMatchesPreviewActions() {
+        XCTAssertEqual(PostRecordingText.loading, "Loading...")
+        XCTAssertEqual(PostRecordingText.revealInFinder, "Reveal in Finder")
+        XCTAssertEqual(PostRecordingText.delete, "Delete")
+        XCTAssertEqual(PostRecordingText.saveTrimmed, "Save Trimmed...")
+        XCTAssertEqual(PostRecordingText.done, "Done")
+        XCTAssertEqual(PostRecordingText.deleteConfirmationTitle, "Delete recording?")
+        XCTAssertEqual(PostRecordingText.deleteConfirmationMessage, "This will permanently remove the file from disk.")
+    }
+
+    func testSettingsTextMatchesGeneralRecordingAndShortcutControls() {
+        XCTAssertEqual(SettingsText.generalTab, "General")
+        XCTAssertEqual(SettingsText.recordingTab, "Recording")
+        XCTAssertEqual(SettingsText.shortcutsTab, "Shortcuts")
+        XCTAssertEqual(SettingsText.launchAtLogin, "Launch at login")
+        XCTAssertEqual(SettingsText.saveRecordingsTo, "Save recordings to:")
+        XCTAssertEqual(SettingsText.askEachTime, "Ask each time")
+        XCTAssertEqual(SettingsText.fixedFolder, "Fixed folder")
+        XCTAssertEqual(SettingsText.outputDirectoryNotWritable, "Cannot write to selected folder. Pick another location.")
+        XCTAssertEqual(SettingsText.recordAudio, "Record audio from microphone")
+        XCTAssertEqual(SettingsText.recordCamera, "Record camera overlay")
+        XCTAssertEqual(SettingsText.addTextOverlay, "Add text overlay")
+        XCTAssertEqual(SettingsText.defaultDevice, "Default")
+        XCTAssertEqual(SettingsText.unavailableDevice, "Unavailable device")
+        XCTAssertEqual(SettingsText.pressShortcut, "Press shortcut...")
+    }
+
+    func testSettingsErrorTextMatchesLaunchAtLoginFailure() {
+        XCTAssertEqual(SettingsErrorText.launchAtLoginUpdateFailed, "Failed to update launch at login")
+    }
+
+    func testSparkleInfoPlistConfigurationIsPresent() throws {
+        let plist = try loadSourceInfoPlist()
+        XCTAssertEqual(plist["SUFeedURL"] as? String, "https://rselbach.github.io/reel/appcast.xml")
+        let publicKey = try XCTUnwrap(plist["SUPublicEDKey"] as? String)
+        XCTAssertFalse(publicKey.isEmpty)
+        XCTAssertNotEqual(publicKey, "SPARKLE_PUBLIC_KEY_PLACEHOLDER")
+        XCTAssertEqual(AppMenuText.checkForUpdates, "Check for Updates...")
+    }
+
+    func testInfoPlistDeclaresMenuBarAppAndPermissionUsageDescriptions() throws {
+        let plist = try loadSourceInfoPlist()
+
+        XCTAssertEqual(plist["LSUIElement"] as? Bool, true)
+        XCTAssertEqual(plist["CFBundleIdentifier"] as? String, "com.rselbach.reel")
+        XCTAssertEqual(plist["CFBundleExecutable"] as? String, "Reel")
+        XCTAssertEqual(plist["LSMinimumSystemVersion"] as? String, "26.0")
+
+        let microphoneUsage = try XCTUnwrap(plist["NSMicrophoneUsageDescription"] as? String)
+        let cameraUsage = try XCTUnwrap(plist["NSCameraUsageDescription"] as? String)
+        let screenUsage = try XCTUnwrap(plist["NSScreenCaptureUsageDescription"] as? String)
+        XCTAssertFalse(microphoneUsage.isEmpty)
+        XCTAssertFalse(cameraUsage.isEmpty)
+        XCTAssertFalse(screenUsage.isEmpty)
+    }
+
+    func testEntitlementsAllowConfiguredAudioCameraAndHardenedRuntime() throws {
+        let entitlements = try loadPropertyList(at: repoRoot().appendingPathComponent("Reel.entitlements"))
+
+        XCTAssertEqual(entitlements["com.apple.security.device.audio-input"] as? Bool, true)
+        XCTAssertEqual(entitlements["com.apple.security.device.camera"] as? Bool, true)
+        XCTAssertEqual(entitlements["com.apple.security.hardened-runtime"] as? Bool, true)
+    }
+
+    func testPackageManifestPinsMacOSPlatformAndSparkleDependency() throws {
+        let manifest = try String(
+            contentsOf: repoRoot().appendingPathComponent("Package.swift"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(manifest.contains(".macOS(.v26)"))
+        XCTAssertTrue(manifest.contains("https://github.com/sparkle-project/Sparkle"))
+        XCTAssertTrue(manifest.contains(".product(name: \"Sparkle\", package: \"Sparkle\")"))
+        XCTAssertTrue(manifest.contains("exclude: [\"Info.plist\", \"AppIcon.icns\"]"))
+    }
+
+    func testReleaseTagValidatorAcceptsSafeTagsAndRejectsUnsafeTags() throws {
+        let script = repoRoot().appendingPathComponent("scripts/release/validate-release-tag.sh")
+
+        let valid = try runProcess("/bin/bash", [script.path(), "1.2.3-beta_1"])
+        XCTAssertEqual(valid.exitCode, 0)
+        XCTAssertEqual(valid.stdout.trimmingCharacters(in: .whitespacesAndNewlines), "1.2.3-beta_1")
+
+        let invalid = try runProcess("/bin/bash", [script.path(), "1.2.3;rm -rf /"])
+        XCTAssertNotEqual(invalid.exitCode, 0)
+        XCTAssertTrue(invalid.stdout.contains("Invalid release tag"))
+    }
+
+    func testGenerateAppcastWritesSanitizedVersionAndSignedEnclosure() throws {
+        let directory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let outputURL = directory.appendingPathComponent("appcast.xml")
+        let script = repoRoot().appendingPathComponent("scripts/release/generate-appcast.sh")
+        let signature = #"sparkle:edSignature="abc123" length="42""#
+
+        let result = try runProcess("/bin/bash", [script.path(), "1.2.3", signature, outputURL.path()])
+        XCTAssertEqual(result.exitCode, 0, result.stdout + result.stderr)
+
+        let appcast = try String(contentsOf: outputURL, encoding: .utf8)
+        XCTAssertTrue(appcast.contains("<title>Version 1.2.3</title>"))
+        XCTAssertTrue(appcast.contains("<sparkle:version>1.2.3</sparkle:version>"))
+        XCTAssertTrue(appcast.contains(#"url="https://github.com/rselbach/reel/releases/download/v1.2.3/Reel.dmg""#))
+        XCTAssertTrue(appcast.contains(signature))
+    }
+
+    func testAboutGitHubRepositoryLinkTargetsProject() {
+        XCTAssertEqual(AboutLinks.githubRepository?.absoluteString, "https://github.com/rselbach/reel")
+    }
+
+    func testRecordingDialogDisplayTitles() {
+        XCTAssertEqual(RecordingDialogLogic.displayTitle(index: 0, displayCount: 1), "Display")
+        XCTAssertEqual(RecordingDialogLogic.displayTitle(index: 0, displayCount: 2), "Display 1")
+        XCTAssertEqual(RecordingDialogLogic.displayTitle(index: 1, displayCount: 2), "Display 2")
+    }
+
+    func testRecordingDialogWindowTitleFallbacks() {
+        XCTAssertEqual(
+            RecordingDialogLogic.windowTitle(appName: "Safari", windowTitle: "Apple"),
+            "Apple"
+        )
+        XCTAssertEqual(
+            RecordingDialogLogic.windowTitle(appName: "Safari", windowTitle: "Safari"),
+            "Safari"
+        )
+        XCTAssertEqual(
+            RecordingDialogLogic.windowTitle(appName: nil, windowTitle: nil),
+            "Unknown"
+        )
+    }
+
+    func testRecordingDialogWindowSearchMatchesAppOrTitleCaseInsensitively() {
+        XCTAssertTrue(RecordingDialogLogic.windowMatchesSearch(
+            appName: "Safari",
+            windowTitle: "Apple Developer",
+            query: "saf"
+        ))
+        XCTAssertTrue(RecordingDialogLogic.windowMatchesSearch(
+            appName: "Safari",
+            windowTitle: "Apple Developer",
+            query: "developer"
+        ))
+        XCTAssertFalse(RecordingDialogLogic.windowMatchesSearch(
+            appName: "Safari",
+            windowTitle: "Apple Developer",
+            query: "notes"
+        ))
+        XCTAssertTrue(RecordingDialogLogic.windowMatchesSearch(
+            appName: nil,
+            windowTitle: nil,
+            query: ""
+        ))
+    }
+
+    func testCountdownLayoutUsesThreeSecondSequenceAndBottomTargetBar() {
+        XCTAssertEqual(CountdownLayout.sequence, [3, 2, 1])
+
+        let frame = CountdownLayout.barFrame(referenceFrame: CGRect(x: 50, y: 75, width: 1200, height: 800))
+        XCTAssertEqual(frame.origin.x, 50)
+        XCTAssertEqual(frame.origin.y, 75)
+        XCTAssertEqual(frame.width, 1200)
+        XCTAssertEqual(frame.height, 80)
+    }
+
+    @MainActor
+    func testCameraOverlayLayoutConvertsNormalizedPositionToScreenOrigin() {
+        let bounds = CGRect(x: 100, y: 200, width: 1000, height: 500)
+        let origin = CameraOverlayLayout.originFromNormalized(
+            x: 1,
+            y: 0,
+            overlaySize: 200,
+            bounds: bounds
+        )
+
+        XCTAssertEqual(origin.x, 900)
+        XCTAssertEqual(origin.y, 200)
+    }
+
+    @MainActor
+    func testCameraOverlayLayoutRoundTripsDraggedPosition() throws {
+        let bounds = CGRect(x: 100, y: 200, width: 1000, height: 500)
+        let origin = CGPoint(x: 500, y: 350)
+        let position = try XCTUnwrap(CameraOverlayLayout.normalizedPosition(
+            origin: origin,
+            overlaySize: 200,
+            bounds: bounds
+        ))
+
+        let roundTripOrigin = CameraOverlayLayout.originFromNormalized(
+            x: position.x,
+            y: position.y,
+            overlaySize: 200,
+            bounds: bounds
+        )
+
+        XCTAssertEqual(roundTripOrigin.x, origin.x, accuracy: 0.001)
+        XCTAssertEqual(roundTripOrigin.y, origin.y, accuracy: 0.001)
+    }
+
+    @MainActor
+    func testCameraOverlayLayoutRejectsOversizedOverlayForNormalization() {
+        let bounds = CGRect(x: 0, y: 0, width: 100, height: 100)
+        XCTAssertNil(CameraOverlayLayout.normalizedPosition(
+            origin: .zero,
+            overlaySize: 100,
+            bounds: bounds
+        ))
+    }
+
+    @MainActor
+    func testActiveTextOverlayTrimsWhitespaceAndRequiresEnabledText() {
+        let settings = AppSettings.shared
+        let oldEnabled = settings.textOverlayEnabled
+        let oldText = settings.textOverlayText
+        defer {
+            settings.textOverlayEnabled = oldEnabled
+            settings.textOverlayText = oldText
+        }
+
+        settings.textOverlayEnabled = false
+        settings.textOverlayText = " Hello "
+        XCTAssertNil(settings.activeTextOverlayText)
+
+        settings.textOverlayEnabled = true
+        settings.textOverlayText = "   "
+        XCTAssertNil(settings.activeTextOverlayText)
+
+        settings.textOverlayText = " Hello "
+        XCTAssertEqual(settings.activeTextOverlayText, "Hello")
+    }
+
     @MainActor
     func testGitInfoNormalizesUppercaseCommits() {
         let uppercase = "ABCDEF1234567890"
@@ -65,5 +379,301 @@ final class AppSettingsTests: XCTestCase {
         // was correctly rejected by isValidCommitSHA, failing the test.
         let fullSHA = "0123456789abcdefabcdef0123456789abcdef01"
         XCTAssertEqual(GitInfo.normalizedCommit(fullSHA), fullSHA.lowercased())
+    }
+
+    @MainActor
+    func testRecordingDimensionsStayUnchangedWhenInsideH264Limits() {
+        let dimensions = ScreenRecorder.dimensionsFittingH264Limits(width: 1920, height: 1080)
+        XCTAssertEqual(dimensions.width, 1920)
+        XCTAssertEqual(dimensions.height, 1080)
+    }
+
+    @MainActor
+    func testRecordingDimensionsDownscaleLargeLandscapeCaptureForH264() {
+        let dimensions = ScreenRecorder.dimensionsFittingH264Limits(width: 5120, height: 2880)
+        XCTAssertEqual(dimensions.width, 4096)
+        XCTAssertEqual(dimensions.height, 2304)
+    }
+
+    @MainActor
+    func testRecordingDimensionsDownscaleLargePortraitCaptureForH264() {
+        let dimensions = ScreenRecorder.dimensionsFittingH264Limits(width: 2880, height: 5120)
+        XCTAssertEqual(dimensions.width, 1296)
+        XCTAssertEqual(dimensions.height, 2304)
+    }
+
+    @MainActor
+    func testRecordingDimensionsLeaveInvalidValuesForExistingValidation() {
+        let dimensions = ScreenRecorder.dimensionsFittingH264Limits(width: 0, height: 1080)
+        XCTAssertEqual(dimensions.width, 0)
+        XCTAssertEqual(dimensions.height, 1080)
+    }
+
+    func testRecordingFileNamingUsesReelPrefixTimestampRandomIDAndMP4Extension() {
+        let date = Date(timeIntervalSince1970: 0)
+        let filename = RecordingFileNaming.fileName(date: date, randomID: "ABC12345")
+
+        XCTAssertEqual(filename, "Reel-1970-01-01T00-00-00Z-ABC12345.mp4")
+        XCTAssertFalse(RecordingFileNaming.sanitizedTimestamp(from: date).contains(":"))
+    }
+
+    func testRecordingFinalizationRevealsFinderOnlyWhenPreviewIsDisabled() {
+        XCTAssertTrue(RecordingFinalizationLogic.shouldRevealInFinder(
+            openFinderAfterRecording: true,
+            showPreviewAfterRecording: false
+        ))
+        XCTAssertFalse(RecordingFinalizationLogic.shouldRevealInFinder(
+            openFinderAfterRecording: true,
+            showPreviewAfterRecording: true
+        ))
+        XCTAssertFalse(RecordingFinalizationLogic.shouldRevealInFinder(
+            openFinderAfterRecording: false,
+            showPreviewAfterRecording: false
+        ))
+    }
+
+    func testRecordingFinalizationFinderRevealFailureMessageIncludesPath() {
+        let url = URL(fileURLWithPath: "/tmp/Reel-Test.mp4")
+        XCTAssertEqual(
+            RecordingFinalizationLogic.finderRevealFailureMessage(for: url),
+            "Recording saved, but Finder could not reveal it: /tmp/Reel-Test.mp4"
+        )
+    }
+
+    func testThumbnailSizingPreservesAspectRatioWithinMaximumSize() throws {
+        let landscape = try XCTUnwrap(ThumbnailSizing.targetSize(
+            sourceSize: CGSize(width: 1920, height: 1080),
+            maxSize: CGSize(width: 320, height: 180)
+        ))
+        XCTAssertEqual(landscape.width, 320)
+        XCTAssertEqual(landscape.height, 180)
+
+        let portrait = try XCTUnwrap(ThumbnailSizing.targetSize(
+            sourceSize: CGSize(width: 1080, height: 1920),
+            maxSize: CGSize(width: 320, height: 180)
+        ))
+        XCTAssertEqual(portrait.width, 101)
+        XCTAssertEqual(portrait.height, 180)
+
+        XCTAssertNil(ThumbnailSizing.targetSize(
+            sourceSize: CGSize(width: 0, height: 1080),
+            maxSize: CGSize(width: 320, height: 180)
+        ))
+    }
+
+    func testFileReplacementMovesNewFileIntoEmptyDestination() throws {
+        let directory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let tempURL = directory.appendingPathComponent("trimmed.tmp.mp4")
+        let outputURL = directory.appendingPathComponent("trimmed.mp4")
+        try Data("new".utf8).write(to: tempURL)
+
+        try FileReplacement.commit(tempURL: tempURL, to: outputURL)
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: tempURL.path()))
+        XCTAssertEqual(try String(contentsOf: outputURL, encoding: .utf8), "new")
+    }
+
+    func testFileReplacementReplacesExistingDestinationAfterSuccessfulMove() throws {
+        let directory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let tempURL = directory.appendingPathComponent("trimmed.tmp.mp4")
+        let outputURL = directory.appendingPathComponent("trimmed.mp4")
+        try Data("old".utf8).write(to: outputURL)
+        try Data("new".utf8).write(to: tempURL)
+
+        try FileReplacement.commit(tempURL: tempURL, to: outputURL)
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: tempURL.path()))
+        XCTAssertEqual(try String(contentsOf: outputURL, encoding: .utf8), "new")
+    }
+
+    func testFileReplacementRestoresExistingDestinationWhenCommitFails() throws {
+        let directory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let missingTempURL = directory.appendingPathComponent("missing.tmp.mp4")
+        let outputURL = directory.appendingPathComponent("trimmed.mp4")
+        try Data("old".utf8).write(to: outputURL)
+
+        XCTAssertThrowsError(try FileReplacement.commit(tempURL: missingTempURL, to: outputURL))
+        XCTAssertEqual(try String(contentsOf: outputURL, encoding: .utf8), "old")
+    }
+
+    func testFileReplacementAllowsAlreadyFinalDestination() throws {
+        let directory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let outputURL = directory.appendingPathComponent("recording.mp4")
+        try Data("final".utf8).write(to: outputURL)
+
+        try FileReplacement.commit(tempURL: outputURL, to: outputURL)
+
+        XCTAssertEqual(try String(contentsOf: outputURL, encoding: .utf8), "final")
+    }
+
+    func testAppTerminationReplyDefersOnlyForActiveRecording() {
+        XCTAssertEqual(
+            AppTerminationLogic.reply(isRecorderInitialized: false, isRecording: false),
+            .terminateNow
+        )
+        XCTAssertEqual(
+            AppTerminationLogic.reply(isRecorderInitialized: true, isRecording: false),
+            .terminateNow
+        )
+        XCTAssertEqual(
+            AppTerminationLogic.reply(isRecorderInitialized: true, isRecording: true),
+            .terminateLater
+        )
+    }
+
+    func testAccessibilityPermissionPollingUsesThirtySecondWindow() {
+        XCTAssertEqual(AccessibilityPermissionPolling.maxAttempts, 60)
+        XCTAssertEqual(AccessibilityPermissionPolling.intervalMilliseconds, 500)
+        XCTAssertEqual(AccessibilityPermissionPolling.totalTimeoutMilliseconds, 30_000)
+    }
+
+    func testTrimSliderMathCalculatesPositionsAndFormattedTime() {
+        XCTAssertEqual(
+            TrimSliderMath.startPosition(trimStart: 2, duration: 10, width: 100),
+            20
+        )
+        XCTAssertEqual(
+            TrimSliderMath.endPosition(trimEnd: 8, duration: 10, width: 100),
+            80
+        )
+        XCTAssertEqual(
+            TrimSliderMath.playheadPosition(currentTime: 5, duration: 10, width: 100),
+            50
+        )
+        XCTAssertEqual(TrimSliderMath.formattedTime(65.4), "1:05.4")
+    }
+
+    func testTrimSliderMathClampsSeekAndMaintainsMinimumRange() {
+        XCTAssertEqual(
+            TrimSliderMath.seekTime(locationX: -100, handleWidth: 12, usableWidth: 100, duration: 10),
+            0
+        )
+        XCTAssertEqual(
+            TrimSliderMath.seekTime(locationX: 500, handleWidth: 12, usableWidth: 100, duration: 10),
+            10
+        )
+        XCTAssertEqual(
+            TrimSliderMath.clampedStart(
+                origin: 4.8,
+                translationWidth: 100,
+                usableWidth: 100,
+                duration: 10,
+                trimEnd: 5
+            ),
+            4.5
+        )
+        XCTAssertEqual(
+            TrimSliderMath.clampedEnd(
+                origin: 5.2,
+                translationWidth: -100,
+                usableWidth: 100,
+                duration: 10,
+                trimStart: 5
+            ),
+            5.5
+        )
+    }
+
+    func testPostRecordingLogicShowsSaveTrimmedOnlyForMeaningfulTrimChanges() {
+        XCTAssertFalse(PostRecordingLogic.hasTrimChanges(duration: 0, trimStart: 1, trimEnd: 5))
+        XCTAssertFalse(PostRecordingLogic.hasTrimChanges(duration: 10, trimStart: 0.05, trimEnd: 9.95))
+        XCTAssertTrue(PostRecordingLogic.hasTrimChanges(duration: 10, trimStart: 0.2, trimEnd: 10))
+        XCTAssertTrue(PostRecordingLogic.hasTrimChanges(duration: 10, trimStart: 0, trimEnd: 9.8))
+    }
+
+    @MainActor
+    func testTextOverlayLayoutCapsImageHeightForLongText() {
+        let layout = TextOverlayLayout.imageSize(
+            suggestedTextSize: CGSize(width: 1000, height: 5000),
+            fontSize: 48,
+            maxWidth: 1600,
+            maxImageHeight: 360
+        )
+
+        XCTAssertLessThanOrEqual(layout.imageSize.height, 360)
+        XCTAssertGreaterThan(layout.textRect.height, 0)
+        XCTAssertLessThanOrEqual(layout.textRect.maxY, layout.imageSize.height)
+    }
+
+    @MainActor
+    func testTextOverlayLayoutKeepsTopPositionVisible() {
+        let yOffset = TextOverlayLayout.yOffset(
+            screenHeight: 1080,
+            overlayHeight: 360,
+            margin: 43.2,
+            position: .top
+        )
+
+        XCTAssertGreaterThanOrEqual(yOffset, 43.2)
+        XCTAssertLessThanOrEqual(yOffset + 360, 1080 - 43.2)
+    }
+
+    @MainActor
+    func testTextOverlayLayoutKeepsOversizedOverlayVisibleAsMuchAsPossible() {
+        let yOffset = TextOverlayLayout.yOffset(
+            screenHeight: 200,
+            overlayHeight: 180,
+            margin: 24,
+            position: .center
+        )
+
+        XCTAssertEqual(yOffset, 24)
+    }
+
+    private func makeTemporaryDirectory() throws -> URL {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("ReelTests-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        return directory
+    }
+
+    private func loadSourceInfoPlist() throws -> [String: Any] {
+        try loadPropertyList(at: repoRoot().appendingPathComponent("Sources/Info.plist"))
+    }
+
+    private func loadPropertyList(at url: URL) throws -> [String: Any] {
+        let data = try Data(contentsOf: url)
+        return try XCTUnwrap(
+            PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any]
+        )
+    }
+
+    private func repoRoot() -> URL {
+        URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+            .deletingLastPathComponent()
+    }
+
+    private func runProcess(_ executable: String, _ arguments: [String]) throws -> (
+        exitCode: Int32,
+        stdout: String,
+        stderr: String
+    ) {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: executable)
+        process.arguments = arguments
+
+        let stdout = Pipe()
+        let stderr = Pipe()
+        process.standardOutput = stdout
+        process.standardError = stderr
+
+        try process.run()
+        process.waitUntilExit()
+
+        return (
+            exitCode: process.terminationStatus,
+            stdout: String(data: stdout.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? "",
+            stderr: String(data: stderr.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+        )
     }
 }

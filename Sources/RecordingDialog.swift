@@ -14,6 +14,27 @@ enum RecordingSelection: Equatable {
     }
 }
 
+enum RecordingDialogLogic {
+    static func displayTitle(index: Int, displayCount: Int) -> String {
+        displayCount == 1 ? "Display" : "Display \(index + 1)"
+    }
+
+    static func windowTitle(appName: String?, windowTitle: String?) -> String {
+        let fallbackName = appName?.isEmpty == false ? appName! : "Unknown"
+        guard let title = windowTitle, !title.isEmpty, title != fallbackName else {
+            return fallbackName
+        }
+        return title
+    }
+
+    static func windowMatchesSearch(appName: String?, windowTitle: String?, query: String) -> Bool {
+        guard !query.isEmpty else { return true }
+        let normalizedQuery = query.lowercased()
+        return (appName ?? "").lowercased().contains(normalizedQuery) ||
+            (windowTitle ?? "").lowercased().contains(normalizedQuery)
+    }
+}
+
 struct RecordingDialog: View {
     let availableDisplays: [SCDisplay]
     let availableWindows: [SCWindow]
@@ -28,11 +49,12 @@ struct RecordingDialog: View {
     
     private var filteredWindows: [SCWindow] {
         guard !searchText.isEmpty else { return availableWindows }
-        let query = searchText.lowercased()
         return availableWindows.filter { window in
-            let appName = window.owningApplication?.applicationName ?? ""
-            let title = window.title ?? ""
-            return appName.lowercased().contains(query) || title.lowercased().contains(query)
+            RecordingDialogLogic.windowMatchesSearch(
+                appName: window.owningApplication?.applicationName,
+                windowTitle: window.title,
+                query: searchText
+            )
         }
     }
     
@@ -58,7 +80,10 @@ struct RecordingDialog: View {
                         ForEach(0..<availableDisplays.count, id: \.self) { index in
                             ThumbnailCard(
                                 image: displayThumbnails[index],
-                                title: availableDisplays.count == 1 ? "Display" : "Display \(index + 1)",
+                                title: RecordingDialogLogic.displayTitle(
+                                    index: index,
+                                    displayCount: availableDisplays.count
+                                ),
                                 isSelected: selection == .display(index),
                                 isLoading: isLoading,
                                 action: { selection = .display(index) },
@@ -146,26 +171,30 @@ struct RecordingDialog: View {
     private func loadThumbnails() async {
         // Load display thumbnails sequentially (SCDisplay isn't Sendable)
         for (index, display) in availableDisplays.enumerated() {
+            guard !Task.isCancelled else { return }
             if let image = await ThumbnailCapture.captureDisplay(display, maxSize: thumbnailSize) {
+                guard !Task.isCancelled else { return }
                 displayThumbnails[index] = image
             }
         }
 
         // Load window thumbnails sequentially (SCWindow isn't Sendable)
         for window in availableWindows {
+            guard !Task.isCancelled else { return }
             if let image = await ThumbnailCapture.captureWindow(window, maxSize: thumbnailSize) {
+                guard !Task.isCancelled else { return }
                 windowThumbnails[window.windowID] = image
             }
         }
+        guard !Task.isCancelled else { return }
         isLoading = false
     }
     
     private func windowTitle(for window: SCWindow) -> String {
-        let appName = window.owningApplication?.applicationName ?? "Unknown"
-        if let title = window.title, !title.isEmpty, title != appName {
-            return title
-        }
-        return appName
+        RecordingDialogLogic.windowTitle(
+            appName: window.owningApplication?.applicationName,
+            windowTitle: window.title
+        )
     }
     
     private func appIcon(for window: SCWindow) -> NSImage? {

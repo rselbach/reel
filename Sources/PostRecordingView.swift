@@ -24,6 +24,79 @@ struct VideoPlayerView: NSViewRepresentable {
 
 private enum TrimConstants {
     static let threshold: Double = 0.1
+    static let minimumDuration: Double = 0.5
+}
+
+enum TrimSliderMath {
+    static func startPosition(trimStart: Double, duration: Double, width: CGFloat) -> CGFloat {
+        guard duration > 0 else { return 0 }
+        return (trimStart / duration) * width
+    }
+
+    static func endPosition(trimEnd: Double, duration: Double, width: CGFloat) -> CGFloat {
+        guard duration > 0 else { return width }
+        return (trimEnd / duration) * width
+    }
+
+    static func playheadPosition(currentTime: Double, duration: Double, width: CGFloat) -> CGFloat {
+        guard duration > 0 else { return 0 }
+        return (currentTime / duration) * width
+    }
+
+    static func clampedStart(
+        origin: Double,
+        translationWidth: CGFloat,
+        usableWidth: CGFloat,
+        duration: Double,
+        trimEnd: Double
+    ) -> Double {
+        guard usableWidth > 0 else { return origin }
+        let delta = (translationWidth / usableWidth) * duration
+        let newStart = origin + delta
+        return min(max(0, newStart), trimEnd - TrimConstants.minimumDuration)
+    }
+
+    static func clampedEnd(
+        origin: Double,
+        translationWidth: CGFloat,
+        usableWidth: CGFloat,
+        duration: Double,
+        trimStart: Double
+    ) -> Double {
+        guard usableWidth > 0 else { return origin }
+        let delta = (translationWidth / usableWidth) * duration
+        let newEnd = origin + delta
+        return max(min(duration, newEnd), trimStart + TrimConstants.minimumDuration)
+    }
+
+    static func seekTime(locationX: CGFloat, handleWidth: CGFloat, usableWidth: CGFloat, duration: Double) -> Double {
+        guard usableWidth > 0 else { return 0 }
+        let newTime = (locationX - handleWidth) / usableWidth * duration
+        return min(max(0, newTime), duration)
+    }
+
+    static func formattedTime(_ seconds: Double) -> String {
+        let mins = Int(seconds) / 60
+        let secs = Int(seconds) % 60
+        let frac = Int((seconds.truncatingRemainder(dividingBy: 1)) * 10)
+        return String(format: "%d:%02d.%d", mins, secs, frac)
+    }
+}
+
+enum PostRecordingText {
+    static let loading = "Loading..."
+    static let revealInFinder = "Reveal in Finder"
+    static let delete = "Delete"
+    static let saveTrimmed = "Save Trimmed..."
+    static let done = "Done"
+    static let deleteConfirmationTitle = "Delete recording?"
+    static let deleteConfirmationMessage = "This will permanently remove the file from disk."
+}
+
+enum PostRecordingLogic {
+    static func hasTrimChanges(duration: Double, trimStart: Double, trimEnd: Double) -> Bool {
+        duration > 0 && (trimStart > TrimConstants.threshold || trimEnd < duration - TrimConstants.threshold)
+    }
 }
 
 struct PostRecordingView: View {
@@ -62,7 +135,7 @@ struct PostRecordingView: View {
                     .padding(.horizontal)
                 }
             } else {
-                ProgressView("Loading...")
+                ProgressView(PostRecordingText.loading)
                     .frame(minWidth: 640, minHeight: 360)
             }
 
@@ -73,11 +146,11 @@ struct PostRecordingView: View {
             }
 
             HStack(spacing: 12) {
-                Button("Reveal in Finder") {
+                Button(PostRecordingText.revealInFinder) {
                     onRevealInFinder()
                 }
 
-                Button("Delete", role: .destructive) {
+                Button(PostRecordingText.delete, role: .destructive) {
                     showDeleteConfirmation = true
                 }
                 .foregroundColor(.red)
@@ -85,7 +158,7 @@ struct PostRecordingView: View {
                 Spacer()
 
                 if hasTrimChanges {
-                    Button("Save Trimmed...") {
+                    Button(PostRecordingText.saveTrimmed) {
                         Task { await exportTrimmedVideo() }
                     }
                     .disabled(isExporting)
@@ -96,7 +169,7 @@ struct PostRecordingView: View {
                         .scaleEffect(0.7)
                 }
 
-                Button("Done") {
+                Button(PostRecordingText.done) {
                     onDismiss()
                 }
                 .buttonStyle(.borderedProminent)
@@ -105,13 +178,13 @@ struct PostRecordingView: View {
         }
         .padding()
         .frame(minWidth: 700, minHeight: 550)
-        .alert("Delete recording?", isPresented: $showDeleteConfirmation) {
-            Button("Delete", role: .destructive) {
+        .alert(PostRecordingText.deleteConfirmationTitle, isPresented: $showDeleteConfirmation) {
+            Button(PostRecordingText.delete, role: .destructive) {
                 onDelete()
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("This will permanently remove the file from disk.")
+            Text(PostRecordingText.deleteConfirmationMessage)
         }
         .onAppear {
             setupPlayer()
@@ -122,7 +195,7 @@ struct PostRecordingView: View {
     }
 
     private var hasTrimChanges: Bool {
-        duration > 0 && (trimStart > TrimConstants.threshold || trimEnd < duration - TrimConstants.threshold)
+        PostRecordingLogic.hasTrimChanges(duration: duration, trimStart: trimStart, trimEnd: trimEnd)
     }
 
     /// Safely tears down the player and time observer.
@@ -186,7 +259,10 @@ struct PostRecordingView: View {
 
         do {
             try await trimVideo(to: outputURL)
-            NSWorkspace.shared.selectFile(outputURL.path(), inFileViewerRootedAtPath: "")
+            let revealed = NSWorkspace.shared.selectFile(outputURL.path(), inFileViewerRootedAtPath: "")
+            if !revealed {
+                exportError = "Trimmed video saved, but Finder could not reveal it."
+            }
         } catch {
             exportError = "Export failed: \(error.localizedDescription)"
         }
@@ -214,9 +290,13 @@ struct PostRecordingView: View {
 
     private func trimVideo(to outputURL: URL) async throws {
         let asset = AVURLAsset(url: videoURL)
-
-        if FileManager.default.fileExists(atPath: outputURL.path()) {
-            try FileManager.default.removeItem(at: outputURL)
+        let tempURL = outputURL
+            .deletingLastPathComponent()
+            .appendingPathComponent(".\(outputURL.deletingPathExtension().lastPathComponent)-\(UUID().uuidString).mp4")
+        defer {
+            if FileManager.default.fileExists(atPath: tempURL.path()) {
+                try? FileManager.default.removeItem(at: tempURL)
+            }
         }
 
         let startTime = CMTime(seconds: trimStart, preferredTimescale: 600)
@@ -230,7 +310,8 @@ struct PostRecordingView: View {
             throw ExportError.sessionCreationFailed
         }
         session.timeRange = timeRange
-        try await session.export(to: outputURL, as: .mp4)
+        try await session.export(to: tempURL, as: .mp4)
+        try FileReplacement.commit(tempURL: tempURL, to: outputURL)
     }
 }
 
@@ -240,6 +321,39 @@ enum ExportError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .sessionCreationFailed: return "Could not create export session"
+        }
+    }
+}
+
+enum FileReplacement {
+    static func commit(
+        tempURL: URL,
+        to outputURL: URL,
+        fileManager: FileManager = .default
+    ) throws {
+        if tempURL == outputURL {
+            return
+        }
+
+        guard fileManager.fileExists(atPath: outputURL.path()) else {
+            try fileManager.moveItem(at: tempURL, to: outputURL)
+            return
+        }
+
+        let backupURL = outputURL
+            .deletingLastPathComponent()
+            .appendingPathComponent(".\(outputURL.lastPathComponent).reel-backup-\(UUID().uuidString)")
+
+        try fileManager.moveItem(at: outputURL, to: backupURL)
+        do {
+            try fileManager.moveItem(at: tempURL, to: outputURL)
+            try? fileManager.removeItem(at: backupURL)
+        } catch {
+            if !fileManager.fileExists(atPath: outputURL.path()),
+               fileManager.fileExists(atPath: backupURL.path()) {
+                try? fileManager.moveItem(at: backupURL, to: outputURL)
+            }
+            throw error
         }
     }
 }
@@ -270,9 +384,12 @@ struct TrimSlider: View {
                         .gesture(
                             DragGesture(minimumDistance: 0)
                                 .onChanged { value in
-                                    let newTime = (value.location.x - handleWidth) / usableWidth * duration
-                                    let clampedTime = min(max(0, newTime), duration)
-                                    onSeek(clampedTime)
+                                    onSeek(TrimSliderMath.seekTime(
+                                        locationX: value.location.x,
+                                        handleWidth: handleWidth,
+                                        usableWidth: usableWidth,
+                                        duration: duration
+                                    ))
                                 }
                         )
 
@@ -307,9 +424,13 @@ struct TrimSlider: View {
                                         startHandleDragOrigin = trimStart
                                     }
                                     let origin = startHandleDragOrigin ?? trimStart
-                                    let delta = (value.translation.width / usableWidth) * duration
-                                    let newStart = origin + delta
-                                    trimStart = min(max(0, newStart), trimEnd - 0.5)
+                                    trimStart = TrimSliderMath.clampedStart(
+                                        origin: origin,
+                                        translationWidth: value.translation.width,
+                                        usableWidth: usableWidth,
+                                        duration: duration,
+                                        trimEnd: trimEnd
+                                    )
                                     onSeek(trimStart)
                                 }
                                 .onEnded { _ in
@@ -328,9 +449,13 @@ struct TrimSlider: View {
                                         endHandleDragOrigin = trimEnd
                                     }
                                     let origin = endHandleDragOrigin ?? trimEnd
-                                    let delta = (value.translation.width / usableWidth) * duration
-                                    let newEnd = origin + delta
-                                    trimEnd = max(min(duration, newEnd), trimStart + 0.5)
+                                    trimEnd = TrimSliderMath.clampedEnd(
+                                        origin: origin,
+                                        translationWidth: value.translation.width,
+                                        usableWidth: usableWidth,
+                                        duration: duration,
+                                        trimStart: trimStart
+                                    )
                                     onSeek(trimEnd)
                                 }
                                 .onEnded { _ in
@@ -346,9 +471,12 @@ struct TrimSlider: View {
                         .gesture(
                             DragGesture()
                                 .onChanged { value in
-                                    let newTime = (value.location.x - handleWidth) / usableWidth * duration
-                                    let clampedTime = min(max(0, newTime), duration)
-                                    onSeek(clampedTime)
+                                    onSeek(TrimSliderMath.seekTime(
+                                        locationX: value.location.x,
+                                        handleWidth: handleWidth,
+                                        usableWidth: usableWidth,
+                                        duration: duration
+                                    ))
                                 }
                         )
                 }
@@ -372,25 +500,19 @@ struct TrimSlider: View {
     }
 
     private func startPosition(in width: CGFloat) -> CGFloat {
-        guard duration > 0 else { return 0 }
-        return (trimStart / duration) * width
+        TrimSliderMath.startPosition(trimStart: trimStart, duration: duration, width: width)
     }
 
     private func endPosition(in width: CGFloat) -> CGFloat {
-        guard duration > 0 else { return width }
-        return (trimEnd / duration) * width
+        TrimSliderMath.endPosition(trimEnd: trimEnd, duration: duration, width: width)
     }
 
     private func playheadPosition(in width: CGFloat) -> CGFloat {
-        guard duration > 0 else { return 0 }
-        return (currentTime / duration) * width
+        TrimSliderMath.playheadPosition(currentTime: currentTime, duration: duration, width: width)
     }
 
     private func formatTime(_ seconds: Double) -> String {
-        let mins = Int(seconds) / 60
-        let secs = Int(seconds) % 60
-        let frac = Int((seconds.truncatingRemainder(dividingBy: 1)) * 10)
-        return String(format: "%d:%02d.%d", mins, secs, frac)
+        TrimSliderMath.formattedTime(seconds)
     }
 }
 

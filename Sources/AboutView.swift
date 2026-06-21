@@ -1,6 +1,10 @@
 import Foundation
 import SwiftUI
 
+enum AboutLinks {
+    static let githubRepository = URL(string: "https://github.com/rselbach/reel")
+}
+
 struct AboutView: View {
     private var appVersion: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Unknown"
@@ -63,7 +67,7 @@ struct AboutView: View {
 
             HStack(spacing: 12) {
                 Button("GitHub") {
-                    if let url = URL(string: "https://github.com/rselbach/reel") {
+                    if let url = AboutLinks.githubRepository {
                         NSWorkspace.shared.open(url)
                     }
                 }

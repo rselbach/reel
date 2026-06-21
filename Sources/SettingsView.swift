@@ -4,6 +4,38 @@ import os.log
 
 private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "com.rselbach.reel", category: "SettingsView")
 
+enum SettingsText {
+    static let generalTab = "General"
+    static let recordingTab = "Recording"
+    static let shortcutsTab = "Shortcuts"
+    static let launchAtLogin = "Launch at login"
+    static let saveRecordingsTo = "Save recordings to:"
+    static let askEachTime = "Ask each time"
+    static let fixedFolder = "Fixed folder"
+    static let outputFolder = "Output folder:"
+    static let choose = "Choose..."
+    static let outputDirectoryNotWritable = "Cannot write to selected folder. Pick another location."
+    static let openFinderAfterRecording = "Open Finder after recording"
+    static let showPreviewAfterRecording = "Show preview after recording"
+    static let showCursor = "Show cursor in recording"
+    static let frameRate = "Frame rate:"
+    static let videoQuality = "Video quality:"
+    static let recordAudio = "Record audio from microphone"
+    static let audioInput = "Audio input:"
+    static let recordCamera = "Record camera overlay"
+    static let camera = "Camera:"
+    static let position = "Position:"
+    static let size = "Size:"
+    static let shape = "Shape:"
+    static let addTextOverlay = "Add text overlay"
+    static let text = "Text:"
+    static let toggleRecording = "Toggle recording:"
+    static let pressShortcut = "Press shortcut..."
+    static let shortcutHelp = "Press the button and type your desired shortcut."
+    static let defaultDevice = "Default"
+    static let unavailableDevice = "Unavailable device"
+}
+
 struct SettingsView: View {
     @ObservedObject var settings = AppSettings.shared
 
@@ -11,17 +43,17 @@ struct SettingsView: View {
         TabView {
             GeneralTab(settings: settings)
                 .tabItem {
-                    Label("General", systemImage: "gear")
+                    Label(SettingsText.generalTab, systemImage: "gear")
                 }
 
             RecordingTab(settings: settings)
                 .tabItem {
-                    Label("Recording", systemImage: "video")
+                    Label(SettingsText.recordingTab, systemImage: "video")
                 }
 
             ShortcutsTab(settings: settings)
                 .tabItem {
-                    Label("Shortcuts", systemImage: "keyboard")
+                    Label(SettingsText.shortcutsTab, systemImage: "keyboard")
                 }
         }
         .frame(width: 460, height: 420)
@@ -35,23 +67,23 @@ struct GeneralTab: View {
 
     var body: some View {
         Form {
-            Toggle("Launch at login", isOn: $settings.launchAtLogin)
+            Toggle(SettingsText.launchAtLogin, isOn: $settings.launchAtLogin)
 
-            Picker("Save recordings to:", selection: $settings.askWhereToSave) {
-                Text("Ask each time").tag(true)
-                Text("Fixed folder").tag(false)
+            Picker(SettingsText.saveRecordingsTo, selection: $settings.askWhereToSave) {
+                Text(SettingsText.askEachTime).tag(true)
+                Text(SettingsText.fixedFolder).tag(false)
             }
 
             if !settings.askWhereToSave {
                 HStack {
-                    Text("Output folder:")
+                    Text(SettingsText.outputFolder)
                     Text(settings.outputDirectory.path())
                         .lineLimit(1)
                         .truncationMode(.middle)
                         .foregroundColor(.secondary)
                         .frame(maxWidth: .infinity, alignment: .leading)
 
-                    Button("Choose...") {
+                    Button(SettingsText.choose) {
                         selectOutputDirectory()
                     }
                 }
@@ -63,8 +95,8 @@ struct GeneralTab: View {
                 }
             }
 
-            Toggle("Open Finder after recording", isOn: $settings.openFinderAfterRecording)
-            Toggle("Show preview after recording", isOn: $settings.showPreviewAfterRecording)
+            Toggle(SettingsText.openFinderAfterRecording, isOn: $settings.openFinderAfterRecording)
+            Toggle(SettingsText.showPreviewAfterRecording, isOn: $settings.showPreviewAfterRecording)
             if let launchError = settings.launchAtLoginError {
                 Text(launchError)
                     .font(.caption)
@@ -85,7 +117,7 @@ struct GeneralTab: View {
 
         if panel.runModal() == .OK, let url = panel.url {
             guard isValidWritableDirectory(url) else {
-                outputDirectoryError = "Cannot write to selected folder. Pick another location."
+                outputDirectoryError = SettingsText.outputDirectoryNotWritable
                 return
             }
             outputDirectoryError = nil
@@ -112,7 +144,10 @@ struct DevicePicker: View {
 
     var body: some View {
         Picker(title, selection: $selection) {
-            Text("Default").tag(nil as String?)
+            Text(SettingsText.defaultDevice).tag(nil as String?)
+            if let selection, !devices.contains(where: { $0.uniqueID == selection }) {
+                Text(SettingsText.unavailableDevice).tag(selection as String?)
+            }
             ForEach(devices, id: \.uniqueID) { device in
                 Text(device.localizedName).tag(device.uniqueID as String?)
             }
@@ -125,15 +160,15 @@ struct RecordingTab: View {
 
     var body: some View {
         Form {
-            Toggle("Show cursor in recording", isOn: $settings.showCursor)
+            Toggle(SettingsText.showCursor, isOn: $settings.showCursor)
 
-            Picker("Frame rate:", selection: $settings.frameRate) {
+            Picker(SettingsText.frameRate, selection: $settings.frameRate) {
                 ForEach(AppSettings.supportedFrameRates, id: \.self) { frameRate in
                     Text("\(frameRate) fps").tag(frameRate)
                 }
             }
 
-            Picker("Video quality:", selection: $settings.videoQuality) {
+            Picker(SettingsText.videoQuality, selection: $settings.videoQuality) {
                 ForEach(AppSettings.VideoQuality.allCases, id: \.self) { quality in
                     Text(quality.rawValue).tag(quality)
                 }
@@ -141,11 +176,11 @@ struct RecordingTab: View {
 
             Divider()
 
-            Toggle("Record audio from microphone", isOn: $settings.recordAudio)
+            Toggle(SettingsText.recordAudio, isOn: $settings.recordAudio)
 
             if settings.recordAudio {
                 DevicePicker(
-                    title: "Audio input:",
+                    title: SettingsText.audioInput,
                     devices: settings.availableAudioDevices,
                     selection: $settings.audioDeviceID
                 )
@@ -153,28 +188,28 @@ struct RecordingTab: View {
 
             Divider()
 
-            Toggle("Record camera overlay", isOn: $settings.recordCamera)
+            Toggle(SettingsText.recordCamera, isOn: $settings.recordCamera)
 
             if settings.recordCamera {
                 DevicePicker(
-                    title: "Camera:",
+                    title: SettingsText.camera,
                     devices: settings.availableCameras,
                     selection: $settings.cameraDeviceID
                 )
 
-                Picker("Position:", selection: $settings.cameraPosition) {
+                Picker(SettingsText.position, selection: $settings.cameraPosition) {
                     ForEach(AppSettings.CameraOverlayPosition.allCases, id: \.self) { position in
                         Text(position.rawValue).tag(position)
                     }
                 }
 
-                Picker("Size:", selection: $settings.cameraSize) {
+                Picker(SettingsText.size, selection: $settings.cameraSize) {
                     ForEach(AppSettings.CameraOverlaySize.allCases, id: \.self) { size in
                         Text(size.rawValue).tag(size)
                     }
                 }
 
-                Picker("Shape:", selection: $settings.cameraShape) {
+                Picker(SettingsText.shape, selection: $settings.cameraShape) {
                     ForEach(AppSettings.CameraOverlayShape.allCases, id: \.self) { shape in
                         Text(shape.rawValue).tag(shape)
                     }
@@ -183,15 +218,15 @@ struct RecordingTab: View {
 
             Divider()
 
-            Toggle("Add text overlay", isOn: $settings.textOverlayEnabled)
+            Toggle(SettingsText.addTextOverlay, isOn: $settings.textOverlayEnabled)
 
             if settings.textOverlayEnabled {
                 HStack {
-                    Text("Text:")
+                    Text(SettingsText.text)
                     TextField("", text: $settings.textOverlayText)
                 }
 
-                Picker("Position:", selection: $settings.textOverlayPosition) {
+                Picker(SettingsText.position, selection: $settings.textOverlayPosition) {
                     ForEach(AppSettings.TextOverlayPosition.allCases, id: \.self) { position in
                         Text(position.rawValue).tag(position)
                     }
@@ -209,10 +244,10 @@ struct ShortcutsTab: View {
     var body: some View {
         Form {
             HStack {
-                Text("Toggle recording:")
+                Text(SettingsText.toggleRecording)
                 Spacer()
                 Button(action: { isRecordingHotkey = true }) {
-                    Text(isRecordingHotkey ? "Press shortcut..." : settings.recordingHotkey.displayString)
+                    Text(isRecordingHotkey ? SettingsText.pressShortcut : settings.recordingHotkey.displayString)
                         .frame(minWidth: 100)
                 }
                 .background(HotkeyRecorder(
@@ -221,7 +256,7 @@ struct ShortcutsTab: View {
                 ))
             }
 
-            Text("Press the button and type your desired shortcut.")
+            Text(SettingsText.shortcutHelp)
                 .font(.caption)
                 .foregroundColor(.secondary)
         }
@@ -254,6 +289,36 @@ struct HotkeyRecorder: NSViewRepresentable {
     }
 }
 
+enum HotkeyRecorderLogic {
+    enum Decision: Equatable {
+        case cancel
+        case record(keyCode: UInt16, modifiers: UInt32)
+        case reject
+        case passThrough
+    }
+
+    static func decision(keyCode: UInt16, modifierFlags: NSEvent.ModifierFlags) -> Decision {
+        if keyCode == KeyCode.escape {
+            return .cancel
+        }
+
+        guard modifierFlags.contains(.command) ||
+              modifierFlags.contains(.control) ||
+              modifierFlags.contains(.option) ||
+              modifierFlags.contains(.shift) else {
+            return .passThrough
+        }
+
+        let modifiers = UInt32(modifierFlags.rawValue) & AppSettings.HotkeyCombo.modifierMask
+        let combo = AppSettings.HotkeyCombo(keyCode: keyCode, modifiers: modifiers)
+        guard combo.isUsableGlobalShortcut else {
+            return .reject
+        }
+
+        return .record(keyCode: keyCode, modifiers: modifiers)
+    }
+}
+
 class HotkeyRecorderView: NSView {
     var onHotkeyRecorded: ((UInt16, UInt32) -> Void)?
     var onCancel: (() -> Void)?
@@ -268,19 +333,19 @@ class HotkeyRecorderView: NSView {
     func startRecording() {
         guard monitor == nil else { return }
         monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { [weak self] event in
-            if event.keyCode == KeyCode.escape {
+            switch HotkeyRecorderLogic.decision(keyCode: event.keyCode, modifierFlags: event.modifierFlags) {
+            case .cancel:
                 self?.onCancel?()
                 return nil
-            } else if event.modifierFlags.contains(.command) ||
-                      event.modifierFlags.contains(.control) ||
-                      event.modifierFlags.contains(.option) ||
-                      event.modifierFlags.contains(.shift) {
-                // Mask to device-independent bits only for cross-API compatibility
-                let modifiers = UInt32(event.modifierFlags.rawValue) & AppSettings.HotkeyCombo.modifierMask
-                self?.onHotkeyRecorded?(event.keyCode, modifiers)
+            case .record(let keyCode, let modifiers):
+                self?.onHotkeyRecorded?(keyCode, modifiers)
                 return nil
+            case .reject:
+                NSSound.beep()
+                return nil
+            case .passThrough:
+                return event
             }
-            return event
         }
     }
 

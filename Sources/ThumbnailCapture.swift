@@ -4,6 +4,18 @@ import ScreenCaptureKit
 
 private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "com.rselbach.reel", category: "ThumbnailCapture")
 
+enum ThumbnailSizing {
+    static func targetSize(sourceSize: CGSize, maxSize: CGSize) -> CGSize? {
+        guard sourceSize.width > 0, sourceSize.height > 0 else { return nil }
+
+        let scale = min(maxSize.width / sourceSize.width, maxSize.height / sourceSize.height)
+        return CGSize(
+            width: max(1, Int(sourceSize.width * scale)),
+            height: max(1, Int(sourceSize.height * scale))
+        )
+    }
+}
+
 @MainActor
 class ThumbnailCapture {
     static func captureDisplay(_ display: SCDisplay, maxSize: CGSize = CGSize(width: 320, height: 180)) async -> NSImage? {
@@ -26,14 +38,13 @@ class ThumbnailCapture {
         do {
             let config = SCStreamConfiguration()
 
-            guard sourceSize.width > 0, sourceSize.height > 0 else {
+            guard let targetSize = ThumbnailSizing.targetSize(sourceSize: sourceSize, maxSize: maxSize) else {
                 logger.warning("Cannot capture thumbnail for zero-size source: \(sourceSize.width)x\(sourceSize.height)")
                 return nil
             }
 
-            let scale = min(maxSize.width / sourceSize.width, maxSize.height / sourceSize.height)
-            config.width = max(1, Int(sourceSize.width * scale))
-            config.height = max(1, Int(sourceSize.height * scale))
+            config.width = Int(targetSize.width)
+            config.height = Int(targetSize.height)
             config.pixelFormat = kCVPixelFormatType_32BGRA
             config.showsCursor = false
 

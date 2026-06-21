@@ -1,6 +1,39 @@
 import AVFoundation
 import SwiftUI
 
+enum CameraOverlayLayout {
+    static func originFromNormalized(
+        x: CGFloat,
+        y: CGFloat,
+        overlaySize: CGFloat,
+        bounds: CGRect
+    ) -> CGPoint {
+        let availableWidth = bounds.width - overlaySize
+        let availableHeight = bounds.height - overlaySize
+
+        return CGPoint(
+            x: bounds.minX + (x * availableWidth),
+            y: bounds.minY + (y * availableHeight)
+        )
+    }
+
+    static func normalizedPosition(
+        origin: CGPoint,
+        overlaySize: CGFloat,
+        bounds: CGRect
+    ) -> (x: CGFloat, y: CGFloat)? {
+        let availableWidth = bounds.width - overlaySize
+        let availableHeight = bounds.height - overlaySize
+
+        guard availableWidth > 0, availableHeight > 0 else { return nil }
+
+        return (
+            x: (origin.x - bounds.minX) / availableWidth,
+            y: (origin.y - bounds.minY) / availableHeight
+        )
+    }
+}
+
 /// Floating window sized exactly to the camera preview.
 /// The window itself is dragged rather than using SwiftUI gestures.
 final class CameraOverlayWindow: NSWindow {
@@ -62,17 +95,13 @@ final class CameraOverlayWindow: NSWindow {
     }
     
     private func notifyPositionChanged() {
-        let availableWidth = dragBounds.width - overlaySize
-        let availableHeight = dragBounds.height - overlaySize
-        
-        guard availableWidth > 0, availableHeight > 0 else { return }
-        
-        // Normalize to 0-1
-        let normalizedX = (frame.origin.x - dragBounds.minX) / availableWidth
-        // macOS screen coords: 0 = bottom, Core Image also uses 0 = bottom
-        let normalizedY = (frame.origin.y - dragBounds.minY) / availableHeight
-        
-        onPositionChanged?(normalizedX, normalizedY)
+        guard let position = CameraOverlayLayout.normalizedPosition(
+            origin: frame.origin,
+            overlaySize: overlaySize,
+            bounds: dragBounds
+        ) else { return }
+
+        onPositionChanged?(position.x, position.y)
     }
 }
 
@@ -107,7 +136,7 @@ final class CameraOverlayController {
         
         // Convert normalized position to screen coordinates
         let coords = initialPosition.normalizedCoordinates
-        let windowOrigin = originFromNormalized(
+        let windowOrigin = CameraOverlayLayout.originFromNormalized(
             x: coords.x,
             y: coords.y,
             overlaySize: overlaySize,
@@ -139,21 +168,5 @@ final class CameraOverlayController {
     
     func updateBounds(_ newBounds: CGRect) {
         window?.dragBounds = newBounds
-    }
-    
-    private func originFromNormalized(
-        x: CGFloat,
-        y: CGFloat,
-        overlaySize: CGFloat,
-        bounds: CGRect
-    ) -> CGPoint {
-        let availableWidth = bounds.width - overlaySize
-        let availableHeight = bounds.height - overlaySize
-        
-        // x/y are 0-1, y=0 is bottom in Core Image coords (matches macOS screen coords)
-        return CGPoint(
-            x: bounds.minX + (x * availableWidth),
-            y: bounds.minY + (y * availableHeight)
-        )
     }
 }

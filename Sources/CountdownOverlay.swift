@@ -7,6 +7,19 @@ private enum CountdownConstants {
     static let barHeight: CGFloat = 80
 }
 
+enum CountdownLayout {
+    static let sequence = [3, 2, 1]
+
+    static func barFrame(referenceFrame: CGRect) -> CGRect {
+        CGRect(
+            x: referenceFrame.origin.x,
+            y: referenceFrame.origin.y,
+            width: referenceFrame.width,
+            height: CountdownConstants.barHeight
+        )
+    }
+}
+
 @MainActor
 class CountdownOverlay {
     private var window: CountdownWindow?
@@ -30,12 +43,7 @@ class CountdownOverlay {
             return false
         }
 
-        let barFrame = NSRect(
-            x: referenceFrame.origin.x,
-            y: referenceFrame.origin.y,
-            width: referenceFrame.width,
-            height: CountdownConstants.barHeight
-        )
+        let barFrame = CountdownLayout.barFrame(referenceFrame: referenceFrame)
         
         let window = CountdownWindow(
             contentRect: barFrame,
@@ -66,7 +74,7 @@ class CountdownOverlay {
         self.window = window
         self.label = label
         
-        for count in [3, 2, 1] {
+        for count in CountdownLayout.sequence {
             if cancelled { break }
             label.stringValue = "\(count)"
             guard await waitOneSecond() else {

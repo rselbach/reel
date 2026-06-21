@@ -5,8 +5,51 @@ import SwiftUI
 
 private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "com.rselbach.reel", category: "AppDelegate")
 
+enum SystemSettingsLink {
+    static let screenCapturePrivacy = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")
+}
+
+enum AppMenuText {
+    static let screenRecordingPermissionRequired = "Screen Recording Permission Required"
+    static let openSystemSettings = "Open System Settings..."
+    static let checkPermission = "Check Permission"
+    static let startRecording = "Start Recording..."
+    static let recordingInProgress = "● Recording..."
+    static let stopRecording = "Stop Recording"
+    static let enableKeyboardShortcuts = "Enable Keyboard Shortcuts..."
+    static let aboutReel = "About Reel"
+    static let checkForUpdates = "Check for Updates..."
+    static let settings = "Settings..."
+    static let quitReel = "Quit Reel"
+    static let hotkeyError = "Hotkey Error"
+    static let unableToOpenSettings = "Unable to open settings"
+    static let failedToOpenPrivacySettings = "Failed to open system privacy settings."
+    static let couldNotOpenSystemPreferences = "Could not open System Preferences."
+    static let couldNotRevealRecording = "Could not reveal recording"
+    static let couldNotDeleteRecording = "Could not delete recording"
+    static let recordingPreviewTitle = "Recording Preview"
+    static let newRecordingTitle = "New Recording"
+    static let settingsWindowTitle = "Reel Settings"
+}
+
+enum AppTerminationLogic {
+    static func reply(isRecorderInitialized: Bool, isRecording: Bool) -> NSApplication.TerminateReply {
+        guard isRecorderInitialized else { return .terminateNow }
+        return isRecording ? .terminateLater : .terminateNow
+    }
+}
+
+enum AccessibilityPermissionPolling {
+    static let maxAttempts = 60
+    static let intervalMilliseconds = 500
+
+    static var totalTimeoutMilliseconds: Int {
+        maxAttempts * intervalMilliseconds
+    }
+}
+
 @MainActor
-class AppDelegate: NSObject, NSApplicationDelegate {
+class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var statusItem: NSStatusItem!
     private var screenRecorder: ScreenRecorder!
     private var settingsWindow: NSWindow?
@@ -23,7 +66,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     )
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        guard screenRecorder.isRecording else { return .terminateNow }
+        let reply = AppTerminationLogic.reply(
+            isRecorderInitialized: screenRecorder != nil,
+            isRecording: screenRecorder?.isRecording ?? false
+        )
+        guard reply == .terminateLater else { return reply }
+
         // Finalize the in-flight recording before quitting so it isn't lost.
         Task { @MainActor in
             hideCameraOverlay()
@@ -113,7 +161,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     private func showHotkeyDisabledAlert(message: String) {
         Task { @MainActor in
             let alert = NSAlert()
-            alert.messageText = "Hotkey Error"
+            alert.messageText = AppMenuText.hotkeyError
             alert.informativeText = message
             alert.alertStyle = .warning
             alert.addButton(withTitle: "OK")
@@ -142,29 +190,29 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func addPermissionItems(to menu: NSMenu) {
-        let permItem = NSMenuItem(title: "Screen Recording Permission Required", action: nil, keyEquivalent: "")
+        let permItem = NSMenuItem(title: AppMenuText.screenRecordingPermissionRequired, action: nil, keyEquivalent: "")
         permItem.isEnabled = false
         menu.addItem(permItem)
 
-        menu.addItem(NSMenuItem(title: "Open System Settings...", action: #selector(openSettings), keyEquivalent: ""))
-        menu.addItem(NSMenuItem(title: "Check Permission", action: #selector(checkPermission), keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: AppMenuText.openSystemSettings, action: #selector(openSettings), keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: AppMenuText.checkPermission, action: #selector(checkPermission), keyEquivalent: ""))
     }
 
     private func addRecordingItems(to menu: NSMenu) {
         guard screenRecorder.isRecording else {
-            menu.addItem(NSMenuItem(title: "Start Recording...", action: #selector(showRecordingDialog), keyEquivalent: "r"))
+            menu.addItem(NSMenuItem(title: AppMenuText.startRecording, action: #selector(showRecordingDialog), keyEquivalent: "r"))
             return
         }
-        let recordingItem = NSMenuItem(title: "● Recording...", action: nil, keyEquivalent: "")
+        let recordingItem = NSMenuItem(title: AppMenuText.recordingInProgress, action: nil, keyEquivalent: "")
         recordingItem.isEnabled = false
         menu.addItem(recordingItem)
-        menu.addItem(NSMenuItem(title: "Stop Recording", action: #selector(stopRecording), keyEquivalent: "s"))
+        menu.addItem(NSMenuItem(title: AppMenuText.stopRecording, action: #selector(stopRecording), keyEquivalent: "s"))
     }
 
     private func addAccessibilityItems(to menu: NSMenu) {
         if !HotkeyManager.shared.hasAccessibilityPermission() {
             menu.addItem(NSMenuItem.separator())
-            let accessItem = NSMenuItem(title: "Enable Keyboard Shortcuts...", action: #selector(requestAccessibility), keyEquivalent: "")
+            let accessItem = NSMenuItem(title: AppMenuText.enableKeyboardShortcuts, action: #selector(requestAccessibility), keyEquivalent: "")
             menu.addItem(accessItem)
         }
     }
@@ -186,11 +234,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func addStandardItems(to menu: NSMenu) {
         menu.addItem(NSMenuItem.separator())
-        menu.addItem(NSMenuItem(title: "About Reel", action: #selector(showAbout), keyEquivalent: ""))
-        menu.addItem(NSMenuItem(title: "Check for Updates...", action: #selector(checkForUpdates), keyEquivalent: ""))
-        menu.addItem(NSMenuItem(title: "Settings...", action: #selector(openPreferences), keyEquivalent: ","))
+        menu.addItem(NSMenuItem(title: AppMenuText.aboutReel, action: #selector(showAbout), keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: AppMenuText.checkForUpdates, action: #selector(checkForUpdates), keyEquivalent: ""))
+        menu.addItem(NSMenuItem(title: AppMenuText.settings, action: #selector(openPreferences), keyEquivalent: ","))
         menu.addItem(NSMenuItem.separator())
-        menu.addItem(NSMenuItem(title: "Quit Reel", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
+        menu.addItem(NSMenuItem(title: AppMenuText.quitReel, action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
     }
 
     private func makeWindow<Content: View>(
@@ -204,7 +252,22 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         window.styleMask = styleMask
         window.center()
         window.isReleasedWhenClosed = false
+        window.delegate = self
         return window
+    }
+
+    func windowWillClose(_ notification: Notification) {
+        guard let window = notification.object as? NSWindow else { return }
+
+        if window === settingsWindow {
+            settingsWindow = nil
+        } else if window === recordingDialogWindow {
+            recordingDialogWindow = nil
+        } else if window === previewWindow {
+            previewWindow = nil
+        } else if window === aboutWindow {
+            aboutWindow = nil
+        }
     }
 
     private func presentWindow(_ window: NSWindow?) {
@@ -226,7 +289,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func showAbout() {
         if aboutWindow == nil {
             aboutWindow = makeWindow(
-                title: "About Reel",
+                title: AppMenuText.aboutReel,
                 styleMask: [.titled, .closable],
                 rootView: AboutView()
             )
@@ -240,14 +303,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func openSettings() {
-        guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture") else {
+        guard let url = SystemSettingsLink.screenCapturePrivacy else {
             logger.error("Failed to create System Settings URL for screen capture privacy settings")
-            showErrorAlert(title: "Unable to open settings", message: "Failed to open system privacy settings.")
+            showErrorAlert(title: AppMenuText.unableToOpenSettings, message: AppMenuText.failedToOpenPrivacySettings)
             return
         }
         let opened = NSWorkspace.shared.open(url)
         if !opened {
-            showErrorAlert(title: "Unable to open settings", message: "Could not open System Preferences.")
+            showErrorAlert(title: AppMenuText.unableToOpenSettings, message: AppMenuText.couldNotOpenSystemPreferences)
         }
     }
 
@@ -291,16 +354,24 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 self?.previewWindow = nil
             },
             onRevealInFinder: {
-                NSWorkspace.shared.selectFile(url.path(), inFileViewerRootedAtPath: "")
+                let revealed = NSWorkspace.shared.selectFile(url.path(), inFileViewerRootedAtPath: "")
+                if !revealed {
+                    let alert = NSAlert()
+                    alert.messageText = AppMenuText.couldNotRevealRecording
+                    alert.informativeText = "Finder could not reveal the recording at \(url.path())."
+                    alert.alertStyle = .warning
+                    alert.runModal()
+                }
             },
             onDelete: { [weak self] in
                 do {
                     try FileManager.default.removeItem(at: url)
                 } catch {
                     let alert = NSAlert()
-                    alert.messageText = "Could not delete recording"
+                    alert.messageText = AppMenuText.couldNotDeleteRecording
                     alert.informativeText = error.localizedDescription
                     alert.alertStyle = .warning
+                    alert.addButton(withTitle: "OK")
                     alert.runModal()
                     return
                 }
@@ -310,7 +381,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         )
 
         previewWindow = makeWindow(
-            title: "Recording Preview",
+            title: AppMenuText.recordingPreviewTitle,
             styleMask: [.titled, .closable, .resizable],
             rootView: previewView
         )
@@ -342,7 +413,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             )
 
             recordingDialogWindow = makeWindow(
-                title: "New Recording",
+                title: AppMenuText.newRecordingTitle,
                 styleMask: [.titled, .closable],
                 rootView: dialogView
             )
@@ -352,6 +423,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     
     private func startRecording(selection: RecordingSelection) {
         Task { @MainActor in
+            guard !isCountdownActive else { return }
+
             switch selection {
             case .display(let index):
                 screenRecorder.selectedDisplayIndex = index
@@ -360,8 +433,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 screenRecorder.selectedWindow = window
                 screenRecorder.recordingMode = .window
             }
-            
-            guard await CountdownOverlay().show(targetFrame: screenRecorder.countdownTargetFrame) else { return }
+
+            isCountdownActive = true
+            let shouldStart = await CountdownOverlay().show(targetFrame: screenRecorder.countdownTargetFrame)
+            isCountdownActive = false
+            guard shouldStart else { return }
             await screenRecorder.startRecording()
             showCameraOverlayIfNeeded()
             rebuildMenu()
@@ -401,10 +477,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         // Poll for permission with timeout instead of fixed delay
         Task { @MainActor in
-            let maxAttempts = 60  // 30 seconds at 0.5s intervals
-            for _ in 0..<maxAttempts {
+            for _ in 0..<AccessibilityPermissionPolling.maxAttempts {
                 do {
-                    try await Task.sleep(for: .milliseconds(500))
+                    try await Task.sleep(for: .milliseconds(AccessibilityPermissionPolling.intervalMilliseconds))
                 } catch {
                     logger.warning("Accessibility permission polling interrupted: \(error.localizedDescription)")
                     return
@@ -423,7 +498,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     @objc private func openPreferences() {
         if settingsWindow == nil {
             settingsWindow = makeWindow(
-                title: "Reel Settings",
+                title: AppMenuText.settingsWindowTitle,
                 styleMask: [.titled, .closable],
                 rootView: SettingsView()
             )
@@ -433,6 +508,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func updateIcon(isRecording: Bool) {
+        if !isRecording {
+            hideCameraOverlay()
+        }
+
         if let button = statusItem.button {
             let symbolName = isRecording ? "record.circle.fill" : "record.circle"
             button.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: "Reel")

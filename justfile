@@ -102,7 +102,7 @@ _dmg-only:
     mkdir -p "$dmg_staging"
     cp -R "{{ app_dir }}" "$dmg_staging/"
     ln -s /Applications "$dmg_staging/Applications"
-    hdiutil create -volname "{{ app_name }}" -srcfolder "$dmg_staging" -ov -format UDZO "$dmg_path"
+    diskutil image create from --format UDZO --volumeName "{{ app_name }}" "$dmg_staging" "$dmg_path"
     rm -rf "$dmg_staging"
     echo "Created: $dmg_path"
 
@@ -133,6 +133,22 @@ run: build-app
 clean:
     rm -rf .build
 
+# Validate feature tracker and manual validation checklist
+validate-docs:
+    python3 scripts/validate-feature-docs.py
+
+# Regenerate manual validation checklist from canonical tracker
+generate-checklist:
+    python3 scripts/generate-manual-validation-checklist.py
+
+# Record a manual validation result in the canonical tracker
+record-manual story_id result notes="":
+    python3 scripts/record-manual-validation.py --id "{{ story_id }}" --result "{{ result }}" --notes "{{ notes }}"
+
+# Preview a manual validation result without writing files
+record-manual-dry-run story_id result notes="":
+    python3 scripts/record-manual-validation.py --id "{{ story_id }}" --result "{{ result }}" --notes "{{ notes }}" --dry-run
+
 # List available signing identities
 list-identities:
     security find-identity -v -p codesigning
@@ -148,6 +164,10 @@ help:
     @echo "  notarize       Sign and notarize the app"
     @echo "  dmg            Create unsigned .dmg"
     @echo "  dmg-signed     Create signed .dmg"
+    @echo "  validate-docs  Validate feature tracker docs"
+    @echo "  generate-checklist Regenerate manual checklist from CSV"
+    @echo "  record-manual  Record manual validation result in CSV"
+    @echo "  record-manual-dry-run Preview manual validation result"
     @echo "  run            Build and open the app"
     @echo "  clean          Remove build artifacts"
     @echo "  list-identities Show available signing certs"

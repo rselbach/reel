@@ -6,6 +6,10 @@ import ServiceManagement
 
 private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "com.rselbach.reel", category: "Settings")
 
+enum SettingsErrorText {
+    static let launchAtLoginUpdateFailed = "Failed to update launch at login"
+}
+
 // MARK: - Key Codes (Carbon virtual key codes)
 enum KeyCode {
     static let escape: UInt16 = 53
@@ -349,8 +353,13 @@ class AppSettings: ObservableObject {
 
         // Device-independent modifier mask (works for both NSEvent and CGEvent)
         static let modifierMask: UInt32 = 0x1E0000  // Cmd|Opt|Ctrl|Shift
+        private static let nonShiftModifierMask: UInt32 = 0x1C0000  // Cmd|Opt|Ctrl
 
         static let `default` = HotkeyCombo(keyCode: 15, modifiers: 0x120000) // Cmd+Shift+R
+
+        var isUsableGlobalShortcut: Bool {
+            modifiers & Self.nonShiftModifierMask != 0
+        }
 
         var displayString: String {
             var parts: [String] = []
@@ -401,6 +410,10 @@ class AppSettings: ObservableObject {
                 // Old value masked to 0x100000 (Cmd only), new value masks to 0x120000 (Cmd+Shift)
                 if combo.keyCode == HotkeyCombo.default.keyCode && combo.modifiers == 0x180500 {
                     logger.info("Migrating hotkey from old modifier format")
+                    return .default
+                }
+                guard combo.isUsableGlobalShortcut else {
+                    logger.warning("Stored recording hotkey is not suitable for a global shortcut; falling back to default")
                     return .default
                 }
                 return combo
@@ -467,9 +480,9 @@ class AppSettings: ObservableObject {
             }
         } catch {
             logger.error("Failed to update launch at login: \(error)")
-            launchAtLoginError = "Failed to update launch at login"
+            launchAtLoginError = SettingsErrorText.launchAtLoginUpdateFailed
             isSyncingLaunchAtLogin = true
-            launchAtLogin = false
+            launchAtLogin = SMAppService.mainApp.status == .enabled
             isSyncingLaunchAtLogin = false
         }
     }
