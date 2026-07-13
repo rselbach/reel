@@ -160,6 +160,12 @@ class ScreenRecorder: NSObject, ObservableObject {
     @Published var errorMessage: String?
     @Published var lastRecordedURL: URL?
 
+    /// Invoked when a recording ends without the user asking it to (stream
+    /// error or writer failure), after errorMessage and lastRecordedURL are
+    /// updated. Lets the app surface the failure instead of burying it in the
+    /// menu.
+    var onUnexpectedStop: (() -> Void)?
+
     var countdownTargetFrame: CGRect? {
         switch recordingMode {
         case .display:
@@ -899,6 +905,7 @@ class ScreenRecorder: NSObject, ObservableObject {
 
         cleanup()
         isRecording = false
+        onUnexpectedStop?()
     }
 
     private func startCaptureSessions() -> (audioFailed: Bool, cameraFailed: Bool) {
@@ -1301,8 +1308,10 @@ class ScreenRecorder: NSObject, ObservableObject {
     /// session ended instead of silently dropping every subsequent frame while
     /// the UI still claims to be recording.
     private func stopAfterWriteFailure(context: String, reason: String) async {
-        defer { errorMessage = "\(context): \(reason)" }
-        guard isRecording, !isStopping else { return }
+        guard isRecording, !isStopping else {
+            errorMessage = "\(context): \(reason)"
+            return
+        }
         isStopping = true
         defer { isStopping = false }
 
@@ -1319,6 +1328,8 @@ class ScreenRecorder: NSObject, ObservableObject {
         }
         cleanup()
         isRecording = false
+        errorMessage = "\(context): \(reason)"
+        onUnexpectedStop?()
     }
 }
 

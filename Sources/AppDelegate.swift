@@ -22,6 +22,9 @@ enum AppMenuText {
     static let settings = "Settings..."
     static let quitReel = "Quit Reel"
     static let hotkeyError = "Hotkey Error"
+    static let recordingFailed = "Recording Failed"
+    static let recordingWarning = "Recording Warning"
+    static let recordingStopped = "Recording Stopped"
     static let unableToOpenSettings = "Unable to open settings"
     static let failedToOpenPrivacySettings = "Failed to open system privacy settings."
     static let couldNotOpenSystemPreferences = "Could not open System Preferences."
@@ -90,6 +93,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         screenRecorder = ScreenRecorder()
+        screenRecorder.onUnexpectedStop = { [weak self] in
+            self?.handleUnexpectedStop()
+        }
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
 
@@ -154,7 +160,29 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 await self.screenRecorder.startRecording()
                 self.showCameraOverlayIfNeeded()
                 self.rebuildMenu()
+                self.reportStartOutcome()
             }
+        }
+    }
+
+    /// Surfaces start failures (and degraded starts, e.g. mic didn't come up)
+    /// as alerts instead of leaving them buried in the status item menu.
+    private func reportStartOutcome() {
+        guard let message = screenRecorder.errorMessage else { return }
+        let title = screenRecorder.isRecording
+            ? AppMenuText.recordingWarning
+            : AppMenuText.recordingFailed
+        showErrorAlert(title: title, message: message)
+    }
+
+    private func handleUnexpectedStop() {
+        rebuildMenu()
+        if let message = screenRecorder.errorMessage {
+            showErrorAlert(title: AppMenuText.recordingStopped, message: message)
+        }
+        if AppSettings.shared.showPreviewAfterRecording,
+           let url = screenRecorder.lastRecordedURL {
+            showPreview(for: url)
         }
     }
 
@@ -315,6 +343,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     private func showErrorAlert(title: String, message: String) {
+        NSApp.activate(ignoringOtherApps: true)
         let alert = NSAlert()
         alert.messageText = title
         alert.informativeText = message
@@ -441,6 +470,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             await screenRecorder.startRecording()
             showCameraOverlayIfNeeded()
             rebuildMenu()
+            reportStartOutcome()
         }
     }
     
