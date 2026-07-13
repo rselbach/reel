@@ -1,5 +1,11 @@
 import AppKit
 
+extension NSScreen {
+    var displayID: CGDirectDisplayID? {
+        deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID
+    }
+}
+
 /// Converts a Quartz coordinate rect (origin top-left, Y down — used by
 /// `SCDisplay.frame` / `SCWindow.frame`) to a Cocoa coordinate rect (origin
 /// bottom-left, Y up — used by `NSWindow`).

@@ -418,6 +418,22 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(GitInfo.normalizedCommit(fullSHA), fullSHA.lowercased())
     }
 
+    func testRegionMathConvertsCocoaSelectionToQuartz() {
+        let quartz = RegionMath.quartzRect(
+            fromScreenLocalCocoa: CGRect(x: 100, y: 100, width: 400, height: 200),
+            screenHeight: 900
+        )
+        XCTAssertEqual(quartz, CGRect(x: 100, y: 600, width: 400, height: 200))
+    }
+
+    func testRegionMathPlacesRegionInGlobalQuartzSpace() {
+        let global = RegionMath.globalQuartzFrame(
+            regionRect: CGRect(x: 10, y: 20, width: 300, height: 200),
+            displayFrame: CGRect(x: 1440, y: 0, width: 2560, height: 1440)
+        )
+        XCTAssertEqual(global, CGRect(x: 1450, y: 20, width: 300, height: 200))
+    }
+
     func testCameraCompositeSquareCropCentersOnLongAxis() {
         let landscape = CameraCompositeLayout.squareCropRect(width: 1920, height: 1080)
         XCTAssertEqual(landscape, CGRect(x: 420, y: 0, width: 1080, height: 1080))

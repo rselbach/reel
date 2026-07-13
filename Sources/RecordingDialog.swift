@@ -4,11 +4,13 @@ import ScreenCaptureKit
 enum RecordingSelection: Equatable {
     case display(Int)
     case window(SCWindow)
-    
+    case region
+
     static func == (lhs: RecordingSelection, rhs: RecordingSelection) -> Bool {
         switch (lhs, rhs) {
         case (.display(let l), .display(let r)): return l == r
         case (.window(let l), .window(let r)): return l.windowID == r.windowID
+        case (.region, .region): return true
         default: return false
         }
     }
@@ -96,7 +98,18 @@ struct RecordingDialog: View {
                 }
                 .frame(height: 130)
             }
-            
+
+            HStack {
+                Button {
+                    onStart(.region)
+                } label: {
+                    Label("Select Area to Record...", systemImage: "rectangle.dashed")
+                }
+                Spacer()
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
+
             if !availableWindows.isEmpty {
                 HStack {
                     Text("Windows")

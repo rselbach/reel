@@ -8,15 +8,10 @@ import UniformTypeIdentifiers
 
 private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "com.rselbach.reel", category: "ScreenRecorder")
 
-private extension NSScreen {
-    var displayID: CGDirectDisplayID? {
-        deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? CGDirectDisplayID
-    }
-}
-
 enum RecordingMode {
     case display
     case window
+    case region
 }
 
 private enum RecordingConstants {
@@ -172,6 +167,7 @@ class ScreenRecorder: NSObject, ObservableObject {
     @Published var availableWindows: [SCWindow] = []
     @Published var selectedDisplayIndex = 0
     @Published var selectedWindow: SCWindow?
+    @Published var selectedRegion: RecordingRegion?
     @Published var recordingMode: RecordingMode = .display
     @Published var errorMessage: String?
     @Published var lastRecordedURL: URL?
@@ -189,7 +185,15 @@ class ScreenRecorder: NSObject, ObservableObject {
             return availableDisplays[selectedDisplayIndex].frame
         case .window:
             return selectedWindow?.frame
+        case .region:
+            guard let region = selectedRegion,
+                  let display = regionDisplay(for: region) else { return nil }
+            return RegionMath.globalQuartzFrame(regionRect: region.rect, displayFrame: display.frame)
         }
+    }
+
+    private func regionDisplay(for region: RecordingRegion) -> SCDisplay? {
+        availableDisplays.first { $0.displayID == region.displayID }
     }
 
     private var stream: SCStream?
@@ -282,6 +286,11 @@ class ScreenRecorder: NSObject, ObservableObject {
             }
             selectedWindow = fresh
             return true
+        case .region:
+            guard let region = selectedRegion,
+                  let display = regionDisplay(for: region) else { return false }
+            let displayBounds = CGRect(origin: .zero, size: display.frame.size)
+            return displayBounds.contains(region.rect)
         }
     }
 
@@ -332,6 +341,14 @@ class ScreenRecorder: NSObject, ObservableObject {
         return Self.dimensionsFittingH264Limits(
             width: Int(window.frame.width * scale),
             height: Int(window.frame.height * scale)
+        )
+    }
+
+    private func captureDimensions(forRegion rect: CGRect, on display: SCDisplay) -> (width: Int, height: Int) {
+        let scale = NSScreen.screens.first { $0.displayID == display.displayID }?.backingScaleFactor ?? 2.0
+        return Self.dimensionsFittingH264Limits(
+            width: Int(rect.width * scale),
+            height: Int(rect.height * scale)
         )
     }
 
@@ -387,6 +404,17 @@ class ScreenRecorder: NSObject, ObservableObject {
             let dimensions = captureDimensions(for: window)
             captureWidth = dimensions.width
             captureHeight = dimensions.height
+
+        case .region:
+            guard let region = selectedRegion,
+                  let display = regionDisplay(for: region) else {
+                errorMessage = "No region selected"
+                return
+            }
+            filter = SCContentFilter(display: display, excludingWindows: [])
+            let dimensions = captureDimensions(forRegion: region.rect, on: display)
+            captureWidth = dimensions.width
+            captureHeight = dimensions.height
         }
 
         guard captureWidth > 0, captureHeight > 0 else {
@@ -402,6 +430,12 @@ class ScreenRecorder: NSObject, ObservableObject {
             config.queueDepth = 5
             config.showsCursor = settings.showCursor
             config.pixelFormat = kCVPixelFormatType_32BGRA
+
+            // Crop the display capture down to the selected region (points,
+            // display-local top-left origin — the space sourceRect expects).
+            if recordingMode == .region, let region = selectedRegion {
+                config.sourceRect = region.rect
+            }
 
             // Request AVFoundation permissions before allocating any recording
             // resources, so a denial surfaces a clear message instead of a

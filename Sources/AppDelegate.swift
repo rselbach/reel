@@ -75,6 +75,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var activeCountdown: CountdownOverlay?
     private var hotkeyObserver: NSObjectProtocol?
     private var cameraOverlayController: CameraOverlayController?
+    private var regionIndicatorController: RegionIndicatorController?
     private var recordingTimer: Timer?
     private var recordingStartedAt: Date?
     private var statusMenu: NSMenu?
@@ -188,6 +189,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 guard await self.runCountdown() else { return }
                 await self.screenRecorder.startRecording()
                 self.showCameraOverlayIfNeeded()
+                self.showRegionIndicatorIfNeeded()
                 self.rebuildMenu()
                 self.reportStartOutcome()
             }
@@ -504,11 +506,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             case .window(let window):
                 screenRecorder.selectedWindow = window
                 screenRecorder.recordingMode = .window
+            case .region:
+                guard let region = await RegionSelector().select() else { return }
+                screenRecorder.selectedRegion = region
+                screenRecorder.recordingMode = .region
             }
 
             guard await runCountdown() else { return }
             await screenRecorder.startRecording()
             showCameraOverlayIfNeeded()
+            showRegionIndicatorIfNeeded()
             rebuildMenu()
             reportStartOutcome()
         }
@@ -558,6 +565,24 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         cameraOverlayController = nil
     }
 
+    /// Shows a border around the recorded region so the user can see exactly
+    /// what area is being captured.
+    private func showRegionIndicatorIfNeeded() {
+        guard screenRecorder.isRecording,
+              screenRecorder.recordingMode == .region,
+              let frame = screenRecorder.countdownTargetFrame else {
+            return
+        }
+
+        regionIndicatorController = RegionIndicatorController()
+        regionIndicatorController?.show(globalQuartzFrame: frame)
+    }
+
+    private func hideRegionIndicator() {
+        regionIndicatorController?.hide()
+        regionIndicatorController = nil
+    }
+
     @objc private func openPreferences() {
         if settingsWindow == nil {
             settingsWindow = makeWindow(
@@ -573,6 +598,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func updateIcon(isRecording: Bool) {
         if !isRecording {
             hideCameraOverlay()
+            hideRegionIndicator()
         }
 
         if let button = statusItem.button {
