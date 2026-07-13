@@ -1292,8 +1292,33 @@ class ScreenRecorder: NSObject, ObservableObject {
         let reason = writer.assetWriter.error?.localizedDescription ?? "Unknown writer error"
         logger.error("\(context, privacy: .public): \(reason, privacy: .public)")
         Task { @MainActor in
-            errorMessage = "\(context): \(reason)"
+            await stopAfterWriteFailure(context: context, reason: reason)
         }
+    }
+
+    /// Tears down a recording whose asset writer can no longer accept samples.
+    /// A failed writer cannot be finalized, so the file is discarded and the
+    /// session ended instead of silently dropping every subsequent frame while
+    /// the UI still claims to be recording.
+    private func stopAfterWriteFailure(context: String, reason: String) async {
+        defer { errorMessage = "\(context): \(reason)" }
+        guard isRecording, !isStopping else { return }
+        isStopping = true
+        defer { isStopping = false }
+
+        signalCaptureStop()
+        stopCaptureSessions()
+        do {
+            try await stream?.stopCapture()
+        } catch {
+            logger.warning("Failed to stop capture after write failure: \(error.localizedDescription)")
+        }
+        assetWriter?.cancelWriting()
+        if let outputURL {
+            discardTempRecording(outputURL)
+        }
+        cleanup()
+        isRecording = false
     }
 }
 
