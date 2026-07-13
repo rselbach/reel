@@ -409,6 +409,12 @@ class ScreenRecorder: NSObject, ObservableObject {
             }
         } catch {
             errorMessage = "Failed to start: \(error.localizedDescription)"
+            if let assetWriter, assetWriter.status == .writing {
+                assetWriter.cancelWriting()
+            }
+            if let outputURL {
+                discardTempRecording(outputURL)
+            }
             cleanup()
         }
     }
@@ -848,6 +854,7 @@ class ScreenRecorder: NSObject, ObservableObject {
 
     private func cleanup() {
         stream = nil
+        outputURL = nil
         assetWriter = nil
         videoInput = nil
         audioInput = nil
