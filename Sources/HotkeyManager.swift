@@ -1,158 +1,150 @@
+import AppKit
 import Carbon
-import Cocoa
 import os.log
 
 private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "com.rselbach.reel", category: "HotkeyManager")
 
+enum CarbonModifierTranslation {
+    /// Converts the NSEvent/CGEvent device-independent modifier mask stored in
+    /// HotkeyCombo into the Carbon modifier mask RegisterEventHotKey expects.
+    static func carbonModifiers(fromEventModifiers modifiers: UInt32) -> UInt32 {
+        var carbon: UInt32 = 0
+        if modifiers & 0x40000 != 0 { carbon |= UInt32(controlKey) }
+        if modifiers & 0x80000 != 0 { carbon |= UInt32(optionKey) }
+        if modifiers & 0x20000 != 0 { carbon |= UInt32(shiftKey) }
+        if modifiers & 0x100000 != 0 { carbon |= UInt32(cmdKey) }
+        return carbon
+    }
+}
+
+/// Carbon event handler; must be a C function, so it trampolines back into
+/// the manager. Hot key events arrive on the main thread via the event
+/// dispatcher target, matching the manager's MainActor isolation.
+private let hotkeyEventHandler: EventHandlerUPP = { _, event, userData in
+    guard let event, let userData else { return OSStatus(eventNotHandledErr) }
+    let kind = GetEventKind(event)
+    let manager = Unmanaged<HotkeyManager>.fromOpaque(userData).takeUnretainedValue()
+    return MainActor.assumeIsolated {
+        manager.handleHotKeyEvent(kind: kind)
+    }
+}
+
+/// Registers the global recording shortcut with Carbon's RegisterEventHotKey,
+/// which — unlike a CGEvent tap — needs no Accessibility permission and
+/// consumes the key combination system-wide by design.
 @MainActor
 class HotkeyManager {
     static let shared = HotkeyManager()
 
-    private var eventTap: CFMachPort?
-    private var runLoopSource: CFRunLoopSource?
     var onToggleRecording: (() -> Void)?
     var onHotkeyDisabled: ((String) -> Void)?
 
-    // Cached state for synchronous access from event tap callback (protected by hotkeyLock)
-    private let hotkeyLock = NSLock()
-    private nonisolated(unsafe) var cachedKeyCode: UInt16 = AppSettings.HotkeyCombo.default.keyCode
-    private nonisolated(unsafe) var cachedModifiers: UInt32 = AppSettings.HotkeyCombo.default.modifiers
-    private nonisolated(unsafe) var cachedEventTap: CFMachPort?
-    private nonisolated(unsafe) var cachedHotkeyDisabledHandler: ((String) -> Void)?
+    private var hotKeyRef: EventHotKeyRef?
+    private var eventHandler: EventHandlerRef?
+    private var isStarted = false
+    // Carbon delivers repeated kEventHotKeyPressed events while the key is
+    // held (auto-repeat); only the first press before a release should toggle.
+    private var isHotkeyHeld = false
+
+    private static let signature: OSType = 0x5245_454C  // "REEL"
 
     private init() {}
 
-    func updateCachedHotkey(_ combo: AppSettings.HotkeyCombo) {
-        hotkeyLock.lock()
-        cachedKeyCode = combo.keyCode
-        cachedModifiers = combo.modifiers
-        hotkeyLock.unlock()
-    }
-
     func start() {
-        guard eventTap == nil else { return }
-
-        hotkeyLock.lock()
-        cachedHotkeyDisabledHandler = onHotkeyDisabled
-        hotkeyLock.unlock()
-
-        // Initialize cached hotkey from current settings
-        let hotkey = AppSettings.shared.recordingHotkey
-        updateCachedHotkey(hotkey)
-
-        let eventMask = (1 << CGEventType.keyDown.rawValue)
-
-        let callback: CGEventTapCallBack = { proxy, type, event, refcon in
-            guard let refcon else { return Unmanaged.passUnretained(event) }
-            let manager = Unmanaged<HotkeyManager>.fromOpaque(refcon).takeUnretainedValue()
-            return manager.handleEvent(proxy: proxy, type: type, event: event)
-        }
-
-        let selfPtr = Unmanaged.passUnretained(self).toOpaque()
-
-        eventTap = CGEvent.tapCreate(
-            tap: .cgSessionEventTap,
-            place: .headInsertEventTap,
-            options: .defaultTap,
-            eventsOfInterest: CGEventMask(eventMask),
-            callback: callback,
-            userInfo: selfPtr
-        )
-
-        guard let eventTap else {
-            logger.error("Failed to create event tap. Check accessibility permissions.")
-            reportHotkeyError("Failed to enable global hotkey. Accessibility permissions may be required.")
-            return
-        }
-
-        runLoopSource = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, eventTap, 0)
-        CFRunLoopAddSource(CFRunLoopGetCurrent(), runLoopSource, .commonModes)
-        CGEvent.tapEnable(tap: eventTap, enable: true)
-
-        hotkeyLock.lock()
-        cachedEventTap = eventTap
-        hotkeyLock.unlock()
+        guard !isStarted else { return }
+        isStarted = true
+        installEventHandlerIfNeeded()
+        registerCurrentHotkey()
     }
 
     func stop() {
-        hotkeyLock.lock()
-        cachedEventTap = nil
-        hotkeyLock.unlock()
-
-        if let eventTap {
-            CGEvent.tapEnable(tap: eventTap, enable: false)
-            if let source = runLoopSource {
-                CFRunLoopRemoveSource(CFRunLoopGetCurrent(), source, .commonModes)
-            }
+        unregisterHotkey()
+        if let eventHandler {
+            RemoveEventHandler(eventHandler)
+            self.eventHandler = nil
         }
-        eventTap = nil
-        runLoopSource = nil
+        isStarted = false
     }
 
-    private nonisolated func handleEvent(
-        proxy: CGEventTapProxy,
-        type: CGEventType,
-        event: CGEvent
-    ) -> Unmanaged<CGEvent>? {
-        switch type {
-        case .tapDisabledByTimeout, .tapDisabledByUserInput:
-            let reason = type == .tapDisabledByTimeout ? "timeout" : "user input"
-            logger.warning("Event tap disabled by \(reason), re-enabling")
+    /// Re-registers the shortcut after the user records a new combination.
+    func updateHotkey(_ combo: AppSettings.HotkeyCombo) {
+        guard isStarted else { return }
+        registerCurrentHotkey()
+    }
 
-            hotkeyLock.lock()
-            let tap = cachedEventTap
-            hotkeyLock.unlock()
-
-            if let tap {
-                CGEvent.tapEnable(tap: tap, enable: true)
-            } else {
-                logger.error("Cannot re-enable event tap: tap is nil")
-                reportHotkeyError("Hotkey stopped working and could not be restored. Please restart the app.")
-            }
-            return Unmanaged.passUnretained(event)
-        case .keyDown:
-            break
+    func handleHotKeyEvent(kind: UInt32) -> OSStatus {
+        switch kind {
+        case UInt32(kEventHotKeyPressed):
+            guard !isHotkeyHeld else { return noErr }
+            isHotkeyHeld = true
+            onToggleRecording?()
+            return noErr
+        case UInt32(kEventHotKeyReleased):
+            isHotkeyHeld = false
+            return noErr
         default:
-            return Unmanaged.passUnretained(event)
-        }
-
-        let keyCode = UInt16(event.getIntegerValueField(.keyboardEventKeycode))
-        let flags = UInt32(event.flags.rawValue) & AppSettings.HotkeyCombo.modifierMask
-
-        // Check synchronously using cached hotkey values
-        hotkeyLock.lock()
-        let expectedKeyCode = cachedKeyCode
-        let expectedModifiers = cachedModifiers
-        hotkeyLock.unlock()
-
-        if keyCode == expectedKeyCode && flags == expectedModifiers {
-            // Consume the event and trigger the callback
-            Task { @MainActor in
-                self.onToggleRecording?()
-            }
-            return nil  // Consume the event so it doesn't reach other apps
-        }
-
-        return Unmanaged.passUnretained(event)
-    }
-
-    private nonisolated func reportHotkeyError(_ message: String) {
-        hotkeyLock.lock()
-        let handler = cachedHotkeyDisabledHandler
-        hotkeyLock.unlock()
-
-        Task { @MainActor in
-            handler?(message)
+            return OSStatus(eventNotHandledErr)
         }
     }
 
-    func hasAccessibilityPermission() -> Bool {
-        let options = ["AXTrustedCheckOptionPrompt": false] as CFDictionary
-        return AXIsProcessTrustedWithOptions(options)
+    private func installEventHandlerIfNeeded() {
+        guard eventHandler == nil else { return }
+
+        var eventTypes = [
+            EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed)),
+            EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyReleased)),
+        ]
+        let selfPtr = Unmanaged.passUnretained(self).toOpaque()
+        let status = InstallEventHandler(
+            GetEventDispatcherTarget(),
+            hotkeyEventHandler,
+            eventTypes.count,
+            &eventTypes,
+            selfPtr,
+            &eventHandler
+        )
+        if status != noErr {
+            logger.error("InstallEventHandler failed (status: \(status))")
+            onHotkeyDisabled?("Failed to enable the global hotkey (error \(status)).")
+        }
     }
 
-    func requestAccessibilityPermission() {
-        let options = ["AXTrustedCheckOptionPrompt": true] as CFDictionary
-        _ = AXIsProcessTrustedWithOptions(options)
+    private func registerCurrentHotkey() {
+        unregisterHotkey()
+
+        let combo = AppSettings.shared.recordingHotkey
+        guard combo.isUsableGlobalShortcut else {
+            logger.warning("Refusing to register unusable global shortcut")
+            return
+        }
+
+        let hotKeyID = EventHotKeyID(signature: Self.signature, id: 1)
+        var ref: EventHotKeyRef?
+        let status = RegisterEventHotKey(
+            UInt32(combo.keyCode),
+            CarbonModifierTranslation.carbonModifiers(fromEventModifiers: combo.modifiers),
+            hotKeyID,
+            GetEventDispatcherTarget(),
+            0,
+            &ref
+        )
+
+        guard status == noErr, let ref else {
+            logger.error("RegisterEventHotKey failed (status: \(status))")
+            onHotkeyDisabled?(
+                "Failed to register the global shortcut \(combo.displayString). It may already be in use by another app."
+            )
+            return
+        }
+
+        hotKeyRef = ref
+        isHotkeyHeld = false
+    }
+
+    private func unregisterHotkey() {
+        if let hotKeyRef {
+            UnregisterEventHotKey(hotKeyRef)
+            self.hotKeyRef = nil
+        }
     }
 }

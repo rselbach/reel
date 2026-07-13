@@ -1,3 +1,4 @@
+import Carbon
 import XCTest
 @testable import Reel
 
@@ -142,7 +143,6 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(AppMenuText.startRecording, "Start Recording...")
         XCTAssertEqual(AppMenuText.recordingInProgress, "● Recording...")
         XCTAssertEqual(AppMenuText.stopRecording, "Stop Recording")
-        XCTAssertEqual(AppMenuText.enableKeyboardShortcuts, "Enable Keyboard Shortcuts...")
         XCTAssertEqual(AppMenuText.aboutReel, "About Reel")
         XCTAssertEqual(AppMenuText.settings, "Settings...")
         XCTAssertEqual(AppMenuText.quitReel, "Quit Reel")
@@ -551,10 +551,21 @@ final class AppSettingsTests: XCTestCase {
         )
     }
 
-    func testAccessibilityPermissionPollingUsesThirtySecondWindow() {
-        XCTAssertEqual(AccessibilityPermissionPolling.maxAttempts, 60)
-        XCTAssertEqual(AccessibilityPermissionPolling.intervalMilliseconds, 500)
-        XCTAssertEqual(AccessibilityPermissionPolling.totalTimeoutMilliseconds, 30_000)
+    func testCarbonModifierTranslationMapsEventMasksToCarbonMasks() {
+        // Default shortcut is Cmd+Shift (0x120000)
+        XCTAssertEqual(
+            CarbonModifierTranslation.carbonModifiers(fromEventModifiers: 0x120000),
+            UInt32(cmdKey | shiftKey)
+        )
+        XCTAssertEqual(
+            CarbonModifierTranslation.carbonModifiers(fromEventModifiers: 0x40000),
+            UInt32(controlKey)
+        )
+        XCTAssertEqual(
+            CarbonModifierTranslation.carbonModifiers(fromEventModifiers: 0x80000),
+            UInt32(optionKey)
+        )
+        XCTAssertEqual(CarbonModifierTranslation.carbonModifiers(fromEventModifiers: 0), 0)
     }
 
     func testTrimSliderMathCalculatesPositionsAndFormattedTime() {

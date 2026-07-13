@@ -16,7 +16,6 @@ enum AppMenuText {
     static let startRecording = "Start Recording..."
     static let recordingInProgress = "● Recording..."
     static let stopRecording = "Stop Recording"
-    static let enableKeyboardShortcuts = "Enable Keyboard Shortcuts..."
     static let aboutReel = "About Reel"
     static let checkForUpdates = "Check for Updates..."
     static let settings = "Settings..."
@@ -39,15 +38,6 @@ enum AppTerminationLogic {
     static func reply(isRecorderInitialized: Bool, isRecording: Bool) -> NSApplication.TerminateReply {
         guard isRecorderInitialized else { return .terminateNow }
         return isRecording ? .terminateLater : .terminateNow
-    }
-}
-
-enum AccessibilityPermissionPolling {
-    static let maxAttempts = 60
-    static let intervalMilliseconds = 500
-
-    static var totalTimeoutMilliseconds: Int {
-        maxAttempts * intervalMilliseconds
     }
 }
 
@@ -138,9 +128,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             self?.showHotkeyDisabledAlert(message: message)
         }
 
-        if HotkeyManager.shared.hasAccessibilityPermission() {
-            HotkeyManager.shared.start()
-        }
+        HotkeyManager.shared.start()
     }
 
     private func handleToggleRecording() {
@@ -215,7 +203,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         menu.autoenablesItems = false
 
         addPermissionOrRecordingItems(to: menu)
-        addAccessibilityItems(to: menu)
         addErrorItems(to: menu)
         addStandardItems(to: menu)
 
@@ -248,14 +235,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         recordingItem.isEnabled = false
         menu.addItem(recordingItem)
         menu.addItem(NSMenuItem(title: AppMenuText.stopRecording, action: #selector(stopRecording), keyEquivalent: "s"))
-    }
-
-    private func addAccessibilityItems(to menu: NSMenu) {
-        if !HotkeyManager.shared.hasAccessibilityPermission() {
-            menu.addItem(NSMenuItem.separator())
-            let accessItem = NSMenuItem(title: AppMenuText.enableKeyboardShortcuts, action: #selector(requestAccessibility), keyEquivalent: "")
-            menu.addItem(accessItem)
-        }
     }
 
     private func addErrorItems(to menu: NSMenu) {
@@ -515,29 +494,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private func hideCameraOverlay() {
         cameraOverlayController?.hide()
         cameraOverlayController = nil
-    }
-
-    @objc private func requestAccessibility() {
-        HotkeyManager.shared.requestAccessibilityPermission()
-
-        // Poll for permission with timeout instead of fixed delay
-        Task { @MainActor in
-            for _ in 0..<AccessibilityPermissionPolling.maxAttempts {
-                do {
-                    try await Task.sleep(for: .milliseconds(AccessibilityPermissionPolling.intervalMilliseconds))
-                } catch {
-                    logger.warning("Accessibility permission polling interrupted: \(error.localizedDescription)")
-                    return
-                }
-                if HotkeyManager.shared.hasAccessibilityPermission() {
-                    HotkeyManager.shared.start()
-                    rebuildMenu()
-                    return
-                }
-            }
-            // Timeout reached, update menu anyway to reflect current state
-            rebuildMenu()
-        }
     }
 
     @objc private func openPreferences() {

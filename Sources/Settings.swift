@@ -207,7 +207,7 @@ class AppSettings: ObservableObject {
             } catch {
                 logger.warning("Failed to persist recording hotkey: \(error.localizedDescription)")
             }
-            HotkeyManager.shared.updateCachedHotkey(recordingHotkey)
+            HotkeyManager.shared.updateHotkey(recordingHotkey)
             NotificationCenter.default.post(name: Self.hotkeyChangedNotification, object: nil)
         }
     }
