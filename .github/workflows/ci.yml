@@ -21,6 +21,9 @@ jobs:
         with:
           xcode-version: latest-stable
 
+      - name: Setup just
+        uses: extractions/setup-just@v2
+
       - name: Build
         run: just build
 
