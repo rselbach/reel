@@ -268,16 +268,18 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertTrue(manifest.contains("exclude: [\"Info.plist\", \"AppIcon.icns\"]"))
     }
 
-    func testReleaseTagValidatorAcceptsSafeTagsAndRejectsUnsafeTags() throws {
+    func testReleaseTagValidatorRequiresNumericSemanticVersion() throws {
         let script = repoRoot().appendingPathComponent("scripts/release/validate-release-tag.sh")
 
-        let valid = try runProcess("/bin/bash", [script.path(), "1.2.3-beta_1"])
+        let valid = try runProcess("/bin/bash", [script.path(), "1.2.3"])
         XCTAssertEqual(valid.exitCode, 0)
-        XCTAssertEqual(valid.stdout.trimmingCharacters(in: .whitespacesAndNewlines), "1.2.3-beta_1")
+        XCTAssertEqual(valid.stdout.trimmingCharacters(in: .whitespacesAndNewlines), "1.2.3")
 
-        let invalid = try runProcess("/bin/bash", [script.path(), "1.2.3;rm -rf /"])
-        XCTAssertNotEqual(invalid.exitCode, 0)
-        XCTAssertTrue(invalid.stderr.contains("Invalid release tag"))
+        for version in ["not-a-version", "1..2", "1_2", "1.2.3.4", "1.2.3-beta_1", "1.2.3;false"] {
+            let invalid = try runProcess("/bin/bash", [script.path(), version])
+            XCTAssertNotEqual(invalid.exitCode, 0, version)
+            XCTAssertTrue(invalid.stderr.contains("Expected X.Y.Z"), version)
+        }
     }
 
     func testGenerateAppcastWritesSanitizedVersionAndSignedEnclosure() throws {
