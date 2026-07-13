@@ -106,6 +106,7 @@ class AppSettings: ObservableObject {
         static let openFinderAfterRecording = "openFinderAfterRecording"
         static let showPreviewAfterRecording = "showPreviewAfterRecording"
         static let recordingHotkey = "recordingHotkey"
+        static let countdownDuration = "countdownDuration"
         static let recordAudio = "recordAudio"
         static let audioDeviceID = "audioDeviceID"
         static let recordCamera = "recordCamera"
@@ -209,6 +210,17 @@ class AppSettings: ObservableObject {
             }
             HotkeyManager.shared.updateHotkey(recordingHotkey)
             NotificationCenter.default.post(name: Self.hotkeyChangedNotification, object: nil)
+        }
+    }
+
+    @Published var countdownDuration: Int {
+        didSet {
+            let sanitized = Self.sanitizedCountdownDuration(countdownDuration)
+            if sanitized != countdownDuration {
+                countdownDuration = sanitized
+                return
+            }
+            persist(countdownDuration, key: DefaultsKey.countdownDuration)
         }
     }
 
@@ -396,6 +408,13 @@ class AppSettings: ObservableObject {
 
     static let supportedFrameRates = [30, 60]
 
+    /// 0 disables the countdown entirely.
+    static let supportedCountdownDurations = [0, 3, 5, 10]
+
+    static func sanitizedCountdownDuration(_ duration: Int) -> Int {
+        supportedCountdownDurations.contains(duration) ? duration : 3
+    }
+
     static func sanitizedFrameRate(_ frameRate: Int) -> Int {
         guard frameRate > 0 else { return 60 }
         if supportedFrameRates.contains(frameRate) { return frameRate }
@@ -512,6 +531,10 @@ class AppSettings: ObservableObject {
         self.askWhereToSave = defaults.bool(forKey: DefaultsKey.askWhereToSave)
 
         self.recordingHotkey = Self.loadRecordingHotkey(from: defaults)
+
+        self.countdownDuration = Self.sanitizedCountdownDuration(
+            defaults.object(forKey: DefaultsKey.countdownDuration) as? Int ?? 3
+        )
 
         self.recordAudio = defaults.bool(forKey: DefaultsKey.recordAudio)
         self.audioDeviceID = defaults.string(forKey: DefaultsKey.audioDeviceID)

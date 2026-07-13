@@ -20,6 +20,8 @@ enum SettingsText {
     static let showCursor = "Show cursor in recording"
     static let frameRate = "Frame rate:"
     static let videoQuality = "Video quality:"
+    static let countdown = "Countdown:"
+    static let countdownOff = "Off"
     static let recordAudio = "Record audio from microphone"
     static let audioInput = "Audio input:"
     static let recordCamera = "Record camera overlay"
@@ -171,6 +173,12 @@ struct RecordingTab: View {
             Picker(SettingsText.videoQuality, selection: $settings.videoQuality) {
                 ForEach(AppSettings.VideoQuality.allCases, id: \.self) { quality in
                     Text(quality.displayName).tag(quality)
+                }
+            }
+
+            Picker(SettingsText.countdown, selection: $settings.countdownDuration) {
+                ForEach(AppSettings.supportedCountdownDurations, id: \.self) { duration in
+                    Text(duration == 0 ? SettingsText.countdownOff : "\(duration) seconds").tag(duration)
                 }
             }
 

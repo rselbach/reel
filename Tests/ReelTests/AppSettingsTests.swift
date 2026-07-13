@@ -311,14 +311,26 @@ final class AppSettingsTests: XCTestCase {
         ))
     }
 
-    func testCountdownLayoutUsesThreeSecondSequenceAndBottomTargetBar() {
-        XCTAssertEqual(CountdownLayout.sequence, [3, 2, 1])
+    func testCountdownLayoutBuildsSequenceAndCentersHUD() {
+        XCTAssertEqual(CountdownLayout.sequence(duration: 3), [3, 2, 1])
+        XCTAssertEqual(CountdownLayout.sequence(duration: 5), [5, 4, 3, 2, 1])
+        XCTAssertEqual(CountdownLayout.sequence(duration: 0), [])
 
-        let frame = CountdownLayout.barFrame(referenceFrame: CGRect(x: 50, y: 75, width: 1200, height: 800))
-        XCTAssertEqual(frame.origin.x, 50)
-        XCTAssertEqual(frame.origin.y, 75)
-        XCTAssertEqual(frame.width, 1200)
-        XCTAssertEqual(frame.height, 80)
+        let frame = CountdownLayout.hudFrame(referenceFrame: CGRect(x: 50, y: 75, width: 1200, height: 800))
+        XCTAssertEqual(frame.midX, 650)
+        XCTAssertEqual(frame.midY, 475)
+        XCTAssertEqual(frame.width, CountdownLayout.hudSize)
+        XCTAssertEqual(frame.height, CountdownLayout.hudSize)
+    }
+
+    @MainActor
+    func testCountdownDurationSanitizationAllowsOnlySupportedValues() {
+        XCTAssertEqual(AppSettings.sanitizedCountdownDuration(0), 0)
+        XCTAssertEqual(AppSettings.sanitizedCountdownDuration(3), 3)
+        XCTAssertEqual(AppSettings.sanitizedCountdownDuration(5), 5)
+        XCTAssertEqual(AppSettings.sanitizedCountdownDuration(10), 10)
+        XCTAssertEqual(AppSettings.sanitizedCountdownDuration(7), 3)
+        XCTAssertEqual(AppSettings.sanitizedCountdownDuration(-1), 3)
     }
 
     @MainActor

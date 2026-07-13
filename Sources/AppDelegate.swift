@@ -72,6 +72,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var previewWindow: NSWindow?
     private var aboutWindow: NSWindow?
     private var isCountdownActive = false
+    private var activeCountdown: CountdownOverlay?
     private var hotkeyObserver: NSObjectProtocol?
     private var cameraOverlayController: CameraOverlayController?
     private var recordingTimer: Timer?
@@ -178,14 +179,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                     self.showRecordingDialog()
                     return
                 }
-                // Prevent multiple overlapping countdowns
-                guard !self.isCountdownActive else { return }
-                self.isCountdownActive = true
+                // Pressing the hotkey again during the countdown cancels it
+                if self.isCountdownActive {
+                    self.activeCountdown?.cancel()
+                    return
+                }
 
-                // Show countdown before starting (same as menu flow)
-                let shouldStart = await CountdownOverlay().show(targetFrame: self.screenRecorder.countdownTargetFrame)
-                self.isCountdownActive = false
-                guard shouldStart else { return }
+                guard await self.runCountdown() else { return }
                 await self.screenRecorder.startRecording()
                 self.showCameraOverlayIfNeeded()
                 self.rebuildMenu()
@@ -506,10 +506,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 screenRecorder.recordingMode = .window
             }
 
-            isCountdownActive = true
-            let shouldStart = await CountdownOverlay().show(targetFrame: screenRecorder.countdownTargetFrame)
-            isCountdownActive = false
-            guard shouldStart else { return }
+            guard await runCountdown() else { return }
             await screenRecorder.startRecording()
             showCameraOverlayIfNeeded()
             rebuildMenu()
@@ -517,6 +514,22 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
     }
     
+    /// Runs the pre-recording countdown (if enabled) and returns true when
+    /// recording should start.
+    private func runCountdown() async -> Bool {
+        guard !isCountdownActive else { return false }
+        isCountdownActive = true
+        let countdown = CountdownOverlay()
+        activeCountdown = countdown
+        let shouldStart = await countdown.show(
+            targetFrame: screenRecorder.countdownTargetFrame,
+            duration: AppSettings.shared.countdownDuration
+        )
+        activeCountdown = nil
+        isCountdownActive = false
+        return shouldStart
+    }
+
     /// Shows the draggable camera overlay if camera recording is enabled.
     private func showCameraOverlayIfNeeded() {
         let settings = AppSettings.shared
