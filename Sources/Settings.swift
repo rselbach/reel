@@ -124,6 +124,7 @@ class AppSettings: ObservableObject {
         static let cameraDeviceID = "cameraDeviceID"
         static let cameraPosition = "cameraPosition"
         static let cameraSize = "cameraSize"
+        static let cameraSizeFraction = "cameraSizeFraction"
         static let cameraShape = "cameraShape"
         static let textOverlayEnabled = "textOverlayEnabled"
         static let textOverlayText = "textOverlayText"
@@ -264,8 +265,28 @@ class AppSettings: ObservableObject {
         didSet { persist(cameraPosition.rawValue, key: DefaultsKey.cameraPosition) }
     }
 
-    @Published var cameraSize: CameraOverlaySize {
-        didSet { persist(cameraSize.rawValue, key: DefaultsKey.cameraSize) }
+    /// Camera overlay width as a fraction of the recording width. The single
+    /// source of truth for overlay size: the Small/Medium/Large picker writes
+    /// preset values here, and live corner-drag resizes persist here too.
+    @Published var cameraSizeFraction: CGFloat {
+        didSet {
+            let sanitized = Self.sanitizedCameraSizeFraction(cameraSizeFraction)
+            if sanitized != cameraSizeFraction {
+                cameraSizeFraction = sanitized
+                return
+            }
+            persist(Double(cameraSizeFraction), key: DefaultsKey.cameraSizeFraction)
+        }
+    }
+
+    static func sanitizedCameraSizeFraction(_ fraction: CGFloat) -> CGFloat {
+        min(max(fraction, CameraOverlayResizeLogic.minFraction), CameraOverlayResizeLogic.maxFraction)
+    }
+
+    /// The preset matching the current fraction, or nil for a custom size
+    /// reached by dragging the overlay's corners.
+    var cameraSizePreset: CameraOverlaySize? {
+        CameraOverlaySize.allCases.first { abs($0.fraction - cameraSizeFraction) < 0.001 }
     }
 
     @Published var cameraShape: CameraOverlayShape {
@@ -599,7 +620,13 @@ class AppSettings: ObservableObject {
         self.recordCamera = defaults.bool(forKey: DefaultsKey.recordCamera)
         self.cameraDeviceID = defaults.string(forKey: DefaultsKey.cameraDeviceID)
         self.cameraPosition = CameraOverlayPosition.fromStored(defaults.string(forKey: DefaultsKey.cameraPosition)) ?? .bottomRight
-        self.cameraSize = CameraOverlaySize.fromStored(defaults.string(forKey: DefaultsKey.cameraSize)) ?? .medium
+        if let storedFraction = defaults.object(forKey: DefaultsKey.cameraSizeFraction) as? Double {
+            self.cameraSizeFraction = Self.sanitizedCameraSizeFraction(storedFraction)
+        } else {
+            // Migrate from the legacy Small/Medium/Large preset key.
+            let legacyPreset = CameraOverlaySize.fromStored(defaults.string(forKey: DefaultsKey.cameraSize)) ?? .medium
+            self.cameraSizeFraction = legacyPreset.fraction
+        }
         self.cameraShape = CameraOverlayShape.fromStored(defaults.string(forKey: DefaultsKey.cameraShape)) ?? .circle
 
         self.textOverlayEnabled = defaults.bool(forKey: DefaultsKey.textOverlayEnabled)

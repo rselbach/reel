@@ -765,7 +765,7 @@ class ScreenRecorder: NSObject, ObservableObject {
         withFrameLock {
             frameState.currentCameraX = initialPos.x
             frameState.currentCameraY = initialPos.y
-            frameState.currentCameraSizeFraction = settings.cameraSize.fraction
+            frameState.currentCameraSizeFraction = settings.cameraSizeFraction
             frameState.frameWriter = FrameWriter(
                 adaptor: adaptor,
                 videoInput: videoInput,

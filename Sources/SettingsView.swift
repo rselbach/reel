@@ -161,6 +161,20 @@ struct DevicePicker: View {
 struct RecordingTab: View {
     @ObservedObject var settings: AppSettings
 
+    /// Presets write their fraction; a corner-drag size that matches no
+    /// preset shows as a "Custom (n%)" entry instead of lying about which
+    /// preset is active.
+    private var cameraSizeSelection: Binding<AppSettings.CameraOverlaySize?> {
+        Binding(
+            get: { settings.cameraSizePreset },
+            set: { preset in
+                if let preset {
+                    settings.cameraSizeFraction = preset.fraction
+                }
+            }
+        )
+    }
+
     var body: some View {
         Form {
             Toggle(SettingsText.showCursor, isOn: $settings.showCursor)
@@ -220,9 +234,13 @@ struct RecordingTab: View {
                     }
                 }
 
-                Picker(SettingsText.size, selection: $settings.cameraSize) {
+                Picker(SettingsText.size, selection: cameraSizeSelection) {
                     ForEach(AppSettings.CameraOverlaySize.allCases, id: \.self) { size in
-                        Text(size.displayName).tag(size)
+                        Text(size.displayName).tag(size as AppSettings.CameraOverlaySize?)
+                    }
+                    if settings.cameraSizePreset == nil {
+                        Text("Custom (\(Int((settings.cameraSizeFraction * 100).rounded()))%)")
+                            .tag(nil as AppSettings.CameraOverlaySize?)
                     }
                 }
 

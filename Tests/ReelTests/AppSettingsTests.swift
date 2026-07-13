@@ -337,6 +337,23 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(AppSettings.sanitizedCountdownDuration(-1), 3)
     }
 
+    @MainActor
+    func testCameraSizeFractionSanitizationAndPresetMatching() {
+        XCTAssertEqual(AppSettings.sanitizedCameraSizeFraction(0.01), CameraOverlayResizeLogic.minFraction)
+        XCTAssertEqual(AppSettings.sanitizedCameraSizeFraction(0.9), CameraOverlayResizeLogic.maxFraction)
+        XCTAssertEqual(AppSettings.sanitizedCameraSizeFraction(0.2), 0.2)
+
+        let settings = AppSettings.shared
+        let old = settings.cameraSizeFraction
+        defer { settings.cameraSizeFraction = old }
+
+        settings.cameraSizeFraction = 0.25
+        XCTAssertEqual(settings.cameraSizePreset, .large)
+
+        settings.cameraSizeFraction = 0.31
+        XCTAssertNil(settings.cameraSizePreset)
+    }
+
     func testCameraOverlayResizeCornerHitDetection() {
         let bounds = CGRect(x: 0, y: 0, width: 200, height: 200)
         XCTAssertEqual(CameraOverlayResizeLogic.corner(at: CGPoint(x: 5, y: 5), in: bounds), .bottomLeft)

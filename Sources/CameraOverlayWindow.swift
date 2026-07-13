@@ -124,6 +124,8 @@ final class CameraOverlayWindow: NSWindow {
     var overlaySize: CGFloat = 0
     var onPositionChanged: ((CGFloat, CGFloat) -> Void)?
     var onSizeChanged: ((CGFloat) -> Void)?
+    /// Fired once when a corner-drag resize ends, for persisting the size.
+    var onSizeChangeEnded: ((CGFloat) -> Void)?
     
     init(contentRect: NSRect, dragBounds: CGRect, overlaySize: CGFloat) {
         self.dragBounds = dragBounds
@@ -165,6 +167,9 @@ final class CameraOverlayWindow: NSWindow {
     }
 
     override func mouseUp(with event: NSEvent) {
+        if resizingCorner != nil, dragBounds.width > 0 {
+            onSizeChangeEnded?(overlaySize / dragBounds.width)
+        }
         resizingCorner = nil
     }
 
@@ -345,12 +350,13 @@ final class CameraOverlayController {
         session: AVCaptureSession,
         bounds: CGRect,
         initialPosition: AppSettings.CameraOverlayPosition,
-        size: AppSettings.CameraOverlaySize,
+        sizeFraction: CGFloat,
         shape: AppSettings.CameraOverlayShape,
         onPositionChanged: @escaping (CGFloat, CGFloat) -> Void,
-        onSizeChanged: @escaping (CGFloat) -> Void
+        onSizeChanged: @escaping (CGFloat) -> Void,
+        onSizeChangeEnded: @escaping (CGFloat) -> Void
     ) {
-        let overlaySize = bounds.width * size.fraction
+        let overlaySize = bounds.width * sizeFraction
         
         // Convert normalized position to screen coordinates
         let coords = initialPosition.normalizedCoordinates
@@ -365,6 +371,7 @@ final class CameraOverlayController {
         let window = CameraOverlayWindow(contentRect: windowFrame, dragBounds: bounds, overlaySize: overlaySize)
         window.onPositionChanged = onPositionChanged
         window.onSizeChanged = onSizeChanged
+        window.onSizeChangeEnded = onSizeChangeEnded
 
         let holder = SessionHolder(session: session)
         self.sessionHolder = holder

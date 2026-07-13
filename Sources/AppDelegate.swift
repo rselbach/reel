@@ -643,13 +643,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             session: session,
             bounds: bounds,
             initialPosition: settings.cameraPosition,
-            size: settings.cameraSize,
+            sizeFraction: settings.cameraSizeFraction,
             shape: settings.cameraShape,
             onPositionChanged: { [weak self] x, y in
                 self?.screenRecorder.updateCameraOverlayPosition(x: x, y: y)
             },
             onSizeChanged: { [weak self] fraction in
                 self?.screenRecorder.updateCameraOverlaySize(fraction: fraction)
+            },
+            onSizeChangeEnded: { fraction in
+                AppSettings.shared.cameraSizeFraction = fraction
             }
         )
 
