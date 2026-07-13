@@ -62,11 +62,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var isCountdownActive = false
     private var hotkeyObserver: NSObjectProtocol?
     private var cameraOverlayController: CameraOverlayController?
-    private let updaterController = SPUStandardUpdaterController(
-        startingUpdater: true,
-        updaterDelegate: nil,
-        userDriverDelegate: nil
-    )
+    // Sparkle needs a real app bundle; under `swift run` there is no
+    // Info.plist and starting the updater misbehaves, so it stays nil in
+    // unbundled dev builds.
+    private var updaterController: SPUStandardUpdaterController?
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         let reply = AppTerminationLogic.reply(
@@ -95,6 +94,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         screenRecorder = ScreenRecorder()
         screenRecorder.onUnexpectedStop = { [weak self] in
             self?.handleUnexpectedStop()
+        }
+
+        if Bundle.main.bundleIdentifier != nil {
+            updaterController = SPUStandardUpdaterController(
+                startingUpdater: true,
+                updaterDelegate: nil,
+                userDriverDelegate: nil
+            )
         }
 
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -269,7 +276,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private func addStandardItems(to menu: NSMenu) {
         menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: AppMenuText.aboutReel, action: #selector(showAbout), keyEquivalent: ""))
-        menu.addItem(NSMenuItem(title: AppMenuText.checkForUpdates, action: #selector(checkForUpdates), keyEquivalent: ""))
+        if updaterController != nil {
+            menu.addItem(NSMenuItem(title: AppMenuText.checkForUpdates, action: #selector(checkForUpdates), keyEquivalent: ""))
+        }
         menu.addItem(NSMenuItem(title: AppMenuText.settings, action: #selector(openPreferences), keyEquivalent: ","))
         menu.addItem(NSMenuItem.separator())
         menu.addItem(NSMenuItem(title: AppMenuText.quitReel, action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
@@ -333,7 +342,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     @objc private func checkForUpdates() {
-        updaterController.checkForUpdates(nil)
+        updaterController?.checkForUpdates(nil)
     }
 
     @objc private func openSettings() {
