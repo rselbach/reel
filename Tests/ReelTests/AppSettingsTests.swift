@@ -268,6 +268,15 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertTrue(manifest.contains("exclude: [\"Info.plist\", \"AppIcon.icns\"]"))
     }
 
+    func testReleaseWorkflowFetchesHistoryForChangelog() throws {
+        let workflow = try String(
+            contentsOf: repoRoot().appendingPathComponent(".github/workflows/release.yml"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(workflow.contains("fetch-depth: 0"))
+    }
+
     func testReleaseTagValidatorRequiresNumericSemanticVersion() throws {
         let script = repoRoot().appendingPathComponent("scripts/release/validate-release-tag.sh")
 
