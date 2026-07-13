@@ -6,3 +6,4 @@ DerivedData/
 .DS_Store
 .home/
 .opencode/
+__pycache__/

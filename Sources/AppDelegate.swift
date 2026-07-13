@@ -499,7 +499,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     private func stopRecordingFlow() async {
         hideCameraOverlay()
-        await screenRecorder.stopRecording()
+        guard await screenRecorder.stopRecording() else { return }
         rebuildMenu()
         if AppSettings.shared.showPreviewAfterRecording,
            let url = screenRecorder.lastRecordedURL {
@@ -592,8 +592,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             guard !isCountdownActive else { return }
 
             switch selection {
-            case .display(let index):
-                screenRecorder.selectedDisplayIndex = index
+            case .display(let displayID):
+                screenRecorder.selectedDisplayID = displayID
                 screenRecorder.recordingMode = .display
             case .window(let window):
                 screenRecorder.selectedWindow = window

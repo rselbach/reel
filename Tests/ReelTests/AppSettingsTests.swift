@@ -2,6 +2,24 @@ import Carbon
 import XCTest
 @testable import Reel
 
+private final class RestoreFailingFileManager: FileManager, @unchecked Sendable {
+    private var moveCount = 0
+
+    override func moveItem(at srcURL: URL, to dstURL: URL) throws {
+        moveCount += 1
+        if moveCount == 3 {
+            throw CocoaError(.fileWriteUnknown)
+        }
+        try super.moveItem(at: srcURL, to: dstURL)
+    }
+}
+
+private final class BackupCleanupFailingFileManager: FileManager, @unchecked Sendable {
+    override func removeItem(at URL: URL) throws {
+        throw CocoaError(.fileWriteNoPermission)
+    }
+}
+
 final class AppSettingsTests: XCTestCase {
     @MainActor
     func testCameraOverlayPositionNormalizedCoordinates() {
@@ -246,7 +264,7 @@ final class AppSettingsTests: XCTestCase {
 
         let invalid = try runProcess("/bin/bash", [script.path(), "1.2.3;rm -rf /"])
         XCTAssertNotEqual(invalid.exitCode, 0)
-        XCTAssertTrue(invalid.stdout.contains("Invalid release tag"))
+        XCTAssertTrue(invalid.stderr.contains("Invalid release tag"))
     }
 
     func testGenerateAppcastWritesSanitizedVersionAndSignedEnclosure() throws {
@@ -275,6 +293,11 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(RecordingDialogLogic.displayTitle(index: 0, displayCount: 1), "Display")
         XCTAssertEqual(RecordingDialogLogic.displayTitle(index: 0, displayCount: 2), "Display 1")
         XCTAssertEqual(RecordingDialogLogic.displayTitle(index: 1, displayCount: 2), "Display 2")
+    }
+
+    func testRecordingSelectionUsesStableDisplayID() {
+        XCTAssertEqual(RecordingSelection.display(10), .display(10))
+        XCTAssertNotEqual(RecordingSelection.display(10), .display(20))
     }
 
     func testRecordingDialogWindowTitleFallbacks() {
@@ -518,6 +541,32 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(global, CGRect(x: 1450, y: 20, width: 300, height: 200))
     }
 
+    func testScreenCoordinateConversionHandlesDisplayAbovePrimary() {
+        let primaryFrame = CGRect(x: 0, y: 0, width: 1920, height: 1080)
+        let upperDisplayQuartzFrame = CGRect(x: 0, y: -1080, width: 1920, height: 1080)
+
+        XCTAssertEqual(
+            ScreenCoordinateConversion.cocoaRect(
+                fromQuartz: upperDisplayQuartzFrame,
+                primaryScreenFrame: primaryFrame
+            ),
+            CGRect(x: 0, y: 1080, width: 1920, height: 1080)
+        )
+    }
+
+    func testScreenCoordinateConversionHandlesDisplayBelowPrimary() {
+        let primaryFrame = CGRect(x: 0, y: 0, width: 1920, height: 1080)
+        let lowerDisplayQuartzFrame = CGRect(x: 0, y: 1080, width: 1920, height: 1080)
+
+        XCTAssertEqual(
+            ScreenCoordinateConversion.cocoaRect(
+                fromQuartz: lowerDisplayQuartzFrame,
+                primaryScreenFrame: primaryFrame
+            ),
+            CGRect(x: 0, y: -1080, width: 1920, height: 1080)
+        )
+    }
+
     func testCameraCompositeSquareCropCentersOnLongAxis() {
         let landscape = CameraCompositeLayout.squareCropRect(width: 1920, height: 1080)
         XCTAssertEqual(landscape, CGRect(x: 420, y: 0, width: 1080, height: 1080))
@@ -648,6 +697,65 @@ final class AppSettingsTests: XCTestCase {
 
         XCTAssertThrowsError(try FileReplacement.commit(tempURL: missingTempURL, to: outputURL))
         XCTAssertEqual(try String(contentsOf: outputURL, encoding: .utf8), "old")
+    }
+
+    func testFileReplacementReportsRollbackFailureAndPreservesBackup() throws {
+        let directory = try makeTemporaryDirectory()
+        defer {
+            do {
+                try FileManager.default.removeItem(at: directory)
+            } catch {
+                XCTFail("Failed to remove test directory: \(error)")
+            }
+        }
+
+        let missingTempURL = directory.appendingPathComponent("missing.tmp.mp4")
+        let outputURL = directory.appendingPathComponent("trimmed.mp4")
+        try Data("old".utf8).write(to: outputURL)
+
+        XCTAssertThrowsError(try FileReplacement.commit(
+            tempURL: missingTempURL,
+            to: outputURL,
+            fileManager: RestoreFailingFileManager()
+        )) { error in
+            guard case FileReplacementError.rollbackFailed(_, _, let backupURL) = error else {
+                return XCTFail("Unexpected error: \(error)")
+            }
+            XCTAssertFalse(FileManager.default.fileExists(atPath: outputURL.path()))
+            let backupContents: String
+            do {
+                backupContents = try String(contentsOf: backupURL, encoding: .utf8)
+            } catch {
+                return XCTFail("Failed to read preserved backup: \(error)")
+            }
+            XCTAssertEqual(backupContents, "old")
+        }
+    }
+
+    func testFileReplacementReportsBackupCleanupFailureAfterCommit() throws {
+        let directory = try makeTemporaryDirectory()
+        defer {
+            do {
+                try FileManager.default.removeItem(at: directory)
+            } catch {
+                XCTFail("Failed to remove test directory: \(error)")
+            }
+        }
+
+        let tempURL = directory.appendingPathComponent("trimmed.tmp.mp4")
+        let outputURL = directory.appendingPathComponent("trimmed.mp4")
+        try Data("old".utf8).write(to: outputURL)
+        try Data("new".utf8).write(to: tempURL)
+
+        let warning = try FileReplacement.commit(
+            tempURL: tempURL,
+            to: outputURL,
+            fileManager: BackupCleanupFailingFileManager()
+        )
+
+        XCTAssertNotNil(warning)
+        XCTAssertEqual(try String(contentsOf: outputURL, encoding: .utf8), "new")
+        XCTAssertTrue(FileManager.default.fileExists(atPath: warning?.backupURL.path() ?? ""))
     }
 
     func testFileReplacementAllowsAlreadyFinalDestination() throws {

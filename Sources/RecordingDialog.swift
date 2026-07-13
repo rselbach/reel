@@ -2,7 +2,7 @@ import SwiftUI
 import ScreenCaptureKit
 
 enum RecordingSelection: Equatable {
-    case display(Int)
+    case display(CGDirectDisplayID)
     case window(SCWindow)
     case region
 
@@ -103,16 +103,17 @@ struct RecordingDialog: View {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 12) {
                         ForEach(0..<displays.count, id: \.self) { index in
+                            let displayID = displays[index].displayID
                             ThumbnailCard(
                                 image: displayThumbnails[index],
                                 title: RecordingDialogLogic.displayTitle(
                                     index: index,
                                     displayCount: displays.count
                                 ),
-                                isSelected: selection == .display(index),
+                                isSelected: selection == .display(displayID),
                                 isLoading: isLoading,
-                                action: { selection = .display(index) },
-                                onDoubleClick: { onStart(.display(index)) }
+                                action: { selection = .display(displayID) },
+                                onDoubleClick: { onStart(.display(displayID)) }
                             )
                             .frame(width: 160)
                         }
@@ -224,7 +225,8 @@ struct RecordingDialog: View {
            !windows.contains(where: { $0.windowID == selected.windowID }) {
             selection = nil
         }
-        if case .display(let index) = selection, index >= displays.count {
+        if case .display(let displayID) = selection,
+           !displays.contains(where: { $0.displayID == displayID }) {
             selection = nil
         }
         await loadThumbnails()

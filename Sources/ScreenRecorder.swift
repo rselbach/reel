@@ -162,10 +162,11 @@ class ScreenRecorder: NSObject, ObservableObject {
     }
     private var isStarting = false
     private var isStopping = false
+    private var stopWaiters: [CheckedContinuation<Void, Never>] = []
     @Published var hasPermission = false
     @Published var availableDisplays: [SCDisplay] = []
     @Published var availableWindows: [SCWindow] = []
-    @Published var selectedDisplayIndex = 0
+    @Published var selectedDisplayID: CGDirectDisplayID?
     @Published var selectedWindow: SCWindow?
     @Published var selectedRegion: RecordingRegion?
     @Published var recordingMode: RecordingMode = .display
@@ -181,8 +182,7 @@ class ScreenRecorder: NSObject, ObservableObject {
     var countdownTargetFrame: CGRect? {
         switch recordingMode {
         case .display:
-            guard selectedDisplayIndex < availableDisplays.count else { return nil }
-            return availableDisplays[selectedDisplayIndex].frame
+            return selectedDisplay?.frame
         case .window:
             return selectedWindow?.frame
         case .region:
@@ -194,6 +194,11 @@ class ScreenRecorder: NSObject, ObservableObject {
 
     private func regionDisplay(for region: RecordingRegion) -> SCDisplay? {
         availableDisplays.first { $0.displayID == region.displayID }
+    }
+
+    private var selectedDisplay: SCDisplay? {
+        guard let selectedDisplayID else { return nil }
+        return availableDisplays.first { $0.displayID == selectedDisplayID }
     }
 
     private var stream: SCStream?
@@ -278,7 +283,7 @@ class ScreenRecorder: NSObject, ObservableObject {
         await refreshWindows()
         switch recordingMode {
         case .display:
-            return selectedDisplayIndex < availableDisplays.count
+            return selectedDisplay != nil
         case .window:
             guard let windowID = selectedWindow?.windowID,
                   let fresh = availableWindows.first(where: { $0.windowID == windowID }) else {
@@ -299,6 +304,9 @@ class ScreenRecorder: NSObject, ObservableObject {
             let content = try await loadShareableContent()
             availableDisplays = content.displays
             availableWindows = content.windows
+            if selectedDisplayID == nil {
+                selectedDisplayID = content.displays.first?.displayID
+            }
             if updatePermissionState {
                 hasPermission = true
                 errorMessage = nil
@@ -336,7 +344,15 @@ class ScreenRecorder: NSObject, ObservableObject {
     }
 
     private func captureDimensions(for window: SCWindow) -> (width: Int, height: Int) {
-        let windowScreen = NSScreen.screens.first { $0.frame.intersects(window.frame) }
+        let windowScreen = cocoaRect(fromQuartz: window.frame).flatMap { windowFrame in
+            NSScreen.screens
+                .map { screen in (screen, screen.frame.intersection(windowFrame)) }
+                .filter { !$0.1.isNull && !$0.1.isEmpty }
+                .max { lhs, rhs in
+                    lhs.1.width * lhs.1.height < rhs.1.width * rhs.1.height
+                }?
+                .0
+        }
         let scale = windowScreen?.backingScaleFactor ?? 2.0
         return Self.dimensionsFittingH264Limits(
             width: Int(window.frame.width * scale),
@@ -385,11 +401,10 @@ class ScreenRecorder: NSObject, ObservableObject {
 
         switch recordingMode {
         case .display:
-            guard selectedDisplayIndex < availableDisplays.count else {
+            guard let display = selectedDisplay else {
                 errorMessage = "No display selected"
                 return
             }
-            let display = availableDisplays[selectedDisplayIndex]
             filter = SCContentFilter(display: display, excludingWindows: [])
             let dimensions = captureDimensions(for: display)
             captureWidth = dimensions.width
@@ -481,6 +496,7 @@ class ScreenRecorder: NSObject, ObservableObject {
 
             try await stream?.startCapture()
             let failures = startCaptureSessions()
+            lastRecordedURL = nil
             isRecording = true
 
             // Surface capture session failures as warnings (recording continues without them)
@@ -508,10 +524,15 @@ class ScreenRecorder: NSObject, ObservableObject {
         }
     }
 
-    func stopRecording() async {
-        guard isRecording, !isStopping else { return }
+    @discardableResult
+    func stopRecording() async -> Bool {
+        guard isRecording else { return false }
+        if isStopping {
+            await waitForActiveStop()
+            return false
+        }
         isStopping = true
-        defer { isStopping = false }
+        defer { finishStopping() }
 
         // Signal callbacks to stop processing immediately
         signalCaptureStop()
@@ -527,6 +548,22 @@ class ScreenRecorder: NSObject, ObservableObject {
         await finalizeRecording()
         cleanup()
         isRecording = false
+        return true
+    }
+
+    private func waitForActiveStop() async {
+        await withCheckedContinuation { continuation in
+            stopWaiters.append(continuation)
+        }
+    }
+
+    private func finishStopping() {
+        isStopping = false
+        let waiters = stopWaiters
+        stopWaiters = []
+        for waiter in waiters {
+            waiter.resume()
+        }
     }
     
     private nonisolated func signalCaptureStop() {
@@ -904,6 +941,7 @@ class ScreenRecorder: NSObject, ObservableObject {
         }
 
         var finalURL = tempURL
+        var replacementWarning: FileReplacementWarning?
 
         if settings.askWhereToSave {
             // As a menu bar (accessory) app there is usually no key window
@@ -931,7 +969,7 @@ class ScreenRecorder: NSObject, ObservableObject {
 
             finalURL = url
             do {
-                try moveTempRecording(from: tempURL, to: finalURL)
+                replacementWarning = try moveTempRecording(from: tempURL, to: finalURL)
             } catch {
                 errorMessage = "Failed to save: \(error.localizedDescription)"
                 discardTempRecording(tempURL)
@@ -942,6 +980,10 @@ class ScreenRecorder: NSObject, ObservableObject {
         logger.info("Recording saved to: \(finalURL.path())")
         lastRecordedURL = finalURL
         settings.noteRecentRecording(finalURL)
+        if let replacementWarning {
+            let warning = replacementWarning.localizedDescription
+            errorMessage = errorMessage.map { "\($0)\n\(warning)" } ?? warning
+        }
 
         if RecordingFinalizationLogic.shouldRevealInFinder(
             openFinderAfterRecording: settings.openFinderAfterRecording,
@@ -949,18 +991,22 @@ class ScreenRecorder: NSObject, ObservableObject {
         ) {
             let revealed = NSWorkspace.shared.selectFile(finalURL.path(), inFileViewerRootedAtPath: "")
             if !revealed {
-                errorMessage = RecordingFinalizationLogic.finderRevealFailureMessage(for: finalURL)
+                let revealError = RecordingFinalizationLogic.finderRevealFailureMessage(for: finalURL)
+                errorMessage = errorMessage.map { "\($0)\n\(revealError)" } ?? revealError
             }
         }
     }
 
-    private func moveTempRecording(from tempURL: URL, to finalURL: URL) throws {
+    private func moveTempRecording(
+        from tempURL: URL,
+        to finalURL: URL
+    ) throws -> FileReplacementWarning? {
         if finalURL == tempURL {
             logger.info("Recording already at final location, skipping move")
-            return
+            return nil
         }
 
-        try FileReplacement.commit(tempURL: tempURL, to: finalURL)
+        return try FileReplacement.commit(tempURL: tempURL, to: finalURL)
     }
 
     private func discardTempRecording(_ tempURL: URL) {
@@ -1003,7 +1049,7 @@ class ScreenRecorder: NSObject, ObservableObject {
     private func handleStreamStopped(dueTo error: Error) async {
         guard isRecording, !isStopping else { return }
         isStopping = true
-        defer { isStopping = false }
+        defer { finishStopping() }
 
         signalCaptureStop()
         stopCaptureSessions()
@@ -1446,7 +1492,7 @@ class ScreenRecorder: NSObject, ObservableObject {
             return
         }
         isStopping = true
-        defer { isStopping = false }
+        defer { finishStopping() }
 
         signalCaptureStop()
         stopCaptureSessions()

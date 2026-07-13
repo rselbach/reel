@@ -149,6 +149,11 @@ record-manual story_id result notes="":
 record-manual-dry-run story_id result notes="":
     python3 scripts/record-manual-validation.py --id "{{ story_id }}" --result "{{ result }}" --notes "{{ notes }}" --dry-run
 
+# Summarize manual validation progress; accepts status script flags
+[positional-arguments]
+manual-status *args:
+    python3 scripts/manual-validation-status.py "$@"
+
 # List available signing identities
 list-identities:
     security find-identity -v -p codesigning
@@ -168,6 +173,7 @@ help:
     @echo "  generate-checklist Regenerate manual checklist from CSV"
     @echo "  record-manual  Record manual validation result in CSV"
     @echo "  record-manual-dry-run Preview manual validation result"
+    @echo "  manual-status  Summarize manual validation progress"
     @echo "  run            Build and open the app"
     @echo "  clean          Remove build artifacts"
     @echo "  list-identities Show available signing certs"

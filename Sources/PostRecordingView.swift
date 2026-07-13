@@ -1,6 +1,12 @@
 import AppKit
 import AVKit
+import os.log
 import SwiftUI
+
+private let logger = Logger(
+    subsystem: Bundle.main.bundleIdentifier ?? "com.rselbach.reel",
+    category: "PostRecordingView"
+)
 
 struct VideoPlayerView: NSViewRepresentable {
     let player: AVPlayer
@@ -315,10 +321,14 @@ struct PostRecordingView: View {
         }
 
         do {
-            try await trimVideo(to: outputURL)
+            let warning = try await trimVideo(to: outputURL)
+            if let warning {
+                exportError = warning.localizedDescription
+            }
             let revealed = NSWorkspace.shared.selectFile(outputURL.path(), inFileViewerRootedAtPath: "")
             if !revealed {
-                exportError = "Trimmed video saved, but Finder could not reveal it."
+                let revealError = "Trimmed video saved, but Finder could not reveal it."
+                exportError = exportError.map { "\($0)\n\(revealError)" } ?? revealError
             }
         } catch {
             exportError = "Export failed: \(error.localizedDescription)"
@@ -345,14 +355,20 @@ struct PostRecordingView: View {
         return panel.url
     }
 
-    private func trimVideo(to outputURL: URL) async throws {
+    private func trimVideo(to outputURL: URL) async throws -> FileReplacementWarning? {
         let asset = AVURLAsset(url: videoURL)
         let tempURL = outputURL
             .deletingLastPathComponent()
             .appendingPathComponent(".\(outputURL.deletingPathExtension().lastPathComponent)-\(UUID().uuidString).mp4")
         defer {
             if FileManager.default.fileExists(atPath: tempURL.path()) {
-                try? FileManager.default.removeItem(at: tempURL)
+                do {
+                    try FileManager.default.removeItem(at: tempURL)
+                } catch {
+                    logger.error(
+                        "Failed to remove temporary trim export at \(tempURL.path(), privacy: .public): \(error.localizedDescription, privacy: .public)"
+                    )
+                }
             }
         }
 
@@ -368,7 +384,7 @@ struct PostRecordingView: View {
         }
         session.timeRange = timeRange
         try await session.export(to: tempURL, as: .mp4)
-        try FileReplacement.commit(tempURL: tempURL, to: outputURL)
+        return try FileReplacement.commit(tempURL: tempURL, to: outputURL)
     }
 }
 
@@ -382,19 +398,40 @@ enum ExportError: LocalizedError {
     }
 }
 
+struct FileReplacementWarning: LocalizedError {
+    let backupURL: URL
+    let underlyingError: Error
+
+    var errorDescription: String? {
+        "The new file was saved, but its backup could not be removed at \(backupURL.path()): \(underlyingError.localizedDescription)"
+    }
+}
+
+enum FileReplacementError: LocalizedError {
+    case rollbackFailed(Error, Error, URL)
+
+    var errorDescription: String? {
+        switch self {
+        case .rollbackFailed(let commitError, let restoreError, let backupURL):
+            return "Replacement failed (\(commitError.localizedDescription)), and the original file could not be restored. It remains at \(backupURL.path()): \(restoreError.localizedDescription)"
+        }
+    }
+}
+
 enum FileReplacement {
+    @discardableResult
     static func commit(
         tempURL: URL,
         to outputURL: URL,
         fileManager: FileManager = .default
-    ) throws {
+    ) throws -> FileReplacementWarning? {
         if tempURL == outputURL {
-            return
+            return nil
         }
 
         guard fileManager.fileExists(atPath: outputURL.path()) else {
             try fileManager.moveItem(at: tempURL, to: outputURL)
-            return
+            return nil
         }
 
         let backupURL = outputURL
@@ -404,13 +441,30 @@ enum FileReplacement {
         try fileManager.moveItem(at: outputURL, to: backupURL)
         do {
             try fileManager.moveItem(at: tempURL, to: outputURL)
-            try? fileManager.removeItem(at: backupURL)
-        } catch {
+        } catch let commitError {
             if !fileManager.fileExists(atPath: outputURL.path()),
                fileManager.fileExists(atPath: backupURL.path()) {
-                try? fileManager.moveItem(at: backupURL, to: outputURL)
+                do {
+                    try fileManager.moveItem(at: backupURL, to: outputURL)
+                } catch let restoreError {
+                    throw FileReplacementError.rollbackFailed(
+                        commitError,
+                        restoreError,
+                        backupURL
+                    )
+                }
             }
-            throw error
+            throw commitError
+        }
+
+        do {
+            try fileManager.removeItem(at: backupURL)
+            return nil
+        } catch {
+            return FileReplacementWarning(
+                backupURL: backupURL,
+                underlyingError: error
+            )
         }
     }
 }
