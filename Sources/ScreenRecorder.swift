@@ -864,14 +864,32 @@ class ScreenRecorder: NSObject, ObservableObject {
         }
     }
 
-    private func abortRecordingAfterStreamError(_ error: Error) {
-        errorMessage = "Stream stopped: \(error.localizedDescription)"
+    /// Ends the recording after the stream stopped on its own (recorded window
+    /// closed, display disconnected, screen locked). Frames already written are
+    /// finalized into a playable file; the recording is only discarded when
+    /// nothing was captured yet.
+    private func handleStreamStopped(dueTo error: Error) async {
+        guard isRecording, !isStopping else { return }
+        isStopping = true
+        defer { isStopping = false }
+
         signalCaptureStop()
         stopCaptureSessions()
-        assetWriter?.cancelWriting()
-        if let outputURL {
-            discardTempRecording(outputURL)
+
+        let hasCapturedFrames = withFrameLock { frameState.frameWriter?.startTime != nil }
+        if hasCapturedFrames {
+            await finalizeRecording()
+            if lastRecordedURL != nil {
+                errorMessage = "Recording stopped unexpectedly (\(error.localizedDescription)). The partial recording was saved."
+            }
+        } else {
+            assetWriter?.cancelWriting()
+            if let outputURL {
+                discardTempRecording(outputURL)
+            }
+            errorMessage = "Recording stopped before any frames were captured: \(error.localizedDescription)"
         }
+
         cleanup()
         isRecording = false
     }
@@ -1275,7 +1293,7 @@ class ScreenRecorder: NSObject, ObservableObject {
 extension ScreenRecorder: SCStreamDelegate {
     nonisolated func stream(_ stream: SCStream, didStopWithError error: Error) {
         Task { @MainActor in
-            abortRecordingAfterStreamError(error)
+            await handleStreamStopped(dueTo: error)
         }
     }
 }
