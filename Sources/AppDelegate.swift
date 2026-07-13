@@ -149,6 +149,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                     self.showRecordingDialog()
                     return
                 }
+                // Fall back to the picker when the remembered selection no
+                // longer exists (window closed, display unplugged).
+                guard await self.screenRecorder.validateSelectionForQuickStart() else {
+                    self.showRecordingDialog()
+                    return
+                }
                 // Prevent multiple overlapping countdowns
                 guard !self.isCountdownActive else { return }
                 self.isCountdownActive = true

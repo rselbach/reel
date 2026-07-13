@@ -245,6 +245,27 @@ class ScreenRecorder: NSObject, ObservableObject {
         await updateShareableContent(updatePermissionState: false, failureMessage: "Failed to refresh windows")
     }
 
+    /// Re-validates the last recording selection before a hotkey-initiated
+    /// start. Returns false when the selection no longer exists (window
+    /// closed, display removed) so the caller can show the picker instead of
+    /// silently failing or recording the wrong thing. For window mode the
+    /// stored SCWindow is replaced with a fresh instance so its frame is
+    /// current.
+    func validateSelectionForQuickStart() async -> Bool {
+        await refreshWindows()
+        switch recordingMode {
+        case .display:
+            return selectedDisplayIndex < availableDisplays.count
+        case .window:
+            guard let windowID = selectedWindow?.windowID,
+                  let fresh = availableWindows.first(where: { $0.windowID == windowID }) else {
+                return false
+            }
+            selectedWindow = fresh
+            return true
+        }
+    }
+
     private func updateShareableContent(updatePermissionState: Bool, failureMessage: String) async {
         do {
             let content = try await loadShareableContent()
