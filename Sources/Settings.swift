@@ -10,6 +10,15 @@ enum SettingsErrorText {
     static let launchAtLoginUpdateFailed = "Failed to update launch at login"
 }
 
+enum RecentRecordingsLogic {
+    /// Most-recent-first, deduplicated, capped at limit.
+    static func updatedPaths(current: [String], adding path: String, limit: Int) -> [String] {
+        var paths = current.filter { $0 != path }
+        paths.insert(path, at: 0)
+        return Array(paths.prefix(limit))
+    }
+}
+
 /// String-backed setting whose rawValue is a stable storage key, decoupled
 /// from the label shown in the UI so rewording a label never resets stored
 /// preferences.
@@ -119,6 +128,7 @@ class AppSettings: ObservableObject {
         static let textOverlayEnabled = "textOverlayEnabled"
         static let textOverlayText = "textOverlayText"
         static let textOverlayPosition = "textOverlayPosition"
+        static let recentRecordings = "recentRecordings"
     }
 
     private func persist(_ value: Any?, key: String) {
@@ -272,6 +282,27 @@ class AppSettings: ObservableObject {
 
     @Published var textOverlayPosition: TextOverlayPosition {
         didSet { persist(textOverlayPosition.rawValue, key: DefaultsKey.textOverlayPosition) }
+    }
+
+    static let maxRecentRecordings = 5
+
+    @Published var recentRecordingPaths: [String] {
+        didSet { persist(recentRecordingPaths, key: DefaultsKey.recentRecordings) }
+    }
+
+    func noteRecentRecording(_ url: URL) {
+        recentRecordingPaths = RecentRecordingsLogic.updatedPaths(
+            current: recentRecordingPaths,
+            adding: url.path(),
+            limit: Self.maxRecentRecordings
+        )
+    }
+
+    /// Recent recordings that still exist on disk.
+    var existingRecentRecordings: [URL] {
+        recentRecordingPaths
+            .map { URL(fileURLWithPath: $0) }
+            .filter { FileManager.default.fileExists(atPath: $0.path()) }
     }
 
     enum AudioSource: String, StoredAppSetting {
@@ -572,6 +603,8 @@ class AppSettings: ObservableObject {
         self.textOverlayEnabled = defaults.bool(forKey: DefaultsKey.textOverlayEnabled)
         self.textOverlayText = defaults.string(forKey: DefaultsKey.textOverlayText) ?? ""
         self.textOverlayPosition = TextOverlayPosition.fromStored(defaults.string(forKey: DefaultsKey.textOverlayPosition)) ?? .center
+
+        self.recentRecordingPaths = defaults.stringArray(forKey: DefaultsKey.recentRecordings) ?? []
     }
 
     private func updateLaunchAtLogin() {

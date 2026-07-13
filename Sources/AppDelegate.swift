@@ -21,6 +21,10 @@ enum AppMenuText {
     static let checkForUpdates = "Check for Updates..."
     static let settings = "Settings..."
     static let quitReel = "Quit Reel"
+    static let openRecordingsFolder = "Open Recordings Folder"
+    static let recentRecordings = "Recent Recordings"
+    static let couldNotOpenRecording = "Could not open recording"
+    static let couldNotOpenRecordingsFolder = "Could not open recordings folder"
     static let hotkeyError = "Hotkey Error"
     static let recordingFailed = "Recording Failed"
     static let recordingWarning = "Recording Warning"
@@ -268,6 +272,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         menu.autoenablesItems = false
 
         addPermissionOrRecordingItems(to: menu)
+        addRecordingsAccessItems(to: menu)
         addErrorItems(to: menu)
         addStandardItems(to: menu)
 
@@ -325,6 +330,45 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         recordingItem.isEnabled = false
         menu.addItem(recordingItem)
         menu.addItem(NSMenuItem(title: AppMenuText.stopRecording, action: #selector(stopRecording), keyEquivalent: "s"))
+    }
+
+    private func addRecordingsAccessItems(to menu: NSMenu) {
+        menu.addItem(NSMenuItem.separator())
+        menu.addItem(NSMenuItem(title: AppMenuText.openRecordingsFolder, action: #selector(openRecordingsFolder), keyEquivalent: ""))
+
+        let recents = AppSettings.shared.existingRecentRecordings
+        guard !recents.isEmpty else { return }
+
+        let submenu = NSMenu()
+        for url in recents {
+            let item = NSMenuItem(title: url.lastPathComponent, action: #selector(openRecentRecording(_:)), keyEquivalent: "")
+            item.representedObject = url
+            item.target = self
+            submenu.addItem(item)
+        }
+        let parent = NSMenuItem(title: AppMenuText.recentRecordings, action: nil, keyEquivalent: "")
+        menu.addItem(parent)
+        menu.setSubmenu(submenu, for: parent)
+    }
+
+    @objc private func openRecordingsFolder() {
+        let url = AppSettings.shared.outputDirectory
+        if !NSWorkspace.shared.open(url) {
+            showErrorAlert(
+                title: AppMenuText.couldNotOpenRecordingsFolder,
+                message: "Finder could not open \(url.path())."
+            )
+        }
+    }
+
+    @objc private func openRecentRecording(_ sender: NSMenuItem) {
+        guard let url = sender.representedObject as? URL else { return }
+        if !NSWorkspace.shared.open(url) {
+            showErrorAlert(
+                title: AppMenuText.couldNotOpenRecording,
+                message: "Could not open \(url.path()). The file may have been moved or deleted."
+            )
+        }
     }
 
     private func addErrorItems(to menu: NSMenu) {

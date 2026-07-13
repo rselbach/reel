@@ -928,6 +928,7 @@ class ScreenRecorder: NSObject, ObservableObject {
 
         logger.info("Recording saved to: \(finalURL.path())")
         lastRecordedURL = finalURL
+        settings.noteRecentRecording(finalURL)
 
         if RecordingFinalizationLogic.shouldRevealInFinder(
             openFinderAfterRecording: settings.openFinderAfterRecording,

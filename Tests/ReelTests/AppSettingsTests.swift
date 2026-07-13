@@ -418,6 +418,25 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(GitInfo.normalizedCommit(fullSHA), fullSHA.lowercased())
     }
 
+    func testRecentRecordingsDeduplicateAndCapMostRecentFirst() {
+        XCTAssertEqual(
+            RecentRecordingsLogic.updatedPaths(current: [], adding: "/a.mp4", limit: 5),
+            ["/a.mp4"]
+        )
+        XCTAssertEqual(
+            RecentRecordingsLogic.updatedPaths(current: ["/a.mp4", "/b.mp4"], adding: "/b.mp4", limit: 5),
+            ["/b.mp4", "/a.mp4"]
+        )
+        XCTAssertEqual(
+            RecentRecordingsLogic.updatedPaths(
+                current: ["/1.mp4", "/2.mp4", "/3.mp4", "/4.mp4", "/5.mp4"],
+                adding: "/6.mp4",
+                limit: 5
+            ),
+            ["/6.mp4", "/1.mp4", "/2.mp4", "/3.mp4", "/4.mp4"]
+        )
+    }
+
     func testRegionMathConvertsCocoaSelectionToQuartz() {
         let quartz = RegionMath.quartzRect(
             fromScreenLocalCocoa: CGRect(x: 100, y: 100, width: 400, height: 200),
