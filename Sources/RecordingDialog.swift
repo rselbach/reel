@@ -37,21 +37,44 @@ enum RecordingDialogLogic {
     }
 }
 
+/// Read-only snapshot wrapper for fanning ScreenCaptureKit objects (and the
+/// NSImages made from them) out to concurrent thumbnail tasks. SCDisplay/
+/// SCWindow/NSImage are not Sendable, but these are immutable snapshots that
+/// are only read.
+private struct UncheckedSendable<T>: @unchecked Sendable {
+    let value: T
+}
+
 struct RecordingDialog: View {
-    let availableDisplays: [SCDisplay]
-    let availableWindows: [SCWindow]
     let onStart: (RecordingSelection) -> Void
     let onCancel: () -> Void
-    
+    let onRefresh: @MainActor () async -> (displays: [SCDisplay], windows: [SCWindow])
+
+    @State private var displays: [SCDisplay]
+    @State private var windows: [SCWindow]
     @State private var selection: RecordingSelection?
     @State private var displayThumbnails: [Int: NSImage] = [:]
     @State private var windowThumbnails: [CGWindowID: NSImage] = [:]
     @State private var isLoading = true
     @State private var searchText = ""
-    
+
+    init(
+        availableDisplays: [SCDisplay],
+        availableWindows: [SCWindow],
+        onStart: @escaping (RecordingSelection) -> Void,
+        onCancel: @escaping () -> Void,
+        onRefresh: @escaping @MainActor () async -> (displays: [SCDisplay], windows: [SCWindow])
+    ) {
+        self.onStart = onStart
+        self.onCancel = onCancel
+        self.onRefresh = onRefresh
+        _displays = State(initialValue: availableDisplays)
+        _windows = State(initialValue: availableWindows)
+    }
+
     private var filteredWindows: [SCWindow] {
-        guard !searchText.isEmpty else { return availableWindows }
-        return availableWindows.filter { window in
+        guard !searchText.isEmpty else { return windows }
+        return windows.filter { window in
             RecordingDialogLogic.windowMatchesSearch(
                 appName: window.owningApplication?.applicationName,
                 windowTitle: window.title,
@@ -70,21 +93,21 @@ struct RecordingDialog: View {
                 .padding(.top, 16)
                 .padding(.bottom, 12)
             
-            if !availableDisplays.isEmpty {
+            if !displays.isEmpty {
                 Text("Displays")
                     .font(.subheadline)
                     .foregroundColor(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .padding(.horizontal, 16)
-                
+
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 12) {
-                        ForEach(0..<availableDisplays.count, id: \.self) { index in
+                        ForEach(0..<displays.count, id: \.self) { index in
                             ThumbnailCard(
                                 image: displayThumbnails[index],
                                 title: RecordingDialogLogic.displayTitle(
                                     index: index,
-                                    displayCount: availableDisplays.count
+                                    displayCount: displays.count
                                 ),
                                 isSelected: selection == .display(index),
                                 isLoading: isLoading,
@@ -110,12 +133,20 @@ struct RecordingDialog: View {
             .padding(.horizontal, 16)
             .padding(.top, 8)
 
-            if !availableWindows.isEmpty {
+            if !windows.isEmpty {
                 HStack {
                     Text("Windows")
                         .font(.subheadline)
                         .foregroundColor(.secondary)
                     Spacer()
+                    Button {
+                        Task { await refresh() }
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                    }
+                    .buttonStyle(.borderless)
+                    .disabled(isLoading)
+                    .help("Refresh displays and windows")
                     TextField("Search", text: $searchText)
                         .textFieldStyle(.roundedBorder)
                         .frame(width: 150)
@@ -142,7 +173,7 @@ struct RecordingDialog: View {
                 }
             }
 
-            if availableDisplays.isEmpty && availableWindows.isEmpty {
+            if displays.isEmpty && windows.isEmpty {
                 VStack(spacing: 6) {
                     Text("No recordable displays or windows found")
                         .font(.subheadline)
@@ -181,24 +212,66 @@ struct RecordingDialog: View {
         }
     }
     
+    private func refresh() async {
+        isLoading = true
+        let content = await onRefresh()
+        displays = content.displays
+        windows = content.windows
+        displayThumbnails = [:]
+        windowThumbnails = [:]
+        // Drop a selection that no longer exists after the refresh.
+        if case .window(let selected) = selection,
+           !windows.contains(where: { $0.windowID == selected.windowID }) {
+            selection = nil
+        }
+        if case .display(let index) = selection, index >= displays.count {
+            selection = nil
+        }
+        await loadThumbnails()
+    }
+
+    /// Captures all thumbnails concurrently. Each child task runs on the
+    /// main actor, but the SCScreenshotManager calls suspend, so the actual
+    /// captures overlap instead of loading one by one.
     private func loadThumbnails() async {
-        // Load display thumbnails sequentially (SCDisplay isn't Sendable)
-        for (index, display) in availableDisplays.enumerated() {
-            guard !Task.isCancelled else { return }
-            if let image = await ThumbnailCapture.captureDisplay(display, maxSize: thumbnailSize) {
+        let size = thumbnailSize
+
+        await withTaskGroup(of: UncheckedSendable<(Int, NSImage)>?.self) { group in
+            for (index, display) in displays.enumerated() {
+                let boxed = UncheckedSendable(value: display)
+                group.addTask {
+                    guard let image = await ThumbnailCapture.captureDisplay(boxed.value, maxSize: size) else {
+                        return nil
+                    }
+                    return UncheckedSendable(value: (index, image))
+                }
+            }
+            for await result in group {
                 guard !Task.isCancelled else { return }
-                displayThumbnails[index] = image
+                if let result {
+                    displayThumbnails[result.value.0] = result.value.1
+                }
             }
         }
 
-        // Load window thumbnails sequentially (SCWindow isn't Sendable)
-        for window in availableWindows {
-            guard !Task.isCancelled else { return }
-            if let image = await ThumbnailCapture.captureWindow(window, maxSize: thumbnailSize) {
+        await withTaskGroup(of: UncheckedSendable<(CGWindowID, NSImage)>?.self) { group in
+            for window in windows {
+                let boxed = UncheckedSendable(value: window)
+                group.addTask {
+                    guard let image = await ThumbnailCapture.captureWindow(boxed.value, maxSize: size) else {
+                        return nil
+                    }
+                    return UncheckedSendable(value: (boxed.value.windowID, image))
+                }
+            }
+            for await result in group {
                 guard !Task.isCancelled else { return }
-                windowThumbnails[window.windowID] = image
+                if let result {
+                    windowThumbnails[result.value.0] = result.value.1
+                }
             }
         }
+
         guard !Task.isCancelled else { return }
         isLoading = false
     }

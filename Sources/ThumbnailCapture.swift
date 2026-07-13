@@ -16,7 +16,9 @@ enum ThumbnailSizing {
     }
 }
 
-@MainActor
+// Deliberately not actor-isolated: thumbnail captures are fired from
+// concurrent tasks and SCScreenshotManager is safe to call off the main
+// thread.
 class ThumbnailCapture {
     static func captureDisplay(_ display: SCDisplay, maxSize: CGSize = CGSize(width: 320, height: 180)) async -> NSImage? {
         let filter = SCContentFilter(display: display, excludingWindows: [])

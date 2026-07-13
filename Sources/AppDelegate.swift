@@ -525,6 +525,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 onCancel: { [weak self] in
                     self?.recordingDialogWindow?.close()
                     self?.recordingDialogWindow = nil
+                },
+                onRefresh: { [weak self] in
+                    guard let self else { return ([], []) }
+                    await self.screenRecorder.refreshWindows()
+                    return (self.screenRecorder.availableDisplays, self.screenRecorder.availableWindows)
                 }
             )
 
