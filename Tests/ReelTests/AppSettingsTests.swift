@@ -20,6 +20,19 @@ private final class BackupCleanupFailingFileManager: FileManager, @unchecked Sen
     }
 }
 
+private final class PartialDestinationFailingFileManager: FileManager, @unchecked Sendable {
+    private var moveCount = 0
+
+    override func moveItem(at srcURL: URL, to dstURL: URL) throws {
+        moveCount += 1
+        if moveCount == 2 {
+            try Data("partial".utf8).write(to: dstURL)
+            throw CocoaError(.fileWriteOutOfSpace)
+        }
+        try super.moveItem(at: srcURL, to: dstURL)
+    }
+}
+
 final class AppSettingsTests: XCTestCase {
     @MainActor
     func testCameraOverlayPositionNormalizedCoordinates() {
@@ -697,6 +710,30 @@ final class AppSettingsTests: XCTestCase {
 
         XCTAssertThrowsError(try FileReplacement.commit(tempURL: missingTempURL, to: outputURL))
         XCTAssertEqual(try String(contentsOf: outputURL, encoding: .utf8), "old")
+    }
+
+    func testFileReplacementRemovesPartialDestinationBeforeRollback() throws {
+        let directory = try makeTemporaryDirectory()
+        defer {
+            do {
+                try FileManager.default.removeItem(at: directory)
+            } catch {
+                XCTFail("Failed to remove test directory: \(error)")
+            }
+        }
+
+        let tempURL = directory.appendingPathComponent("recording.tmp.mp4")
+        let outputURL = directory.appendingPathComponent("recording.mp4")
+        try Data("new".utf8).write(to: tempURL)
+        try Data("old".utf8).write(to: outputURL)
+
+        XCTAssertThrowsError(try FileReplacement.commit(
+            tempURL: tempURL,
+            to: outputURL,
+            fileManager: PartialDestinationFailingFileManager()
+        ))
+        XCTAssertEqual(try String(contentsOf: outputURL, encoding: .utf8), "old")
+        XCTAssertEqual(try String(contentsOf: tempURL, encoding: .utf8), "new")
     }
 
     func testFileReplacementReportsRollbackFailureAndPreservesBackup() throws {

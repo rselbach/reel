@@ -442,9 +442,11 @@ enum FileReplacement {
         do {
             try fileManager.moveItem(at: tempURL, to: outputURL)
         } catch let commitError {
-            if !fileManager.fileExists(atPath: outputURL.path()),
-               fileManager.fileExists(atPath: backupURL.path()) {
+            if fileManager.fileExists(atPath: backupURL.path()) {
                 do {
+                    if fileManager.fileExists(atPath: outputURL.path()) {
+                        try fileManager.removeItem(at: outputURL)
+                    }
                     try fileManager.moveItem(at: backupURL, to: outputURL)
                 } catch let restoreError {
                     throw FileReplacementError.rollbackFailed(
