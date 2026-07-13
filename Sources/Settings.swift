@@ -468,11 +468,13 @@ class AppSettings: ObservableObject {
         supportedCountdownDurations.contains(duration) ? duration : 3
     }
 
+    static let defaultFrameRate = 30
+
     static func sanitizedFrameRate(_ frameRate: Int) -> Int {
-        guard frameRate > 0 else { return 60 }
+        guard frameRate > 0 else { return defaultFrameRate }
         if supportedFrameRates.contains(frameRate) { return frameRate }
 
-        let closest = supportedFrameRates.min(by: { abs($0 - frameRate) < abs($1 - frameRate) }) ?? 60
+        let closest = supportedFrameRates.min(by: { abs($0 - frameRate) < abs($1 - frameRate) }) ?? defaultFrameRate
         return closest
     }
 
@@ -563,7 +565,7 @@ class AppSettings: ObservableObject {
         self.launchAtLogin = defaults.bool(forKey: DefaultsKey.launchAtLogin)
         self.hasShownWelcome = defaults.bool(forKey: DefaultsKey.hasShownWelcome)
         self.showCursor = defaults.object(forKey: DefaultsKey.showCursor) as? Bool ?? true
-        self.frameRate = Self.sanitizedFrameRate(defaults.object(forKey: DefaultsKey.frameRate) as? Int ?? 60)
+        self.frameRate = Self.sanitizedFrameRate(defaults.object(forKey: DefaultsKey.frameRate) as? Int ?? Self.defaultFrameRate)
         self.videoQuality = VideoQuality.fromStored(defaults.string(forKey: DefaultsKey.videoQuality)) ?? .medium
         self.openFinderAfterRecording = defaults.object(forKey: DefaultsKey.openFinderAfterRecording) as? Bool ?? true
         self.showPreviewAfterRecording = defaults.object(forKey: DefaultsKey.showPreviewAfterRecording) as? Bool ?? true

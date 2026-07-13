@@ -104,10 +104,11 @@ final class AppSettingsTests: XCTestCase {
 
     @MainActor
     func testFrameRateSanitizationUsesSafeFallback() {
-        XCTAssertEqual(AppSettings.sanitizedFrameRate(0), 60)
+        XCTAssertEqual(AppSettings.sanitizedFrameRate(0), 30)
         XCTAssertEqual(AppSettings.sanitizedFrameRate(30), 30)
         XCTAssertEqual(AppSettings.sanitizedFrameRate(60), 60)
         XCTAssertEqual(AppSettings.sanitizedFrameRate(45), 30)
+        XCTAssertEqual(AppSettings.defaultFrameRate, 30)
     }
 
     func testGitInfoURLValidation() {
