@@ -22,8 +22,9 @@ enum SettingsText {
     static let videoQuality = "Video quality:"
     static let countdown = "Countdown:"
     static let countdownOff = "Off"
-    static let recordAudio = "Record audio from microphone"
-    static let audioInput = "Audio input:"
+    static let recordAudio = "Record audio"
+    static let audioSource = "Source:"
+    static let audioInput = "Microphone:"
     static let recordCamera = "Record camera overlay"
     static let camera = "Camera:"
     static let position = "Position:"
@@ -187,11 +188,19 @@ struct RecordingTab: View {
             Toggle(SettingsText.recordAudio, isOn: $settings.recordAudio)
 
             if settings.recordAudio {
-                DevicePicker(
-                    title: SettingsText.audioInput,
-                    devices: settings.availableAudioDevices,
-                    selection: $settings.audioDeviceID
-                )
+                Picker(SettingsText.audioSource, selection: $settings.audioSource) {
+                    ForEach(AppSettings.AudioSource.allCases, id: \.self) { source in
+                        Text(source.displayName).tag(source)
+                    }
+                }
+
+                if settings.audioSource == .microphone {
+                    DevicePicker(
+                        title: SettingsText.audioInput,
+                        devices: settings.availableAudioDevices,
+                        selection: $settings.audioDeviceID
+                    )
+                }
             }
 
             Divider()

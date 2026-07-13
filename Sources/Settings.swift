@@ -108,6 +108,7 @@ class AppSettings: ObservableObject {
         static let recordingHotkey = "recordingHotkey"
         static let countdownDuration = "countdownDuration"
         static let recordAudio = "recordAudio"
+        static let audioSource = "audioSource"
         static let audioDeviceID = "audioDeviceID"
         static let recordCamera = "recordCamera"
         static let cameraDeviceID = "cameraDeviceID"
@@ -228,6 +229,10 @@ class AppSettings: ObservableObject {
         didSet { persist(recordAudio, key: DefaultsKey.recordAudio) }
     }
 
+    @Published var audioSource: AudioSource {
+        didSet { persist(audioSource.rawValue, key: DefaultsKey.audioSource) }
+    }
+
     @Published var audioDeviceID: String? {
         didSet { persist(audioDeviceID, key: DefaultsKey.audioDeviceID) }
     }
@@ -262,6 +267,18 @@ class AppSettings: ObservableObject {
 
     @Published var textOverlayPosition: TextOverlayPosition {
         didSet { persist(textOverlayPosition.rawValue, key: DefaultsKey.textOverlayPosition) }
+    }
+
+    enum AudioSource: String, StoredAppSetting {
+        case microphone
+        case systemAudio
+
+        var displayName: String {
+            switch self {
+            case .microphone: return "Microphone"
+            case .systemAudio: return "System Audio"
+            }
+        }
     }
 
     enum CameraOverlayPosition: String, StoredAppSetting {
@@ -537,6 +554,7 @@ class AppSettings: ObservableObject {
         )
 
         self.recordAudio = defaults.bool(forKey: DefaultsKey.recordAudio)
+        self.audioSource = AudioSource.fromStored(defaults.string(forKey: DefaultsKey.audioSource)) ?? .microphone
         self.audioDeviceID = defaults.string(forKey: DefaultsKey.audioDeviceID)
 
         self.recordCamera = defaults.bool(forKey: DefaultsKey.recordCamera)

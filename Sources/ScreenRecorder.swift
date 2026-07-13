@@ -213,6 +213,9 @@ class ScreenRecorder: NSObject, ObservableObject {
     // a concurrent queue can deliver frames out of presentation-time order,
     // which corrupts AVAssetWriterInput appends (timestamps must be monotonic).
     private let streamOutputQueue = DispatchQueue(label: "com.rselbach.reel.stream-output")
+    // Separate serial queue for SCStream system-audio samples so audio
+    // delivery is never blocked behind frame compositing.
+    private let systemAudioQueue = DispatchQueue(label: "com.rselbach.reel.system-audio")
 
     // Thread-safe state for frame processing (accessed from ScreenCaptureKit callback queue)
     private nonisolated(unsafe) let frameState = FrameCaptureState()
@@ -403,7 +406,8 @@ class ScreenRecorder: NSObject, ObservableObject {
             // Request AVFoundation permissions before allocating any recording
             // resources, so a denial surfaces a clear message instead of a
             // generic "Failed to start" and leaves no temp file behind.
-            if settings.recordAudio {
+            // System audio rides on the screen recording permission instead.
+            if settings.recordAudio, settings.audioSource == .microphone {
                 guard await ensureAVPermission(for: .audio) else {
                     errorMessage = "Microphone access denied. Enable it in System Settings → Privacy & Security → Microphone."
                     return
@@ -420,7 +424,12 @@ class ScreenRecorder: NSObject, ObservableObject {
             // Set up capture sessions before the asset writer so the audio
             // input can use the source's recommended settings (makeAudioInput).
             if settings.recordAudio {
-                try setupAudioCapture()
+                switch settings.audioSource {
+                case .microphone:
+                    try setupAudioCapture()
+                case .systemAudio:
+                    configureSystemAudioCapture(config)
+                }
             }
 
             if settings.recordCamera {
@@ -432,6 +441,9 @@ class ScreenRecorder: NSObject, ObservableObject {
             stream = SCStream(filter: filter, configuration: config, delegate: self)
 
             try stream?.addStreamOutput(self, type: .screen, sampleHandlerQueue: streamOutputQueue)
+            if config.capturesAudio {
+                try stream?.addStreamOutput(self, type: .audio, sampleHandlerQueue: systemAudioQueue)
+            }
 
             try await stream?.startCapture()
             let failures = startCaptureSessions()
@@ -788,6 +800,22 @@ class ScreenRecorder: NSObject, ObservableObject {
         // attached to a configured session; capture it now so the writer input
         // matches the actual source sample rate/channels.
         audioOutputSettings = output.recommendedAudioSettingsForAssetWriter(writingTo: .mp4)
+    }
+
+    /// Captures the system's audio output through the SCStream itself; no
+    /// extra permission is needed beyond screen recording. Our own audio is
+    /// excluded so alert sounds from Reel don't end up in recordings.
+    private func configureSystemAudioCapture(_ config: SCStreamConfiguration) {
+        config.capturesAudio = true
+        config.excludesCurrentProcessAudio = true
+        config.sampleRate = 48_000
+        config.channelCount = 2
+        audioOutputSettings = [
+            AVFormatIDKey: kAudioFormatMPEG4AAC,
+            AVSampleRateKey: 48_000,
+            AVNumberOfChannelsKey: 2,
+            AVEncoderBitRateKey: 192_000
+        ]
     }
 
     private func setupCameraCapture() throws {
@@ -1404,9 +1432,22 @@ extension ScreenRecorder: SCStreamOutput {
         didOutputSampleBuffer sampleBuffer: CMSampleBuffer,
         of type: SCStreamOutputType
     ) {
+        switch type {
+        case .screen:
+            handleScreenSampleBuffer(sampleBuffer)
+        case .audio:
+            autoreleasepool {
+                guard sampleBuffer.isValid else { return }
+                appendAudioSampleBuffer(sampleBuffer)
+            }
+        default:
+            return
+        }
+    }
+
+    private nonisolated func handleScreenSampleBuffer(_ sampleBuffer: CMSampleBuffer) {
         autoreleasepool {
-            guard type == .screen,
-                  sampleBuffer.isValid,
+            guard sampleBuffer.isValid,
                   let attachments = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, createIfNecessary: false)
                     as? [[SCStreamFrameInfo: Any]],
                   let statusRaw = attachments.first?[.status] as? Int,
@@ -1509,24 +1550,31 @@ extension ScreenRecorder: AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptur
                 }
                 guard stored else { return }
             } else if output is AVCaptureAudioDataOutput {
-                let writer = withFrameLock { () -> FrameWriter? in
-                    guard !frameState.isCaptureStopped else { return nil }
-                    return frameState.frameWriter
-                }
+                appendAudioSampleBuffer(sampleBuffer)
+            }
+        }
+    }
 
-                guard var writer,
-                      writer.startTime != nil,
-                      let audio = writer.audioInput,
-                      audio.isReadyForMoreMediaData
-                else { return }
+    /// Appends an audio sample (microphone or system audio) to the writer.
+    /// Samples arriving before the video session starts are dropped so audio
+    /// never leads the first frame.
+    private nonisolated func appendAudioSampleBuffer(_ sampleBuffer: CMSampleBuffer) {
+        let writer = withFrameLock { () -> FrameWriter? in
+            guard !frameState.isCaptureStopped else { return nil }
+            return frameState.frameWriter
+        }
 
-                if !audio.append(sampleBuffer) {
-                    withFrameLock {
-                        handleAppendFailure(&writer, context: "Failed to append audio sample")
-                        frameState.frameWriter = writer
-                        frameState.isCaptureStopped = true
-                    }
-                }
+        guard var writer,
+              writer.startTime != nil,
+              let audio = writer.audioInput,
+              audio.isReadyForMoreMediaData
+        else { return }
+
+        if !audio.append(sampleBuffer) {
+            withFrameLock {
+                handleAppendFailure(&writer, context: "Failed to append audio sample")
+                frameState.frameWriter = writer
+                frameState.isCaptureStopped = true
             }
         }
     }

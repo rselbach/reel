@@ -23,6 +23,7 @@ final class AppSettingsTests: XCTestCase {
     @MainActor
     func testStoredSettingRawValuesAreStableKeys() {
         XCTAssertEqual(AppSettings.VideoQuality.medium.rawValue, "medium")
+        XCTAssertEqual(AppSettings.AudioSource.systemAudio.rawValue, "systemAudio")
         XCTAssertEqual(AppSettings.CameraOverlayPosition.bottomRight.rawValue, "bottomRight")
         XCTAssertEqual(AppSettings.CameraOverlaySize.large.rawValue, "large")
         XCTAssertEqual(AppSettings.CameraOverlayShape.circle.rawValue, "circle")
@@ -40,6 +41,8 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(AppSettings.CameraOverlaySize.fromStored("Large"), .large)
         XCTAssertEqual(AppSettings.CameraOverlayShape.fromStored("Circle"), .circle)
         XCTAssertEqual(AppSettings.TextOverlayPosition.fromStored("Center"), .center)
+        XCTAssertEqual(AppSettings.AudioSource.fromStored("System Audio"), .systemAudio)
+        XCTAssertEqual(AppSettings.AudioSource.fromStored("microphone"), .microphone)
     }
 
     @MainActor
@@ -176,7 +179,7 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(SettingsText.askEachTime, "Ask each time")
         XCTAssertEqual(SettingsText.fixedFolder, "Fixed folder")
         XCTAssertEqual(SettingsText.outputDirectoryNotWritable, "Cannot write to selected folder. Pick another location.")
-        XCTAssertEqual(SettingsText.recordAudio, "Record audio from microphone")
+        XCTAssertEqual(SettingsText.recordAudio, "Record audio")
         XCTAssertEqual(SettingsText.recordCamera, "Record camera overlay")
         XCTAssertEqual(SettingsText.addTextOverlay, "Add text overlay")
         XCTAssertEqual(SettingsText.defaultDevice, "Default")
