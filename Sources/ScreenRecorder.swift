@@ -813,6 +813,10 @@ class ScreenRecorder: NSObject, ObservableObject {
         var finalURL = tempURL
 
         if settings.askWhereToSave {
+            // As a menu bar (accessory) app there is usually no key window
+            // when a recording stops; without activation the save panel can
+            // open behind the frontmost app.
+            NSApp.activate(ignoringOtherApps: true)
             let panel = NSSavePanel()
             panel.allowedContentTypes = [.mpeg4Movie]
             panel.nameFieldStringValue = tempURL.lastPathComponent
