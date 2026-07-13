@@ -547,6 +547,13 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(try String(contentsOf: outputURL, encoding: .utf8), "final")
     }
 
+    func testStatusItemLeftClickStopsOnlyActiveRecordings() {
+        XCTAssertTrue(StatusItemClickLogic.shouldStopRecording(isRecording: true, isRightClick: false))
+        XCTAssertFalse(StatusItemClickLogic.shouldStopRecording(isRecording: true, isRightClick: true))
+        XCTAssertFalse(StatusItemClickLogic.shouldStopRecording(isRecording: false, isRightClick: false))
+        XCTAssertFalse(StatusItemClickLogic.shouldStopRecording(isRecording: false, isRightClick: true))
+    }
+
     func testRecordingElapsedFormatCoversMinutesAndHours() {
         XCTAssertEqual(RecordingElapsedFormat.string(seconds: 0), "0:00")
         XCTAssertEqual(RecordingElapsedFormat.string(seconds: 42), "0:42")

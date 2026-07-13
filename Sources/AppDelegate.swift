@@ -34,6 +34,15 @@ enum AppMenuText {
     static let settingsWindowTitle = "Reel Settings"
 }
 
+enum StatusItemClickLogic {
+    /// Left-click stops an active recording immediately (stop latency matters
+    /// at the end of a take); right-click, or any click while idle, opens the
+    /// menu.
+    static func shouldStopRecording(isRecording: Bool, isRightClick: Bool) -> Bool {
+        isRecording && !isRightClick
+    }
+}
+
 enum RecordingElapsedFormat {
     static func string(seconds: Int) -> String {
         let clamped = max(0, seconds)
@@ -67,6 +76,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var cameraOverlayController: CameraOverlayController?
     private var recordingTimer: Timer?
     private var recordingStartedAt: Date?
+    private var statusMenu: NSMenu?
     // Sparkle needs a real app bundle; under `swift run` there is no
     // Info.plist and starting the updater misbehaves, so it stays nil in
     // unbundled dev builds.
@@ -113,6 +123,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
         if let button = statusItem.button {
             button.image = NSImage(systemSymbolName: "record.circle", accessibilityDescription: "Reel")
+            button.target = self
+            button.action = #selector(statusItemClicked)
+            button.sendAction(on: [.leftMouseUp, .rightMouseUp])
         }
 
         AppSettings.shared.checkLaunchAtLoginStatus()
@@ -221,7 +234,28 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         addErrorItems(to: menu)
         addStandardItems(to: menu)
 
-        statusItem.menu = menu
+        statusMenu = menu
+    }
+
+    /// The status item has no permanent menu so left-clicks can act directly
+    /// (stop an active recording); the menu is attached only while shown.
+    @objc private func statusItemClicked() {
+        let event = NSApp.currentEvent
+        let isRightClick = event?.type == .rightMouseUp
+            || (event?.modifierFlags.contains(.control) ?? false)
+
+        if StatusItemClickLogic.shouldStopRecording(
+            isRecording: screenRecorder.isRecording,
+            isRightClick: isRightClick
+        ) {
+            stopRecording()
+            return
+        }
+
+        rebuildMenu()
+        statusItem.menu = statusMenu
+        statusItem.button?.performClick(nil)
+        statusItem.menu = nil
     }
 
     private func addPermissionOrRecordingItems(to menu: NSMenu) {
@@ -533,6 +567,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             button.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: "Reel")
             button.contentTintColor = isRecording ? .red : nil
             button.imagePosition = .imageLeft
+            button.toolTip = isRecording
+                ? "Reel — click to stop recording"
+                : "Reel"
         }
 
         if isRecording {
