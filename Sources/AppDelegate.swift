@@ -85,6 +85,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var recordingTimer: Timer?
     private var recordingStartedAt: Date?
     private var statusMenu: NSMenu?
+    private var windowTrackingTimer: Timer?
     // Sparkle needs a real app bundle; under `swift run` there is no
     // Info.plist and starting the updater misbehaves, so it stays nil in
     // unbundled dev builds.
@@ -648,12 +649,56 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 self?.screenRecorder.updateCameraOverlayPosition(x: x, y: y)
             }
         )
+
+        startWindowTrackingIfNeeded()
     }
-    
+
     /// Hides the camera overlay window.
     private func hideCameraOverlay() {
+        stopWindowTracking()
         cameraOverlayController?.hide()
         cameraOverlayController = nil
+    }
+
+    /// Window recordings follow the window wherever it goes, but the camera
+    /// overlay's drag bounds were captured at start. Poll the recorded
+    /// window's frame and move the overlay along with it.
+    private func startWindowTrackingIfNeeded() {
+        guard screenRecorder.recordingMode == .window,
+              let windowID = screenRecorder.selectedWindow?.windowID else {
+            return
+        }
+
+        let timer = Timer(timeInterval: 1.0, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                self?.syncOverlayToRecordedWindow(windowID: windowID)
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        windowTrackingTimer = timer
+    }
+
+    private func stopWindowTracking() {
+        windowTrackingTimer?.invalidate()
+        windowTrackingTimer = nil
+    }
+
+    private func syncOverlayToRecordedWindow(windowID: CGWindowID) {
+        guard let controller = cameraOverlayController,
+              let quartzBounds = Self.windowBounds(windowID: windowID),
+              let cocoaBounds = cocoaRect(fromQuartz: quartzBounds) else {
+            return
+        }
+        controller.updateBounds(cocoaBounds)
+    }
+
+    private static func windowBounds(windowID: CGWindowID) -> CGRect? {
+        guard let infoList = CGWindowListCopyWindowInfo(.optionIncludingWindow, windowID) as? [[String: Any]],
+              let boundsDict = infoList.first?[kCGWindowBounds as String] as? NSDictionary,
+              let bounds = CGRect(dictionaryRepresentation: boundsDict) else {
+            return nil
+        }
+        return bounds
     }
 
     /// Shows a border around the recorded region so the user can see exactly

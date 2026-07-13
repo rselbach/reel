@@ -94,7 +94,7 @@ final class CameraOverlayWindow: NSWindow {
         notifyPositionChanged()
     }
     
-    private func notifyPositionChanged() {
+    func notifyPositionChanged() {
         guard let position = CameraOverlayLayout.normalizedPosition(
             origin: frame.origin,
             overlaySize: overlaySize,
@@ -102,6 +102,15 @@ final class CameraOverlayWindow: NSWindow {
         ) else { return }
 
         onPositionChanged?(position.x, position.y)
+    }
+
+    func clampToDragBounds() {
+        var newOrigin = frame.origin
+        newOrigin.x = max(dragBounds.minX, min(newOrigin.x, dragBounds.maxX - overlaySize))
+        newOrigin.y = max(dragBounds.minY, min(newOrigin.y, dragBounds.maxY - overlaySize))
+        if newOrigin != frame.origin {
+            setFrameOrigin(newOrigin)
+        }
     }
 }
 
@@ -166,7 +175,23 @@ final class CameraOverlayController {
         window = nil
     }
     
+    /// Updates the drag bounds after the recorded window moved or resized,
+    /// shifting the overlay by the same delta so it keeps its position
+    /// relative to the recorded content, then re-clamping and republishing
+    /// the normalized position for the compositor.
     func updateBounds(_ newBounds: CGRect) {
-        window?.dragBounds = newBounds
+        guard let window, window.dragBounds != newBounds else { return }
+
+        let delta = CGPoint(
+            x: newBounds.minX - window.dragBounds.minX,
+            y: newBounds.minY - window.dragBounds.minY
+        )
+        window.dragBounds = newBounds
+        window.setFrameOrigin(NSPoint(
+            x: window.frame.origin.x + delta.x,
+            y: window.frame.origin.y + delta.y
+        ))
+        window.clampToDragBounds()
+        window.notifyPositionChanged()
     }
 }
