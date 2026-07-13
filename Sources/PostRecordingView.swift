@@ -59,7 +59,9 @@ enum TrimSliderMath {
         guard usableWidth > 0 else { return origin }
         let delta = (translationWidth / usableWidth) * duration
         let newStart = origin + delta
-        return min(max(0, newStart), trimEnd - TrimConstants.minimumDuration)
+        let minimumDuration = min(TrimConstants.minimumDuration, max(0, duration))
+        let latestStart = max(0, trimEnd - minimumDuration)
+        return min(max(0, newStart), latestStart)
     }
 
     static func clampedEnd(
@@ -72,7 +74,9 @@ enum TrimSliderMath {
         guard usableWidth > 0 else { return origin }
         let delta = (translationWidth / usableWidth) * duration
         let newEnd = origin + delta
-        return max(min(duration, newEnd), trimStart + TrimConstants.minimumDuration)
+        let minimumDuration = min(TrimConstants.minimumDuration, max(0, duration))
+        let earliestEnd = min(duration, trimStart + minimumDuration)
+        return max(min(duration, newEnd), earliestEnd)
     }
 
     static func seekTime(locationX: CGFloat, handleWidth: CGFloat, usableWidth: CGFloat, duration: Double) -> Double {

@@ -933,6 +933,29 @@ final class AppSettingsTests: XCTestCase {
         )
     }
 
+    func testTrimSliderMathKeepsShortRecordingRangeValid() {
+        XCTAssertEqual(
+            TrimSliderMath.clampedStart(
+                origin: 0,
+                translationWidth: 100,
+                usableWidth: 100,
+                duration: 0.2,
+                trimEnd: 0.2
+            ),
+            0
+        )
+        XCTAssertEqual(
+            TrimSliderMath.clampedEnd(
+                origin: 0.2,
+                translationWidth: -100,
+                usableWidth: 100,
+                duration: 0.2,
+                trimStart: 0
+            ),
+            0.2
+        )
+    }
+
     func testPostRecordingLogicShowsSaveTrimmedOnlyForMeaningfulTrimChanges() {
         XCTAssertFalse(PostRecordingLogic.hasTrimChanges(duration: 0, trimStart: 1, trimEnd: 5))
         XCTAssertFalse(PostRecordingLogic.hasTrimChanges(duration: 10, trimStart: 0.05, trimEnd: 9.95))
