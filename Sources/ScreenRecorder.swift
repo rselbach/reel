@@ -160,7 +160,8 @@ class ScreenRecorder: NSObject, ObservableObject {
             }
         }
     }
-    private var isStarting = false
+    private(set) var isStarting = false
+    private var startWaiters: [CheckedContinuation<Void, Never>] = []
     private var isStopping = false
     private var stopWaiters: [CheckedContinuation<Void, Never>] = []
     @Published var hasPermission = false
@@ -390,7 +391,7 @@ class ScreenRecorder: NSObject, ObservableObject {
     func startRecording() async {
         guard !isRecording, !isStarting else { return }
         isStarting = true
-        defer { isStarting = false }
+        defer { finishStarting() }
 
         // Reset stop signal for new recording
         resetCaptureStopSignal()
@@ -526,6 +527,9 @@ class ScreenRecorder: NSObject, ObservableObject {
 
     @discardableResult
     func stopRecording() async -> Bool {
+        if isStarting {
+            await waitForActiveStart()
+        }
         guard isRecording else { return false }
         if isStopping {
             await waitForActiveStop()
@@ -549,6 +553,21 @@ class ScreenRecorder: NSObject, ObservableObject {
         cleanup()
         isRecording = false
         return true
+    }
+
+    private func waitForActiveStart() async {
+        await withCheckedContinuation { continuation in
+            startWaiters.append(continuation)
+        }
+    }
+
+    private func finishStarting() {
+        isStarting = false
+        let waiters = startWaiters
+        startWaiters = []
+        for waiter in waiters {
+            waiter.resume()
+        }
     }
 
     private func waitForActiveStop() async {

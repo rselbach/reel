@@ -62,9 +62,13 @@ enum RecordingElapsedFormat {
 }
 
 enum AppTerminationLogic {
-    static func reply(isRecorderInitialized: Bool, isRecording: Bool) -> NSApplication.TerminateReply {
+    static func reply(
+        isRecorderInitialized: Bool,
+        isRecording: Bool,
+        isStarting: Bool
+    ) -> NSApplication.TerminateReply {
         guard isRecorderInitialized else { return .terminateNow }
-        return isRecording ? .terminateLater : .terminateNow
+        return isRecording || isStarting ? .terminateLater : .terminateNow
     }
 }
 
@@ -94,7 +98,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         let reply = AppTerminationLogic.reply(
             isRecorderInitialized: screenRecorder != nil,
-            isRecording: screenRecorder?.isRecording ?? false
+            isRecording: screenRecorder?.isRecording ?? false,
+            isStarting: screenRecorder?.isStarting ?? false
         )
         guard reply == .terminateLater else { return reply }
 

@@ -823,17 +823,37 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(RecordingElapsedFormat.string(seconds: -5), "0:00")
     }
 
-    func testAppTerminationReplyDefersOnlyForActiveRecording() {
+    func testAppTerminationReplyDefersForActiveOrStartingRecording() {
         XCTAssertEqual(
-            AppTerminationLogic.reply(isRecorderInitialized: false, isRecording: false),
+            AppTerminationLogic.reply(
+                isRecorderInitialized: false,
+                isRecording: false,
+                isStarting: false
+            ),
             .terminateNow
         )
         XCTAssertEqual(
-            AppTerminationLogic.reply(isRecorderInitialized: true, isRecording: false),
+            AppTerminationLogic.reply(
+                isRecorderInitialized: true,
+                isRecording: false,
+                isStarting: false
+            ),
             .terminateNow
         )
         XCTAssertEqual(
-            AppTerminationLogic.reply(isRecorderInitialized: true, isRecording: true),
+            AppTerminationLogic.reply(
+                isRecorderInitialized: true,
+                isRecording: true,
+                isStarting: false
+            ),
+            .terminateLater
+        )
+        XCTAssertEqual(
+            AppTerminationLogic.reply(
+                isRecorderInitialized: true,
+                isRecording: false,
+                isStarting: true
+            ),
             .terminateLater
         )
     }
