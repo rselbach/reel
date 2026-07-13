@@ -98,6 +98,7 @@ class AppSettings: ObservableObject {
 
     private enum DefaultsKey {
         static let launchAtLogin = "launchAtLogin"
+        static let hasShownWelcome = "hasShownWelcome"
         static let showCursor = "showCursor"
         static let frameRate = "frameRate"
         static let videoQuality = "videoQuality"
@@ -161,6 +162,10 @@ class AppSettings: ObservableObject {
     }
 
     @Published var launchAtLoginError: String?
+
+    @Published var hasShownWelcome: Bool {
+        didSet { persist(hasShownWelcome, key: DefaultsKey.hasShownWelcome) }
+    }
 
     @Published var showCursor: Bool {
         didSet { persist(showCursor, key: DefaultsKey.showCursor) }
@@ -525,6 +530,7 @@ class AppSettings: ObservableObject {
         let defaults = UserDefaults.standard
 
         self.launchAtLogin = defaults.bool(forKey: DefaultsKey.launchAtLogin)
+        self.hasShownWelcome = defaults.bool(forKey: DefaultsKey.hasShownWelcome)
         self.showCursor = defaults.object(forKey: DefaultsKey.showCursor) as? Bool ?? true
         self.frameRate = Self.sanitizedFrameRate(defaults.object(forKey: DefaultsKey.frameRate) as? Int ?? 60)
         self.videoQuality = VideoQuality.fromStored(defaults.string(forKey: DefaultsKey.videoQuality)) ?? .medium

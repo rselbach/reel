@@ -13,6 +13,7 @@ enum AppMenuText {
     static let screenRecordingPermissionRequired = "Screen Recording Permission Required"
     static let openSystemSettings = "Open System Settings..."
     static let checkPermission = "Check Permission"
+    static let relaunchAfterGranting = "Relaunch Reel after granting permission"
     static let startRecording = "Start Recording..."
     static let recordingInProgress = "● Recording..."
     static let stopRecording = "Stop Recording"
@@ -71,6 +72,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var recordingDialogWindow: NSWindow?
     private var previewWindow: NSWindow?
     private var aboutWindow: NSWindow?
+    private var welcomeWindow: NSWindow?
     private var isCountdownActive = false
     private var activeCountdown: CountdownOverlay?
     private var hotkeyObserver: NSObjectProtocol?
@@ -143,10 +145,43 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             }
         }
 
-        Task { @MainActor in
-            await screenRecorder.requestPermission()
+        if AppSettings.shared.hasShownWelcome {
+            Task { @MainActor in
+                await screenRecorder.requestPermission()
+                rebuildMenu()
+            }
+        } else {
+            // First launch: explain the menu bar icon and ask for the screen
+            // recording permission with context instead of firing the TCC
+            // prompt out of nowhere.
             rebuildMenu()
+            showWelcome()
         }
+    }
+
+    private func showWelcome() {
+        if welcomeWindow == nil {
+            let welcomeView = WelcomeView(
+                recorder: screenRecorder,
+                onRequestPermission: { [weak self] in
+                    Task { @MainActor in
+                        guard let self else { return }
+                        await self.screenRecorder.requestPermission()
+                        self.rebuildMenu()
+                    }
+                },
+                onDismiss: { [weak self] in
+                    self?.welcomeWindow?.close()
+                }
+            )
+            welcomeWindow = makeWindow(
+                title: WelcomeText.windowTitle,
+                styleMask: [.titled, .closable],
+                rootView: welcomeView
+            )
+        }
+
+        presentWindow(welcomeWindow)
     }
 
     private func setupHotkey() {
@@ -275,6 +310,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
         menu.addItem(NSMenuItem(title: AppMenuText.openSystemSettings, action: #selector(openSettings), keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: AppMenuText.checkPermission, action: #selector(checkPermission), keyEquivalent: ""))
+
+        let relaunchNote = NSMenuItem(title: AppMenuText.relaunchAfterGranting, action: nil, keyEquivalent: "")
+        relaunchNote.isEnabled = false
+        menu.addItem(relaunchNote)
     }
 
     private func addRecordingItems(to menu: NSMenu) {
@@ -340,6 +379,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             previewWindow = nil
         } else if window === aboutWindow {
             aboutWindow = nil
+        } else if window === welcomeWindow {
+            welcomeWindow = nil
+            AppSettings.shared.hasShownWelcome = true
         }
     }
 
