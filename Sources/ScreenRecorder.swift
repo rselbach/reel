@@ -22,10 +22,23 @@ enum RecordingMode {
 private enum RecordingConstants {
     /// Minimum dimensions for windows to appear in the picker (filters tiny/hidden windows)
     static let minimumWindowSize: CGFloat = 100
-    /// Padding from screen edge for camera overlay (in points, doubled for Retina)
-    static let cameraOverlayPadding: CGFloat = 40
     /// Conservative H.264 dimensions for broad AVAssetWriter compatibility.
     static let maxH264Size = CGSize(width: 4096, height: 2304)
+}
+
+enum CameraCompositeLayout {
+    /// Centered square crop applied to camera frames so the composited
+    /// overlay matches the preview window, which is a square that aspect-fills
+    /// the camera feed.
+    static func squareCropRect(width: CGFloat, height: CGFloat) -> CGRect {
+        let side = min(width, height)
+        return CGRect(
+            x: ((width - side) / 2).rounded(.down),
+            y: ((height - side) / 2).rounded(.down),
+            width: side,
+            height: side
+        )
+    }
 }
 
 enum RecordingFileNaming {
@@ -128,6 +141,9 @@ private struct FrameWriter {
     let recordCamera: Bool
     let cameraSize: CGFloat
     let cameraShape: AppSettings.CameraOverlayShape
+    // Front cameras are mirrored in the on-screen preview; mirror the
+    // composited output too so the recording matches what the user saw.
+    let mirrorCamera: Bool
     let textOverlay: TextOverlay?
     var hasWriteFailure = false
 }
@@ -686,6 +702,7 @@ class ScreenRecorder: NSObject, ObservableObject {
         let textOverlay = settings.activeTextOverlayText.map {
             TextOverlay(text: $0, position: settings.textOverlayPosition)
         }
+        let mirrorCamera = settings.recordCamera && settings.selectedCamera?.position == .front
         withFrameLock {
             frameState.currentCameraX = initialPos.x
             frameState.currentCameraY = initialPos.y
@@ -700,6 +717,7 @@ class ScreenRecorder: NSObject, ObservableObject {
                 recordCamera: settings.recordCamera,
                 cameraSize: settings.cameraSize.fraction,
                 cameraShape: settings.cameraShape,
+                mirrorCamera: mirrorCamera,
                 textOverlay: textOverlay
             )
         }
@@ -1059,6 +1077,7 @@ class ScreenRecorder: NSObject, ObservableObject {
         yNormalized: CGFloat,
         sizeFraction: CGFloat,
         shape: AppSettings.CameraOverlayShape,
+        mirrored: Bool,
         textOverlay: TextOverlay?
     ) -> CVPixelBuffer? {
         let screenImage = CIImage(cvPixelBuffer: screenBuffer)
@@ -1075,7 +1094,8 @@ class ScreenRecorder: NSObject, ObservableObject {
                 xNormalized: xNormalized,
                 yNormalized: yNormalized,
                 sizeFraction: sizeFraction,
-                shape: shape
+                shape: shape,
+                mirrored: mirrored
             ) else { return nil }
             composited = cameraOverlay.composited(over: composited)
             didComposite = true
@@ -1104,6 +1124,10 @@ class ScreenRecorder: NSObject, ObservableObject {
         return outputBuffer
     }
 
+    /// Builds the camera bubble exactly as the draggable preview window shows
+    /// it: a square, aspect-fill center crop (mirrored for front cameras)
+    /// whose position maps over the full recording bounds with no extra
+    /// padding, so what the user drags on screen is what lands in the file.
     private nonisolated func makeCameraOverlay(
         cameraBuffer: CVPixelBuffer,
         screenWidth: CGFloat,
@@ -1111,38 +1135,46 @@ class ScreenRecorder: NSObject, ObservableObject {
         xNormalized: CGFloat,
         yNormalized: CGFloat,
         sizeFraction: CGFloat,
-        shape: AppSettings.CameraOverlayShape
+        shape: AppSettings.CameraOverlayShape,
+        mirrored: Bool
     ) -> CIImage? {
         var cameraImage = CIImage(cvPixelBuffer: cameraBuffer)
         let cameraWidth = CGFloat(CVPixelBufferGetWidth(cameraBuffer))
         let cameraHeight = CGFloat(CVPixelBufferGetHeight(cameraBuffer))
+        let overlaySize = (screenWidth * sizeFraction).rounded()
+        guard overlaySize > 0, cameraWidth > 0, cameraHeight > 0 else { return nil }
 
-        let overlayWidth = screenWidth * sizeFraction
-        let scale = overlayWidth / cameraWidth
-        let overlayHeight = cameraHeight * scale
+        if mirrored {
+            cameraImage = cameraImage
+                .transformed(by: CGAffineTransform(scaleX: -1, y: 1))
+                .transformed(by: CGAffineTransform(translationX: cameraWidth, y: 0))
+        }
 
+        let cropRect = CameraCompositeLayout.squareCropRect(width: cameraWidth, height: cameraHeight)
+        cameraImage = cameraImage
+            .cropped(to: cropRect)
+            .transformed(by: CGAffineTransform(translationX: -cropRect.origin.x, y: -cropRect.origin.y))
+
+        let scale = overlaySize / cropRect.width
         cameraImage = cameraImage.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
 
         if shape == .circle {
-            let diameter = min(overlayWidth, overlayHeight)
-            let centerX = overlayWidth / 2
-            let centerY = overlayHeight / 2
-            let radius = diameter / 2
+            let radius = overlaySize / 2
 
-            let cacheKey = "\(Int(overlayWidth.rounded()))x\(Int(overlayHeight.rounded()))"
+            let cacheKey = "\(Int(overlaySize))"
             let gradientOutput: CIImage
             if let cached = circularMaskCache.object(forKey: cacheKey as NSString) {
                 gradientOutput = cached
             } else {
                 guard let radialGradient = CIFilter(name: "CIRadialGradient") else { return nil }
-                radialGradient.setValue(CIVector(x: centerX, y: centerY), forKey: "inputCenter")
+                radialGradient.setValue(CIVector(x: radius, y: radius), forKey: "inputCenter")
                 radialGradient.setValue(radius - 1, forKey: "inputRadius0")
                 radialGradient.setValue(radius, forKey: "inputRadius1")
                 radialGradient.setValue(CIColor.white, forKey: "inputColor0")
                 radialGradient.setValue(CIColor.clear, forKey: "inputColor1")
 
                 guard let cachedOutput = radialGradient.outputImage?.cropped(
-                    to: CGRect(x: 0, y: 0, width: overlayWidth, height: overlayHeight)
+                    to: CGRect(x: 0, y: 0, width: overlaySize, height: overlaySize)
                 ) else { return nil }
                 circularMaskCache.setObject(cachedOutput, forKey: cacheKey as NSString)
                 gradientOutput = cachedOutput
@@ -1154,16 +1186,16 @@ class ScreenRecorder: NSObject, ObservableObject {
             ])
         }
 
-        // Position the overlay using normalized coordinates
-        // X: 0 = left edge (with padding), 1 = right edge (with padding)
-        // Y: 0 = bottom edge (with padding), 1 = top edge (with padding)
-        let padding: CGFloat = RecordingConstants.cameraOverlayPadding
-        let availableWidth = screenWidth - overlayWidth - (padding * 2)
-        let availableHeight = screenHeight - overlayHeight - (padding * 2)
-        let xOffset = padding + (xNormalized * availableWidth)
-        let yOffset = padding + (yNormalized * availableHeight)
+        // Same normalized-position mapping the preview window uses for
+        // dragging, over the full frame with no padding.
+        let origin = CameraOverlayLayout.originFromNormalized(
+            x: xNormalized,
+            y: yNormalized,
+            overlaySize: overlaySize,
+            bounds: CGRect(x: 0, y: 0, width: screenWidth, height: screenHeight)
+        )
 
-        return cameraImage.transformed(by: CGAffineTransform(translationX: xOffset, y: yOffset))
+        return cameraImage.transformed(by: CGAffineTransform(translationX: origin.x, y: origin.y))
     }
 
     private nonisolated func makeTextOverlayImage(
@@ -1427,6 +1459,7 @@ extension ScreenRecorder: SCStreamOutput {
                     yNormalized: cameraY,
                     sizeFraction: snapshot.cameraSize,
                     shape: snapshot.cameraShape,
+                    mirrored: snapshot.mirrorCamera,
                     textOverlay: snapshot.textOverlay
                 ) {
                     frameToWrite = composited

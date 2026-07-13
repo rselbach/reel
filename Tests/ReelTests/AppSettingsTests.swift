@@ -403,6 +403,17 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(GitInfo.normalizedCommit(fullSHA), fullSHA.lowercased())
     }
 
+    func testCameraCompositeSquareCropCentersOnLongAxis() {
+        let landscape = CameraCompositeLayout.squareCropRect(width: 1920, height: 1080)
+        XCTAssertEqual(landscape, CGRect(x: 420, y: 0, width: 1080, height: 1080))
+
+        let portrait = CameraCompositeLayout.squareCropRect(width: 1080, height: 1920)
+        XCTAssertEqual(portrait, CGRect(x: 0, y: 420, width: 1080, height: 1080))
+
+        let square = CameraCompositeLayout.squareCropRect(width: 720, height: 720)
+        XCTAssertEqual(square, CGRect(x: 0, y: 0, width: 720, height: 720))
+    }
+
     @MainActor
     func testRecordingDimensionsStayUnchangedWhenInsideH264Limits() {
         let dimensions = ScreenRecorder.dimensionsFittingH264Limits(width: 1920, height: 1080)
