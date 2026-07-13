@@ -142,12 +142,14 @@ generate-checklist:
     python3 scripts/generate-manual-validation-checklist.py
 
 # Record a manual validation result in the canonical tracker
+[positional-arguments]
 record-manual story_id result notes="":
-    python3 scripts/record-manual-validation.py --id "{{ story_id }}" --result "{{ result }}" --notes "{{ notes }}"
+    python3 scripts/record-manual-validation.py --id "$1" --result "$2" --notes "$3"
 
 # Preview a manual validation result without writing files
+[positional-arguments]
 record-manual-dry-run story_id result notes="":
-    python3 scripts/record-manual-validation.py --id "{{ story_id }}" --result "{{ result }}" --notes "{{ notes }}" --dry-run
+    python3 scripts/record-manual-validation.py --id "$1" --result "$2" --notes "$3" --dry-run
 
 # Summarize manual validation progress; accepts status script flags
 [positional-arguments]
