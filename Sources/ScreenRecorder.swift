@@ -134,7 +134,6 @@ private struct FrameWriter {
     let bufferPool: CVPixelBufferPool?
     var startTime: CMTime?
     let recordCamera: Bool
-    let cameraSize: CGFloat
     let cameraShape: AppSettings.CameraOverlayShape
     // Front cameras are mirrored in the on-screen preview; mirror the
     // composited output too so the recording matches what the user saw.
@@ -149,6 +148,7 @@ private final class FrameCaptureState {
     var isCaptureStopped = false
     var currentCameraX: CGFloat = 1.0
     var currentCameraY: CGFloat = 0.0
+    var currentCameraSizeFraction: CGFloat = 0.2
 }
 
 @MainActor
@@ -553,6 +553,19 @@ class ScreenRecorder: NSObject, ObservableObject {
         }
     }
 
+    /// Updates the camera overlay size during recording. Session-only: the
+    /// persisted Small/Medium/Large preset is untouched, so the next
+    /// recording starts back at the preset size.
+    /// - Parameter fraction: Overlay width as a fraction of the recording width.
+    func updateCameraOverlaySize(fraction: CGFloat) {
+        withFrameLock {
+            frameState.currentCameraSizeFraction = min(
+                max(fraction, CameraOverlayResizeLogic.minFraction),
+                CameraOverlayResizeLogic.maxFraction
+            )
+        }
+    }
+
     private func setupAssetWriter(width: Int, height: Int) throws {
         let outputURL = try makeOutputURL()
         let assetWriter = try AVAssetWriter(outputURL: outputURL, fileType: .mp4)
@@ -752,6 +765,7 @@ class ScreenRecorder: NSObject, ObservableObject {
         withFrameLock {
             frameState.currentCameraX = initialPos.x
             frameState.currentCameraY = initialPos.y
+            frameState.currentCameraSizeFraction = settings.cameraSize.fraction
             frameState.frameWriter = FrameWriter(
                 adaptor: adaptor,
                 videoInput: videoInput,
@@ -761,7 +775,6 @@ class ScreenRecorder: NSObject, ObservableObject {
                 bufferPool: bufferPool,
                 startTime: nil,
                 recordCamera: settings.recordCamera,
-                cameraSize: settings.cameraSize.fraction,
                 cameraShape: settings.cameraShape,
                 mirrorCamera: mirrorCamera,
                 textOverlay: textOverlay
@@ -1498,6 +1511,7 @@ extension ScreenRecorder: SCStreamOutput {
             var cameraBuffer: CVPixelBuffer?
             var cameraX: CGFloat = 0
             var cameraY: CGFloat = 0
+            var cameraSizeFraction: CGFloat = 0.2
 
             withFrameLock {
                 guard !frameState.isCaptureStopped else { return }
@@ -1516,6 +1530,7 @@ extension ScreenRecorder: SCStreamOutput {
 
                 cameraX = frameState.currentCameraX
                 cameraY = frameState.currentCameraY
+                cameraSizeFraction = frameState.currentCameraSizeFraction
                 writerSnapshot = writer
             }
 
@@ -1533,7 +1548,7 @@ extension ScreenRecorder: SCStreamOutput {
                     bufferPool: snapshot.bufferPool,
                     xNormalized: cameraX,
                     yNormalized: cameraY,
-                    sizeFraction: snapshot.cameraSize,
+                    sizeFraction: cameraSizeFraction,
                     shape: snapshot.cameraShape,
                     mirrored: snapshot.mirrorCamera,
                     textOverlay: snapshot.textOverlay

@@ -128,15 +128,13 @@ struct CameraPreviewLayerView: NSViewRepresentable {
 }
 
 /// Live camera preview with optional circle clipping.
-/// Used in the draggable overlay window during recording.
+/// Fills its container so it follows the overlay window's live resizes.
 struct CameraPreviewView: View {
     let sessionHolder: SessionHolder
-    let size: CGFloat
     let shape: AppSettings.CameraOverlayShape
-    
+
     var body: some View {
         CameraPreviewLayerView(sessionHolder: sessionHolder)
-            .frame(width: size, height: size)
             .modifier(ShapeClipModifier(shape: shape))
     }
 }

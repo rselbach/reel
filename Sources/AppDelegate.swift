@@ -647,6 +647,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             shape: settings.cameraShape,
             onPositionChanged: { [weak self] x, y in
                 self?.screenRecorder.updateCameraOverlayPosition(x: x, y: y)
+            },
+            onSizeChanged: { [weak self] fraction in
+                self?.screenRecorder.updateCameraOverlaySize(fraction: fraction)
             }
         )
 

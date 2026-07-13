@@ -337,6 +337,53 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(AppSettings.sanitizedCountdownDuration(-1), 3)
     }
 
+    func testCameraOverlayResizeCornerHitDetection() {
+        let bounds = CGRect(x: 0, y: 0, width: 200, height: 200)
+        XCTAssertEqual(CameraOverlayResizeLogic.corner(at: CGPoint(x: 5, y: 5), in: bounds), .bottomLeft)
+        XCTAssertEqual(CameraOverlayResizeLogic.corner(at: CGPoint(x: 195, y: 5), in: bounds), .bottomRight)
+        XCTAssertEqual(CameraOverlayResizeLogic.corner(at: CGPoint(x: 5, y: 195), in: bounds), .topLeft)
+        XCTAssertEqual(CameraOverlayResizeLogic.corner(at: CGPoint(x: 195, y: 195), in: bounds), .topRight)
+        // Center and edge midpoints move rather than resize
+        XCTAssertNil(CameraOverlayResizeLogic.corner(at: CGPoint(x: 100, y: 100), in: bounds))
+        XCTAssertNil(CameraOverlayResizeLogic.corner(at: CGPoint(x: 100, y: 5), in: bounds))
+        // Bounds smaller than two hit regions: everything is ambiguous, so move
+        let tiny = CGRect(x: 0, y: 0, width: 20, height: 20)
+        XCTAssertNil(CameraOverlayResizeLogic.corner(at: CGPoint(x: 10, y: 10), in: tiny))
+    }
+
+    func testCameraOverlayResizeAnchorsOppositeCornerAndClamps() {
+        let initial = CGRect(x: 100, y: 100, width: 100, height: 100)
+
+        // Dragging the top-right corner outward grows the square while the
+        // bottom-left corner stays fixed; the dominant axis (x) wins.
+        let grown = CameraOverlayResizeLogic.resizedFrame(
+            corner: .topRight, initialFrame: initial,
+            deltaX: 40, deltaY: 10, minSide: 50, maxSide: 300
+        )
+        XCTAssertEqual(grown, CGRect(x: 100, y: 100, width: 140, height: 140))
+
+        // Dragging the bottom-left corner keeps the top-right corner fixed.
+        let fromBottomLeft = CameraOverlayResizeLogic.resizedFrame(
+            corner: .bottomLeft, initialFrame: initial,
+            deltaX: -40, deltaY: 10, minSide: 50, maxSide: 300
+        )
+        XCTAssertEqual(fromBottomLeft.maxX, 200)
+        XCTAssertEqual(fromBottomLeft.maxY, 200)
+        XCTAssertEqual(fromBottomLeft.width, 140)
+
+        let clamped = CameraOverlayResizeLogic.resizedFrame(
+            corner: .topRight, initialFrame: initial,
+            deltaX: 500, deltaY: 0, minSide: 50, maxSide: 150
+        )
+        XCTAssertEqual(clamped.width, 150)
+
+        let shrunk = CameraOverlayResizeLogic.resizedFrame(
+            corner: .topRight, initialFrame: initial,
+            deltaX: -90, deltaY: 0, minSide: 50, maxSide: 300
+        )
+        XCTAssertEqual(shrunk.width, 50)
+    }
+
     @MainActor
     func testCameraOverlayLayoutConvertsNormalizedPositionToScreenOrigin() {
         let bounds = CGRect(x: 100, y: 200, width: 1000, height: 500)
