@@ -463,6 +463,24 @@ final class AppSettingsTests: XCTestCase {
     }
 
     @MainActor
+    func testCameraOverlayLayoutCapsSizeToShortCaptureBounds() {
+        XCTAssertEqual(
+            CameraOverlayLayout.overlaySize(
+                sizeFraction: 0.2,
+                bounds: CGRect(x: 0, y: 0, width: 1000, height: 500)
+            ),
+            200
+        )
+        XCTAssertEqual(
+            CameraOverlayLayout.overlaySize(
+                sizeFraction: 0.2,
+                bounds: CGRect(x: 0, y: 0, width: 1000, height: 100)
+            ),
+            100
+        )
+    }
+
+    @MainActor
     func testCameraOverlayLayoutRoundTripsDraggedPosition() throws {
         let bounds = CGRect(x: 100, y: 200, width: 1000, height: 500)
         let origin = CGPoint(x: 500, y: 350)

@@ -81,6 +81,11 @@ enum CameraOverlayResizeLogic {
 }
 
 enum CameraOverlayLayout {
+    static func overlaySize(sizeFraction: CGFloat, bounds: CGRect) -> CGFloat {
+        guard bounds.width > 0, bounds.height > 0 else { return 0 }
+        return min(bounds.width * sizeFraction, bounds.width, bounds.height)
+    }
+
     static func originFromNormalized(
         x: CGFloat,
         y: CGFloat,
@@ -198,10 +203,9 @@ final class CameraOverlayWindow: NSWindow {
 
     private func resizeDrag(corner: CameraOverlayResizeLogic.Corner, deltaX: CGFloat, deltaY: CGFloat) {
         let minSide = dragBounds.width * CameraOverlayResizeLogic.minFraction
-        let maxSide = min(
-            dragBounds.width * CameraOverlayResizeLogic.maxFraction,
-            dragBounds.width,
-            dragBounds.height
+        let maxSide = CameraOverlayLayout.overlaySize(
+            sizeFraction: CameraOverlayResizeLogic.maxFraction,
+            bounds: dragBounds
         )
 
         var newFrame = CameraOverlayResizeLogic.resizedFrame(
@@ -243,6 +247,20 @@ final class CameraOverlayWindow: NSWindow {
         if newOrigin != frame.origin {
             setFrameOrigin(newOrigin)
         }
+    }
+
+    func fitSizeToDragBounds() {
+        let maxSide = CameraOverlayLayout.overlaySize(
+            sizeFraction: CameraOverlayResizeLogic.maxFraction,
+            bounds: dragBounds
+        )
+        guard maxSide > 0, overlaySize > maxSide else { return }
+
+        overlaySize = maxSide
+        setFrame(
+            CGRect(origin: frame.origin, size: CGSize(width: maxSide, height: maxSide)),
+            display: true
+        )
     }
 }
 
@@ -356,7 +374,10 @@ final class CameraOverlayController {
         onSizeChanged: @escaping (CGFloat) -> Void,
         onSizeChangeEnded: @escaping (CGFloat) -> Void
     ) {
-        let overlaySize = bounds.width * sizeFraction
+        let overlaySize = CameraOverlayLayout.overlaySize(
+            sizeFraction: sizeFraction,
+            bounds: bounds
+        )
         
         // Convert normalized position to screen coordinates
         let coords = initialPosition.normalizedCoordinates
@@ -408,6 +429,7 @@ final class CameraOverlayController {
             x: window.frame.origin.x + delta.x,
             y: window.frame.origin.y + delta.y
         ))
+        window.fitSizeToDragBounds()
         window.clampToDragBounds()
         window.notifyPositionChanged()
         // A recorded-window resize changes the bounds size, which changes the

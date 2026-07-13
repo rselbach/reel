@@ -1282,7 +1282,10 @@ class ScreenRecorder: NSObject, ObservableObject {
         var cameraImage = CIImage(cvPixelBuffer: cameraBuffer)
         let cameraWidth = CGFloat(CVPixelBufferGetWidth(cameraBuffer))
         let cameraHeight = CGFloat(CVPixelBufferGetHeight(cameraBuffer))
-        let overlaySize = (screenWidth * sizeFraction).rounded()
+        let overlaySize = CameraOverlayLayout.overlaySize(
+            sizeFraction: sizeFraction,
+            bounds: CGRect(x: 0, y: 0, width: screenWidth, height: screenHeight)
+        ).rounded()
         guard overlaySize > 0, cameraWidth > 0, cameraHeight > 0 else { return nil }
 
         if mirrored {
