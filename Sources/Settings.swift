@@ -10,6 +10,22 @@ enum SettingsErrorText {
     static let launchAtLoginUpdateFailed = "Failed to update launch at login"
 }
 
+/// String-backed setting whose rawValue is a stable storage key, decoupled
+/// from the label shown in the UI so rewording a label never resets stored
+/// preferences.
+protocol StoredAppSetting: RawRepresentable, CaseIterable where RawValue == String {
+    var displayName: String { get }
+}
+
+extension StoredAppSetting {
+    /// Decodes a persisted value, accepting both the stable rawValue and the
+    /// display label because older builds persisted the labels themselves.
+    static func fromStored(_ stored: String?) -> Self? {
+        guard let stored else { return nil }
+        return Self(rawValue: stored) ?? Self.allCases.first { $0.displayName == stored }
+    }
+}
+
 // MARK: - Key Codes (Carbon virtual key codes)
 enum KeyCode {
     static let escape: UInt16 = 53
@@ -236,11 +252,20 @@ class AppSettings: ObservableObject {
         didSet { persist(textOverlayPosition.rawValue, key: DefaultsKey.textOverlayPosition) }
     }
 
-    enum CameraOverlayPosition: String, CaseIterable {
-        case bottomLeft = "Bottom Left"
-        case bottomRight = "Bottom Right"
-        case topLeft = "Top Left"
-        case topRight = "Top Right"
+    enum CameraOverlayPosition: String, StoredAppSetting {
+        case bottomLeft
+        case bottomRight
+        case topLeft
+        case topRight
+
+        var displayName: String {
+            switch self {
+            case .bottomLeft: return "Bottom Left"
+            case .bottomRight: return "Bottom Right"
+            case .topLeft: return "Top Left"
+            case .topRight: return "Top Right"
+            }
+        }
 
         /// Returns normalized (x, y) coordinates for this corner position.
         /// X: 0.0 = left, 1.0 = right
@@ -255,10 +280,18 @@ class AppSettings: ObservableObject {
         }
     }
 
-    enum CameraOverlaySize: String, CaseIterable {
-        case small = "Small"
-        case medium = "Medium"
-        case large = "Large"
+    enum CameraOverlaySize: String, StoredAppSetting {
+        case small
+        case medium
+        case large
+
+        var displayName: String {
+            switch self {
+            case .small: return "Small"
+            case .medium: return "Medium"
+            case .large: return "Large"
+            }
+        }
 
         var fraction: CGFloat {
             switch self {
@@ -269,15 +302,30 @@ class AppSettings: ObservableObject {
         }
     }
 
-    enum CameraOverlayShape: String, CaseIterable {
-        case rectangle = "Rectangle"
-        case circle = "Circle"
+    enum CameraOverlayShape: String, StoredAppSetting {
+        case rectangle
+        case circle
+
+        var displayName: String {
+            switch self {
+            case .rectangle: return "Rectangle"
+            case .circle: return "Circle"
+            }
+        }
     }
 
-    enum TextOverlayPosition: String, CaseIterable {
-        case top = "Top"
-        case center = "Center"
-        case bottom = "Bottom"
+    enum TextOverlayPosition: String, StoredAppSetting {
+        case top
+        case center
+        case bottom
+
+        var displayName: String {
+            switch self {
+            case .top: return "Top"
+            case .center: return "Center"
+            case .bottom: return "Bottom"
+            }
+        }
     }
 
     var activeTextOverlayText: String? {
@@ -321,11 +369,20 @@ class AppSettings: ObservableObject {
             ?? AVCaptureDevice.default(for: .video)
     }
 
-    enum VideoQuality: String, CaseIterable {
-        case low = "Low (5 Mbps)"
-        case medium = "Medium (10 Mbps)"
-        case high = "High (20 Mbps)"
-        case maximum = "Maximum (50 Mbps)"
+    enum VideoQuality: String, StoredAppSetting {
+        case low
+        case medium
+        case high
+        case maximum
+
+        var displayName: String {
+            switch self {
+            case .low: return "Low (5 Mbps)"
+            case .medium: return "Medium (10 Mbps)"
+            case .high: return "High (20 Mbps)"
+            case .maximum: return "Maximum (50 Mbps)"
+            }
+        }
 
         var bitrate: Int {
             switch self {
@@ -434,7 +491,7 @@ class AppSettings: ObservableObject {
         self.launchAtLogin = defaults.bool(forKey: DefaultsKey.launchAtLogin)
         self.showCursor = defaults.object(forKey: DefaultsKey.showCursor) as? Bool ?? true
         self.frameRate = Self.sanitizedFrameRate(defaults.object(forKey: DefaultsKey.frameRate) as? Int ?? 60)
-        self.videoQuality = VideoQuality(rawValue: defaults.string(forKey: DefaultsKey.videoQuality) ?? "") ?? .medium
+        self.videoQuality = VideoQuality.fromStored(defaults.string(forKey: DefaultsKey.videoQuality)) ?? .medium
         self.openFinderAfterRecording = defaults.object(forKey: DefaultsKey.openFinderAfterRecording) as? Bool ?? true
         self.showPreviewAfterRecording = defaults.object(forKey: DefaultsKey.showPreviewAfterRecording) as? Bool ?? true
 
@@ -461,13 +518,13 @@ class AppSettings: ObservableObject {
 
         self.recordCamera = defaults.bool(forKey: DefaultsKey.recordCamera)
         self.cameraDeviceID = defaults.string(forKey: DefaultsKey.cameraDeviceID)
-        self.cameraPosition = CameraOverlayPosition(rawValue: defaults.string(forKey: DefaultsKey.cameraPosition) ?? "") ?? .bottomRight
-        self.cameraSize = CameraOverlaySize(rawValue: defaults.string(forKey: DefaultsKey.cameraSize) ?? "") ?? .medium
-        self.cameraShape = CameraOverlayShape(rawValue: defaults.string(forKey: DefaultsKey.cameraShape) ?? "") ?? .circle
+        self.cameraPosition = CameraOverlayPosition.fromStored(defaults.string(forKey: DefaultsKey.cameraPosition)) ?? .bottomRight
+        self.cameraSize = CameraOverlaySize.fromStored(defaults.string(forKey: DefaultsKey.cameraSize)) ?? .medium
+        self.cameraShape = CameraOverlayShape.fromStored(defaults.string(forKey: DefaultsKey.cameraShape)) ?? .circle
 
         self.textOverlayEnabled = defaults.bool(forKey: DefaultsKey.textOverlayEnabled)
         self.textOverlayText = defaults.string(forKey: DefaultsKey.textOverlayText) ?? ""
-        self.textOverlayPosition = TextOverlayPosition(rawValue: defaults.string(forKey: DefaultsKey.textOverlayPosition) ?? "") ?? .center
+        self.textOverlayPosition = TextOverlayPosition.fromStored(defaults.string(forKey: DefaultsKey.textOverlayPosition)) ?? .center
     }
 
     private func updateLaunchAtLogin() {

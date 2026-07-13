@@ -20,6 +20,28 @@ final class AppSettingsTests: XCTestCase {
     }
 
     @MainActor
+    func testStoredSettingRawValuesAreStableKeys() {
+        XCTAssertEqual(AppSettings.VideoQuality.medium.rawValue, "medium")
+        XCTAssertEqual(AppSettings.CameraOverlayPosition.bottomRight.rawValue, "bottomRight")
+        XCTAssertEqual(AppSettings.CameraOverlaySize.large.rawValue, "large")
+        XCTAssertEqual(AppSettings.CameraOverlayShape.circle.rawValue, "circle")
+        XCTAssertEqual(AppSettings.TextOverlayPosition.center.rawValue, "center")
+    }
+
+    @MainActor
+    func testStoredSettingDecodingAcceptsStableKeysAndLegacyLabels() {
+        XCTAssertEqual(AppSettings.VideoQuality.fromStored("medium"), .medium)
+        XCTAssertEqual(AppSettings.VideoQuality.fromStored("Medium (10 Mbps)"), .medium)
+        XCTAssertNil(AppSettings.VideoQuality.fromStored("bogus"))
+        XCTAssertNil(AppSettings.VideoQuality.fromStored(nil))
+
+        XCTAssertEqual(AppSettings.CameraOverlayPosition.fromStored("Bottom Right"), .bottomRight)
+        XCTAssertEqual(AppSettings.CameraOverlaySize.fromStored("Large"), .large)
+        XCTAssertEqual(AppSettings.CameraOverlayShape.fromStored("Circle"), .circle)
+        XCTAssertEqual(AppSettings.TextOverlayPosition.fromStored("Center"), .center)
+    }
+
+    @MainActor
     func testHotkeyDisplayStringForDefaultShortcut() {
         XCTAssertEqual(AppSettings.HotkeyCombo.default.displayString, "⇧⌘R")
     }

@@ -170,7 +170,7 @@ struct RecordingTab: View {
 
             Picker(SettingsText.videoQuality, selection: $settings.videoQuality) {
                 ForEach(AppSettings.VideoQuality.allCases, id: \.self) { quality in
-                    Text(quality.rawValue).tag(quality)
+                    Text(quality.displayName).tag(quality)
                 }
             }
 
@@ -199,19 +199,19 @@ struct RecordingTab: View {
 
                 Picker(SettingsText.position, selection: $settings.cameraPosition) {
                     ForEach(AppSettings.CameraOverlayPosition.allCases, id: \.self) { position in
-                        Text(position.rawValue).tag(position)
+                        Text(position.displayName).tag(position)
                     }
                 }
 
                 Picker(SettingsText.size, selection: $settings.cameraSize) {
                     ForEach(AppSettings.CameraOverlaySize.allCases, id: \.self) { size in
-                        Text(size.rawValue).tag(size)
+                        Text(size.displayName).tag(size)
                     }
                 }
 
                 Picker(SettingsText.shape, selection: $settings.cameraShape) {
                     ForEach(AppSettings.CameraOverlayShape.allCases, id: \.self) { shape in
-                        Text(shape.rawValue).tag(shape)
+                        Text(shape.displayName).tag(shape)
                     }
                 }
             }
@@ -228,7 +228,7 @@ struct RecordingTab: View {
 
                 Picker(SettingsText.position, selection: $settings.textOverlayPosition) {
                     ForEach(AppSettings.TextOverlayPosition.allCases, id: \.self) { position in
-                        Text(position.rawValue).tag(position)
+                        Text(position.displayName).tag(position)
                     }
                 }
             }
