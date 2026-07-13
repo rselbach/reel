@@ -547,6 +547,15 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(try String(contentsOf: outputURL, encoding: .utf8), "final")
     }
 
+    func testRecordingElapsedFormatCoversMinutesAndHours() {
+        XCTAssertEqual(RecordingElapsedFormat.string(seconds: 0), "0:00")
+        XCTAssertEqual(RecordingElapsedFormat.string(seconds: 42), "0:42")
+        XCTAssertEqual(RecordingElapsedFormat.string(seconds: 65), "1:05")
+        XCTAssertEqual(RecordingElapsedFormat.string(seconds: 3600), "1:00:00")
+        XCTAssertEqual(RecordingElapsedFormat.string(seconds: 3725), "1:02:05")
+        XCTAssertEqual(RecordingElapsedFormat.string(seconds: -5), "0:00")
+    }
+
     func testAppTerminationReplyDefersOnlyForActiveRecording() {
         XCTAssertEqual(
             AppTerminationLogic.reply(isRecorderInitialized: false, isRecording: false),

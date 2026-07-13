@@ -34,6 +34,19 @@ enum AppMenuText {
     static let settingsWindowTitle = "Reel Settings"
 }
 
+enum RecordingElapsedFormat {
+    static func string(seconds: Int) -> String {
+        let clamped = max(0, seconds)
+        let hours = clamped / 3600
+        let mins = (clamped % 3600) / 60
+        let secs = clamped % 60
+        if hours > 0 {
+            return String(format: "%d:%02d:%02d", hours, mins, secs)
+        }
+        return String(format: "%d:%02d", mins, secs)
+    }
+}
+
 enum AppTerminationLogic {
     static func reply(isRecorderInitialized: Bool, isRecording: Bool) -> NSApplication.TerminateReply {
         guard isRecorderInitialized else { return .terminateNow }
@@ -52,6 +65,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var isCountdownActive = false
     private var hotkeyObserver: NSObjectProtocol?
     private var cameraOverlayController: CameraOverlayController?
+    private var recordingTimer: Timer?
+    private var recordingStartedAt: Date?
     // Sparkle needs a real app bundle; under `swift run` there is no
     // Info.plist and starting the updater misbehaves, so it stays nil in
     // unbundled dev builds.
@@ -517,7 +532,47 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             let symbolName = isRecording ? "record.circle.fill" : "record.circle"
             button.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: "Reel")
             button.contentTintColor = isRecording ? .red : nil
+            button.imagePosition = .imageLeft
+        }
+
+        if isRecording {
+            startRecordingTimer()
+        } else {
+            stopRecordingTimer()
         }
         rebuildMenu()
+    }
+
+    /// Shows elapsed time next to the status icon while recording, so the
+    /// user can see at a glance that the recording is actually rolling.
+    private func startRecordingTimer() {
+        guard recordingTimer == nil else { return }
+        recordingStartedAt = Date()
+        updateElapsedTitle()
+
+        let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                self?.updateElapsedTitle()
+            }
+        }
+        // .common keeps the title updating while the status menu is open.
+        RunLoop.main.add(timer, forMode: .common)
+        recordingTimer = timer
+    }
+
+    private func stopRecordingTimer() {
+        recordingTimer?.invalidate()
+        recordingTimer = nil
+        recordingStartedAt = nil
+        statusItem.button?.title = ""
+    }
+
+    private func updateElapsedTitle() {
+        guard let start = recordingStartedAt, let button = statusItem.button else { return }
+        let elapsed = Int(Date().timeIntervalSince(start))
+        button.attributedTitle = NSAttributedString(
+            string: " " + RecordingElapsedFormat.string(seconds: elapsed),
+            attributes: [.font: NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .regular)]
+        )
     }
 }
