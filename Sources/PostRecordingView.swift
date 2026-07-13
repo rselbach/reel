@@ -91,6 +91,7 @@ enum PostRecordingText {
     static let dragHint = "Drag this recording into Slack, Mail, or Finder"
     static let delete = "Delete"
     static let saveTrimmed = "Save Trimmed..."
+    static let keyframeNote = "Trimming is lossless; the start point snaps to the nearest keyframe."
     static let done = "Done"
     static let deleteConfirmationTitle = "Delete recording?"
     static let deleteConfirmationMessage = "This will permanently remove the file from disk."
@@ -137,6 +138,12 @@ struct PostRecordingView: View {
                         }
                     )
                     .padding(.horizontal)
+
+                    if hasTrimChanges {
+                        Text(PostRecordingText.keyframeNote)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
                 }
             } else {
                 ProgressView(PostRecordingText.loading)
