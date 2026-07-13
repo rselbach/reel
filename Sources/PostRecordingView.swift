@@ -86,6 +86,9 @@ enum TrimSliderMath {
 enum PostRecordingText {
     static let loading = "Loading..."
     static let revealInFinder = "Reveal in Finder"
+    static let copy = "Copy"
+    static let copied = "Copied!"
+    static let dragHint = "Drag this recording into Slack, Mail, or Finder"
     static let delete = "Delete"
     static let saveTrimmed = "Save Trimmed..."
     static let done = "Done"
@@ -115,6 +118,7 @@ struct PostRecordingView: View {
     @State private var isExporting = false
     @State private var showDeleteConfirmation = false
     @State private var exportError: String?
+    @State private var justCopied = false
 
     var body: some View {
         VStack(spacing: 16) {
@@ -144,6 +148,35 @@ struct PostRecordingView: View {
                     .foregroundColor(.red)
                     .font(.caption)
             }
+
+            HStack(spacing: 12) {
+                // Draggable file chip: the whole point of these recordings is
+                // sharing them, so make the file itself grabbable.
+                HStack(spacing: 6) {
+                    Image(systemName: "film")
+                    Text(videoURL.lastPathComponent)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .frame(maxWidth: 220)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(Color(nsColor: .controlBackgroundColor))
+                )
+                .onDrag {
+                    NSItemProvider(contentsOf: videoURL) ?? NSItemProvider()
+                }
+                .help(PostRecordingText.dragHint)
+
+                Button(justCopied ? PostRecordingText.copied : PostRecordingText.copy) {
+                    copyToPasteboard()
+                }
+
+                Spacer()
+            }
+            .padding(.horizontal)
 
             HStack(spacing: 12) {
                 Button(PostRecordingText.revealInFinder) {
@@ -196,6 +229,23 @@ struct PostRecordingView: View {
 
     private var hasTrimChanges: Bool {
         PostRecordingLogic.hasTrimChanges(duration: duration, trimStart: trimStart, trimEnd: trimEnd)
+    }
+
+    /// Puts the recording file on the pasteboard so it can be pasted into
+    /// Slack, Mail, Finder, etc.
+    private func copyToPasteboard() {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.writeObjects([videoURL as NSURL])
+        justCopied = true
+        Task { @MainActor in
+            do {
+                try await Task.sleep(for: .seconds(1.5))
+            } catch {
+                return
+            }
+            justCopied = false
+        }
     }
 
     /// Safely tears down the player and time observer.
