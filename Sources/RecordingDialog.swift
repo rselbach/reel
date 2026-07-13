@@ -220,10 +220,12 @@ struct RecordingDialog: View {
         windows = content.windows
         displayThumbnails = [:]
         windowThumbnails = [:]
-        // Drop a selection that no longer exists after the refresh.
-        if case .window(let selected) = selection,
-           !windows.contains(where: { $0.windowID == selected.windowID }) {
-            selection = nil
+        // Replace a selected window with the refreshed ScreenCaptureKit
+        // snapshot so resizing and other metadata changes reach the recorder.
+        if case .window(let selected) = selection {
+            selection = windows
+                .first(where: { $0.windowID == selected.windowID })
+                .map { .window($0) }
         }
         if case .display(let displayID) = selection,
            !displays.contains(where: { $0.displayID == displayID }) {
