@@ -6,7 +6,7 @@ Generated from the canonical tracker on 2026-06-21. This checklist is a companio
 
 Environment note: a bounded System Events probe on 2026-06-21 returned `UI elements enabled = false`, so this environment cannot inspect the menu bar, permission prompts, device pickers, or recording UI.
 
-Manual validation required: 29 stories.
+Manual validation required: 30 stories.
 No further manual validation required: 2 stories.
 
 ## Recommended Order
@@ -537,6 +537,25 @@ Expected behavior: The About window displays app version, build number, and Git 
 Manual steps:
 
 1. Open About Reel, confirm version/build/commit display, click GitHub and confirm the project repository opens, and if the build has a valid commit hash click the commit link and confirm the exact GitHub commit opens.
+
+Current status: Partial automated evidence passed; manual UI validation still pending. A bounded System Events probe on 2026-06-21 returned UI elements enabled = false, so this environment cannot inspect the app UI; validate manually using the listed steps.
+
+Result: [ ] Pass  [ ] Fail  [ ] Blocked
+
+Notes:
+
+## US-032 - Recording picker refresh and empty states
+
+User story: As a user, I want to refresh the recording picker and understand why it is empty so I can recover without closing and reopening it.
+
+Expected behavior: RecordingDialog always shows the refresh control, including when no windows are listed. With no windows but at least one display it explains that no open windows were found; with neither displays nor windows it explains the screen recording permission may not be in effect and offers a button that opens the System Settings privacy pane, surfacing an inline error if the pane cannot be opened.
+
+Manual steps:
+
+1. Open the recording picker with screen recording permission revoked
+2. verify the empty state explains the permission and the System Settings button opens the privacy pane
+3. grant permission, press refresh, and verify displays and windows appear
+4. close all windows of every app and verify the picker explains no open windows were found while still offering refresh.
 
 Current status: Partial automated evidence passed; manual UI validation still pending. A bounded System Events probe on 2026-06-21 returned UI elements enabled = false, so this environment cannot inspect the app UI; validate manually using the listed steps.
 

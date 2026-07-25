@@ -339,6 +339,21 @@ final class AppSettingsTests: XCTestCase {
         )
     }
 
+    @MainActor
+    func testRecordingDialogTextDistinguishesEmptyStates() {
+        XCTAssertEqual(RecordingDialogText.noWindows, "No open windows found.")
+        XCTAssertEqual(
+            RecordingDialogText.nothingRecordable,
+            "No recordable displays or windows found"
+        )
+        XCTAssertNotEqual(
+            RecordingDialogText.noWindows,
+            RecordingDialogText.nothingRecordable
+        )
+        XCTAssertEqual(RecordingDialogText.openSystemSettings, AppMenuText.openSystemSettings)
+    }
+
+    @MainActor
     func testRecordingDialogWindowSearchMatchesAppOrTitleCaseInsensitively() {
         XCTAssertTrue(RecordingDialogLogic.windowMatchesSearch(
             appName: "Safari",

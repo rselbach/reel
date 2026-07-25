@@ -16,6 +16,19 @@ enum RecordingSelection: Equatable {
     }
 }
 
+enum RecordingDialogText {
+    static let windows = "Windows"
+    static let search = "Search"
+    static let refreshHelp = "Refresh displays and windows"
+    static let refresh = "Refresh"
+    static let noWindows = "No open windows found."
+    static let noWindowsHint = "Open a window, then refresh."
+    static let nothingRecordable = "No recordable displays or windows found"
+    static let nothingRecordableHint = "Check screen recording permission and try again."
+    static let openSystemSettings = "Open System Settings..."
+    static let openSystemSettingsFailed = "Could not open System Settings."
+}
+
 enum RecordingDialogLogic {
     static func displayTitle(index: Int, displayCount: Int) -> String {
         displayCount == 1 ? "Display" : "Display \(index + 1)"
@@ -57,6 +70,7 @@ struct RecordingDialog: View {
     @State private var windowThumbnails: [CGWindowID: NSImage] = [:]
     @State private var isLoading = true
     @State private var searchText = ""
+    @State private var settingsError: String?
 
     init(
         availableDisplays: [SCDisplay],
@@ -134,27 +148,31 @@ struct RecordingDialog: View {
             .padding(.horizontal, 16)
             .padding(.top, 8)
 
-            if !windows.isEmpty {
-                HStack {
-                    Text("Windows")
-                        .font(.subheadline)
-                        .foregroundColor(.secondary)
-                    Spacer()
-                    Button {
-                        Task { await refresh() }
-                    } label: {
-                        Image(systemName: "arrow.clockwise")
-                    }
-                    .buttonStyle(.borderless)
-                    .disabled(isLoading)
-                    .help("Refresh displays and windows")
-                    TextField("Search", text: $searchText)
+            // The refresh control lives outside the windows list: when nothing
+            // is listed yet is exactly when the user needs to retry.
+            HStack {
+                Text(RecordingDialogText.windows)
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                Spacer()
+                Button {
+                    Task { await refresh() }
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .buttonStyle(.borderless)
+                .disabled(isLoading)
+                .help(RecordingDialogText.refreshHelp)
+                if !windows.isEmpty {
+                    TextField(RecordingDialogText.search, text: $searchText)
                         .textFieldStyle(.roundedBorder)
                         .frame(width: 150)
                 }
-                .padding(.horizontal, 16)
-                .padding(.top, 8)
-                
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 8)
+
+            if !windows.isEmpty {
                 ScrollView {
                     LazyVGrid(columns: columns, spacing: 12) {
                         ForEach(filteredWindows, id: \.windowID) { window in
@@ -172,21 +190,11 @@ struct RecordingDialog: View {
                     .padding(.horizontal, 16)
                     .padding(.bottom, 16)
                 }
+            } else {
+                emptyState
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
 
-            if displays.isEmpty && windows.isEmpty {
-                VStack(spacing: 6) {
-                    Text("No recordable displays or windows found")
-                        .font(.subheadline)
-                    Text("Check screen recording permission and try again.")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.horizontal, 16)
-                .padding(.vertical, 16)
-            }
-            
             Divider()
             
             HStack {
@@ -213,6 +221,49 @@ struct RecordingDialog: View {
         }
     }
     
+    /// Shown in place of the window grid. Missing displays *and* windows
+    /// almost always means the screen recording permission is not in effect,
+    /// so that case offers a way straight to System Settings.
+    @ViewBuilder
+    private var emptyState: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if displays.isEmpty {
+                Text(RecordingDialogText.nothingRecordable)
+                    .font(.subheadline)
+                Text(RecordingDialogText.nothingRecordableHint)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                Button(RecordingDialogText.openSystemSettings) {
+                    openScreenCaptureSettings()
+                }
+                .padding(.top, 4)
+            } else {
+                Text(RecordingDialogText.noWindows)
+                    .font(.subheadline)
+                Text(RecordingDialogText.noWindowsHint)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+
+            if let settingsError {
+                Text(settingsError)
+                    .font(.caption)
+                    .foregroundColor(.red)
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 16)
+    }
+
+    private func openScreenCaptureSettings() {
+        guard let url = SystemSettingsLink.screenCapturePrivacy,
+              NSWorkspace.shared.open(url) else {
+            settingsError = RecordingDialogText.openSystemSettingsFailed
+            return
+        }
+        settingsError = nil
+    }
+
     private func refresh() async {
         isLoading = true
         let content = await onRefresh()
