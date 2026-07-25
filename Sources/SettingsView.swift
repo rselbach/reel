@@ -39,27 +39,48 @@ enum SettingsText {
     static let unavailableDevice = "Unavailable device"
 }
 
+enum SettingsLayout {
+    static let width: CGFloat = 460
+    /// The Recording tab grows well past this once camera and text overlay
+    /// are both enabled, so tab content scrolls rather than clipping.
+    static let height: CGFloat = 480
+}
+
+/// Wraps a settings tab so content taller than the window scrolls instead of
+/// being silently cut off at the bottom.
+private struct ScrollingTab<Content: View>: View {
+    @ViewBuilder let content: Content
+
+    var body: some View {
+        ScrollView {
+            content
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding()
+        }
+    }
+}
+
 struct SettingsView: View {
     @ObservedObject var settings = AppSettings.shared
 
     var body: some View {
         TabView {
-            GeneralTab(settings: settings)
+            ScrollingTab { GeneralTab(settings: settings) }
                 .tabItem {
                     Label(SettingsText.generalTab, systemImage: "gear")
                 }
 
-            RecordingTab(settings: settings)
+            ScrollingTab { RecordingTab(settings: settings) }
                 .tabItem {
                     Label(SettingsText.recordingTab, systemImage: "video")
                 }
 
-            ShortcutsTab(settings: settings)
+            ScrollingTab { ShortcutsTab(settings: settings) }
                 .tabItem {
                     Label(SettingsText.shortcutsTab, systemImage: "keyboard")
                 }
         }
-        .frame(width: 460, height: 420)
+        .frame(width: SettingsLayout.width, height: SettingsLayout.height)
         .padding()
     }
 }
@@ -107,7 +128,6 @@ struct GeneralTab: View {
                     .lineLimit(2)
             }
         }
-        .padding()
     }
 
     private func selectOutputDirectory() {
@@ -268,7 +288,6 @@ struct RecordingTab: View {
                 }
             }
         }
-        .padding()
     }
 }
 
@@ -295,7 +314,6 @@ struct ShortcutsTab: View {
                 .font(.caption)
                 .foregroundColor(.secondary)
         }
-        .padding()
     }
 }
 

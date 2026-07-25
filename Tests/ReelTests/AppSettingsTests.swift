@@ -219,6 +219,16 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(SettingsText.pressShortcut, "Press shortcut...")
     }
 
+    @MainActor
+    func testSettingsWindowIsTallEnoughForTheRecordingTab() {
+        // The Recording tab is the tallest: 6 always-visible controls, 3
+        // dividers, and up to 9 more rows once camera and text overlay are on.
+        // Scrolling covers the overflow, but the common case should still fit.
+        XCTAssertGreaterThanOrEqual(SettingsLayout.height, 480)
+        XCTAssertEqual(SettingsLayout.width, 460)
+    }
+
+    @MainActor
     func testSettingsErrorTextMatchesLaunchAtLoginFailure() {
         XCTAssertEqual(SettingsErrorText.launchAtLoginUpdateFailed, "Failed to update launch at login")
     }
