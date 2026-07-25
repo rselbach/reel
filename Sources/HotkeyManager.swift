@@ -23,11 +23,13 @@ enum CarbonModifierTranslation {
 enum HotkeyAction: UInt32, CaseIterable {
     case toggleRecording = 1
     case discardRecording = 2
+    case pauseRecording = 3
 
     var displayName: String {
         switch self {
         case .toggleRecording: return "Toggle recording:"
         case .discardRecording: return "Discard recording:"
+        case .pauseRecording: return "Pause and resume:"
         }
     }
 }

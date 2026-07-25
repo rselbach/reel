@@ -286,6 +286,7 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertFalse(ids.contains(0), "0 is reserved as an unset EventHotKeyID")
         XCTAssertEqual(HotkeyAction.toggleRecording.rawValue, 1)
         XCTAssertEqual(HotkeyAction.discardRecording.rawValue, 2)
+        XCTAssertEqual(HotkeyAction.pauseRecording.rawValue, 3)
     }
 
     @MainActor
@@ -294,6 +295,7 @@ final class AppSettingsTests: XCTestCase {
             switch action {
             case .toggleRecording: return .default
             case .discardRecording: return .discardDefault
+            case .pauseRecording: return .pauseDefault
             }
         }
         XCTAssertEqual(Set(defaults.map(\.displayString)).count, defaults.count)

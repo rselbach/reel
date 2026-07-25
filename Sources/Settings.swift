@@ -152,6 +152,7 @@ class AppSettings: ObservableObject {
         static let showPreviewAfterRecording = "showPreviewAfterRecording"
         static let recordingHotkey = "recordingHotkey"
         static let discardHotkey = "discardHotkey"
+        static let pauseHotkey = "pauseHotkey"
         static let countdownDuration = "countdownDuration"
         static let recordAudio = "recordAudio"
         static let audioSource = "audioSource"
@@ -274,6 +275,13 @@ class AppSettings: ObservableObject {
         }
     }
 
+    /// Pauses or resumes without ending the take.
+    @Published var pauseHotkey: HotkeyCombo {
+        didSet {
+            persistHotkey(pauseHotkey, key: DefaultsKey.pauseHotkey, action: .pauseRecording)
+        }
+    }
+
     /// Non-nil when the user tried to assign a shortcut another action already
     /// owns. Carbon would simply refuse the second registration, leaving one
     /// shortcut silently dead.
@@ -283,6 +291,7 @@ class AppSettings: ObservableObject {
         switch action {
         case .toggleRecording: return recordingHotkey
         case .discardRecording: return discardHotkey
+        case .pauseRecording: return pauseHotkey
         }
     }
 
@@ -301,6 +310,7 @@ class AppSettings: ObservableObject {
         switch action {
         case .toggleRecording: recordingHotkey = combo
         case .discardRecording: discardHotkey = combo
+        case .pauseRecording: pauseHotkey = combo
         }
     }
 
@@ -621,6 +631,7 @@ class AppSettings: ObservableObject {
 
         static let `default` = HotkeyCombo(keyCode: 15, modifiers: 0x120000) // Cmd+Shift+R
         static let discardDefault = HotkeyCombo(keyCode: 15, modifiers: 0x1A0000) // Cmd+Opt+Shift+R
+        static let pauseDefault = HotkeyCombo(keyCode: 35, modifiers: 0x120000) // Cmd+Shift+P
 
         var isUsableGlobalShortcut: Bool {
             modifiers & Self.nonShiftModifierMask != 0
@@ -731,6 +742,11 @@ class AppSettings: ObservableObject {
             from: defaults,
             key: DefaultsKey.discardHotkey,
             fallback: .discardDefault
+        )
+        self.pauseHotkey = Self.loadHotkey(
+            from: defaults,
+            key: DefaultsKey.pauseHotkey,
+            fallback: .pauseDefault
         )
 
         self.countdownDuration = Self.sanitizedCountdownDuration(

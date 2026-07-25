@@ -111,6 +111,11 @@ private struct FrameWriter {
     let mirrorCamera: Bool
     let textOverlay: TextOverlay?
     var hasWriteFailure = false
+    /// Total time spent paused so far. Subtracted from every sample's
+    /// timestamp so the output has no gap where the pauses were.
+    var pausedDuration: CMTime = .zero
+    /// Presentation time of the first frame seen during the current pause.
+    var pauseStartTime: CMTime?
 }
 
 private final class FrameCaptureState {
@@ -120,6 +125,7 @@ private final class FrameCaptureState {
     var currentCameraX: CGFloat = 1.0
     var currentCameraY: CGFloat = 0.0
     var currentCameraSizeFraction: CGFloat = 0.2
+    var isPaused = false
 }
 
 @MainActor
@@ -128,6 +134,14 @@ class ScreenRecorder: NSObject, ObservableObject {
         didSet {
             guard oldValue != isRecording else { return }
             onRecordingStateChanged?(isRecording)
+        }
+    }
+    /// Paused recordings keep the stream and capture sessions running but
+    /// write nothing, and the time spent paused is removed from the output.
+    @Published private(set) var isPaused = false {
+        didSet {
+            guard oldValue != isPaused else { return }
+            onPauseStateChanged?(isPaused)
         }
     }
     private(set) var isStarting = false
@@ -154,6 +168,9 @@ class ScreenRecorder: NSObject, ObservableObject {
     /// artwork, the elapsed timer, and the on-screen overlays this way rather
     /// than reaching into the app delegate itself.
     var onRecordingStateChanged: ((Bool) -> Void)?
+
+    /// Invoked when a running recording is paused or resumed.
+    var onPauseStateChanged: ((Bool) -> Void)?
 
     /// Asks where to put a finished recording when the user chose "Ask each
     /// time". Returning nil discards it. The recorder owns the temporary
@@ -603,7 +620,26 @@ class ScreenRecorder: NSObject, ObservableObject {
         await finalizeRecording()
         cleanup()
         isRecording = false
+        isPaused = false
         return true
+    }
+
+    /// Stops writing without ending the take. Capture keeps running so
+    /// resuming is instant; the gap is removed from the output timeline.
+    func pauseRecording() {
+        guard isRecording, !isStopping, !isPaused else { return }
+        withFrameLock { frameState.isPaused = true }
+        isPaused = true
+    }
+
+    func resumeRecording() {
+        guard isRecording, isPaused else { return }
+        withFrameLock { frameState.isPaused = false }
+        isPaused = false
+    }
+
+    func togglePause() {
+        isPaused ? resumeRecording() : pauseRecording()
     }
 
     /// Ends the recording and throws the file away, for a take the user does
@@ -638,6 +674,7 @@ class ScreenRecorder: NSObject, ObservableObject {
 
         cleanup()
         isRecording = false
+        isPaused = false
         errorMessage = nil
         logger.info("Recording discarded at the user's request")
         return true
@@ -1140,6 +1177,7 @@ class ScreenRecorder: NSObject, ObservableObject {
         withFrameLock {
             frameState.latestCameraPixelBuffer = nil
             frameState.frameWriter = nil
+            frameState.isPaused = false
         }
     }
 
@@ -1194,6 +1232,7 @@ class ScreenRecorder: NSObject, ObservableObject {
 
         cleanup()
         isRecording = false
+        isPaused = false
         onUnexpectedStop?()
     }
 
@@ -1392,6 +1431,7 @@ class ScreenRecorder: NSObject, ObservableObject {
         }
         cleanup()
         isRecording = false
+        isPaused = false
         errorMessage = "\(context): \(reason)"
         onUnexpectedStop?()
     }
@@ -1444,16 +1484,40 @@ extension ScreenRecorder: SCStreamOutput {
             var cameraY: CGFloat = 0
             var cameraSizeFraction: CGFloat = 0.2
 
+            var adjustedTime = presentationTime
+
             withFrameLock {
                 guard !frameState.isCaptureStopped else { return }
                 guard var writer = frameState.frameWriter else { return }
                 guard !writer.hasWriteFailure else { return }
 
+                // Paused: remember where the gap started and drop the frame.
+                if frameState.isPaused {
+                    if writer.pauseStartTime == nil {
+                        writer.pauseStartTime = presentationTime
+                        frameState.frameWriter = writer
+                    }
+                    return
+                }
+
+                // First frame after a resume: fold the gap into the running
+                // offset so the output timeline stays continuous.
+                if let pauseStart = writer.pauseStartTime {
+                    writer.pausedDuration = CMTimeAdd(
+                        writer.pausedDuration,
+                        CMTimeSubtract(presentationTime, pauseStart)
+                    )
+                    writer.pauseStartTime = nil
+                    frameState.frameWriter = writer
+                }
+
+                adjustedTime = CMTimeSubtract(presentationTime, writer.pausedDuration)
+
                 cameraBuffer = frameState.latestCameraPixelBuffer
 
                 if writer.startTime == nil {
-                    writer.startTime = presentationTime
-                    writer.assetWriter.startSession(atSourceTime: presentationTime)
+                    writer.startTime = adjustedTime
+                    writer.assetWriter.startSession(atSourceTime: adjustedTime)
                     frameState.frameWriter = writer
                 }
 
@@ -1500,7 +1564,7 @@ extension ScreenRecorder: SCStreamOutput {
                 guard !writer.hasWriteFailure else { return }
                 guard writer.videoInput.isReadyForMoreMediaData else { return }
 
-                if !writer.adaptor.append(frameToWrite, withPresentationTime: presentationTime) {
+                if !writer.adaptor.append(frameToWrite, withPresentationTime: adjustedTime) {
                     let context = usedCompositedBuffer
                         ? "Failed to append composited video frame"
                         : "Failed to append video frame"
@@ -1539,12 +1603,55 @@ extension ScreenRecorder: AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptur
         }
     }
 
+    /// Shifts every timestamp in a sample buffer back by an offset, for the
+    /// time spent paused. Returns the original buffer when there is no offset.
+    private nonisolated func retimed(_ sampleBuffer: CMSampleBuffer, by offset: CMTime) -> CMSampleBuffer? {
+        guard offset != .zero else { return sampleBuffer }
+
+        var count: CMItemCount = 0
+        guard CMSampleBufferGetSampleTimingInfoArray(
+            sampleBuffer,
+            entryCount: 0,
+            arrayToFill: nil,
+            entriesNeededOut: &count
+        ) == noErr else { return nil }
+
+        var timings = [CMSampleTimingInfo](repeating: .invalid, count: count)
+        guard CMSampleBufferGetSampleTimingInfoArray(
+            sampleBuffer,
+            entryCount: count,
+            arrayToFill: &timings,
+            entriesNeededOut: &count
+        ) == noErr else { return nil }
+
+        for index in 0..<count {
+            timings[index].presentationTimeStamp = CMTimeSubtract(
+                timings[index].presentationTimeStamp,
+                offset
+            )
+            if timings[index].decodeTimeStamp.isValid {
+                timings[index].decodeTimeStamp = CMTimeSubtract(timings[index].decodeTimeStamp, offset)
+            }
+        }
+
+        var retimedBuffer: CMSampleBuffer?
+        guard CMSampleBufferCreateCopyWithNewTiming(
+            allocator: kCFAllocatorDefault,
+            sampleBuffer: sampleBuffer,
+            sampleTimingEntryCount: count,
+            sampleTimingArray: &timings,
+            sampleBufferOut: &retimedBuffer
+        ) == noErr else { return nil }
+
+        return retimedBuffer
+    }
+
     /// Appends an audio sample (microphone or system audio) to the writer.
     /// Samples arriving before the video session starts are dropped so audio
     /// never leads the first frame.
     private nonisolated func appendAudioSampleBuffer(_ sampleBuffer: CMSampleBuffer) {
         let writer = withFrameLock { () -> FrameWriter? in
-            guard !frameState.isCaptureStopped else { return nil }
+            guard !frameState.isCaptureStopped, !frameState.isPaused else { return nil }
             return frameState.frameWriter
         }
 
@@ -1553,6 +1660,13 @@ extension ScreenRecorder: AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptur
               let audio = writer.audioInput,
               audio.isReadyForMoreMediaData
         else { return }
+
+        // Audio carries its own timestamps, so the pause offset has to be
+        // applied to the buffer rather than passed alongside it.
+        guard let sampleBuffer = retimed(sampleBuffer, by: writer.pausedDuration) else {
+            logger.warning("Could not retime audio sample for pause offset; dropping it")
+            return
+        }
 
         if !audio.append(sampleBuffer) {
             withFrameLock {

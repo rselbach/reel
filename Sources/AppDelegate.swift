@@ -19,6 +19,9 @@ enum AppMenuText {
     static let recordingInProgress = "● Recording..."
     static let stopRecording = "Stop Recording"
     static let discardRecording = "Discard Recording"
+    static let pauseRecording = "Pause Recording"
+    static let resumeRecording = "Resume Recording"
+    static let recordingPaused = "❚❚ Paused"
     static let discardConfirmationTitle = "Discard this recording?"
     static let discardConfirmationMessage = "The take will be deleted. This cannot be undone."
     static let discard = "Discard"
@@ -152,6 +155,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var captureBoundsIndicator: CaptureBoundsIndicator?
     private var recordingTimer: Timer?
     private var recordingStartedAt: Date?
+    /// Time spent paused, excluded from the elapsed readout so it reflects
+    /// what is actually in the file.
+    private var pausedTotal: TimeInterval = 0
+    private var pausedAt: Date?
     private var statusMenu: NSMenu?
     private var windowTrackingTimer: Timer?
     // Sparkle needs a real app bundle; under `swift run` there is no
@@ -190,6 +197,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
         screenRecorder.onRecordingStateChanged = { [weak self] isRecording in
             self?.updateIcon(isRecording: isRecording)
+        }
+        screenRecorder.onPauseStateChanged = { [weak self] isPaused in
+            self?.updatePauseState(isPaused)
         }
         screenRecorder.requestSaveDestination = { [weak self] request in
             await self?.promptForSaveDestination(request)
@@ -270,6 +280,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             switch action {
             case .toggleRecording:
                 self?.handleToggleRecording()
+            case .pauseRecording:
+                self?.screenRecorder.togglePause()
             case .discardRecording:
                 // No confirmation on the shortcut: it is a deliberate chord,
                 // and a modal here would land in the middle of a demo. The
@@ -417,9 +429,18 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             }
             return
         }
-        let recordingItem = NSMenuItem(title: AppMenuText.recordingInProgress, action: nil, keyEquivalent: "")
+        let recordingItem = NSMenuItem(
+            title: screenRecorder.isPaused ? AppMenuText.recordingPaused : AppMenuText.recordingInProgress,
+            action: nil,
+            keyEquivalent: ""
+        )
         recordingItem.isEnabled = false
         menu.addItem(recordingItem)
+        menu.addItem(NSMenuItem(
+            title: screenRecorder.isPaused ? AppMenuText.resumeRecording : AppMenuText.pauseRecording,
+            action: #selector(togglePause),
+            keyEquivalent: "p"
+        ))
         menu.addItem(NSMenuItem(title: AppMenuText.stopRecording, action: #selector(stopRecording), keyEquivalent: "s"))
         menu.addItem(NSMenuItem(title: AppMenuText.discardRecording, action: #selector(discardRecordingFromMenu), keyEquivalent: ""))
     }
@@ -586,6 +607,25 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         Task { @MainActor in
             await stopRecordingFlow()
         }
+    }
+
+    @objc private func togglePause() {
+        screenRecorder.togglePause()
+    }
+
+    /// Freezes the elapsed readout and marks the status item while paused, so
+    /// a forgotten pause is visible rather than looking like a live recording.
+    private func updatePauseState(_ isPaused: Bool) {
+        if isPaused {
+            pausedAt = Date()
+        } else if let pausedAt {
+            pausedTotal += Date().timeIntervalSince(pausedAt)
+            self.pausedAt = nil
+        }
+
+        statusItem.button?.contentTintColor = isPaused ? .systemGray : .red
+        updateElapsedTitle()
+        rebuildMenu()
     }
 
     @objc private func discardRecordingFromMenu() {
@@ -1003,6 +1043,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private func startRecordingTimer() {
         guard recordingTimer == nil else { return }
         recordingStartedAt = Date()
+        pausedTotal = 0
+        pausedAt = nil
         updateElapsedTitle()
 
         let timer = Timer(timeInterval: 1, repeats: true) { [weak self] _ in
@@ -1019,12 +1061,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         recordingTimer?.invalidate()
         recordingTimer = nil
         recordingStartedAt = nil
+        pausedTotal = 0
+        pausedAt = nil
         statusItem.button?.title = ""
     }
 
     private func updateElapsedTitle() {
         guard let start = recordingStartedAt, let button = statusItem.button else { return }
-        let elapsed = Int(Date().timeIntervalSince(start))
+        let pausedSoFar = pausedTotal + (pausedAt.map { Date().timeIntervalSince($0) } ?? 0)
+        let elapsed = Int(Date().timeIntervalSince(start) - pausedSoFar)
         button.attributedTitle = NSAttributedString(
             string: " " + RecordingElapsedFormat.string(seconds: elapsed),
             attributes: [.font: NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .regular)]

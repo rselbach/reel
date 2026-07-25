@@ -6,7 +6,7 @@ Generated from the canonical tracker on 2026-06-21. This checklist is a companio
 
 Environment note: a bounded System Events probe on 2026-06-21 returned `UI elements enabled = false`, so this environment cannot inspect the menu bar, permission prompts, device pickers, or recording UI.
 
-Manual validation required: 36 stories.
+Manual validation required: 37 stories.
 No further manual validation required: 2 stories.
 
 ## Recommended Order
@@ -680,6 +680,28 @@ Manual steps:
 2. repeat and cancel the confirmation, verifying the recording continues
 3. press the discard shortcut during a recording and verify it ends immediately with no confirmation and no file
 4. open Settings, Shortcuts and verify both shortcuts are listed and that assigning one the other's combination is refused with an explanation.
+
+Current status: Partial automated evidence passed; manual UI validation still pending. A bounded System Events probe on 2026-06-21 returned UI elements enabled = false, so this environment cannot inspect the app UI; validate manually using the listed steps.
+
+Result: [ ] Pass  [ ] Fail  [ ] Blocked
+
+Notes:
+
+## US-039 - Pause and resume a recording
+
+User story: As a user recording a demo, I want to pause while I set up the next step so the dead time is not in the finished video.
+
+Expected behavior: Pausing keeps the stream and capture sessions running but stops writing: video frames and audio samples are dropped while paused. The presentation time of the first frame seen during a pause is remembered, and on resume the elapsed gap is added to a running offset that is subtracted from every subsequent video timestamp and applied to audio sample buffers through a retimed copy, so the output has no gap. The menu offers Pause and Resume, a global shortcut toggles it, the status item dims and its elapsed readout excludes paused time, and pause state is cleared on every path that ends a recording.
+
+Manual steps:
+
+1. Start a recording with microphone audio
+2. pause from the menu, wait ten seconds, resume, and stop
+3. verify the playback has no ten-second gap and that audio stays in sync with video after the resume
+4. verify the menu bar elapsed time stops advancing while paused and the icon dims
+5. pause and resume several times in one take and verify sync still holds
+6. pause and then stop without resuming and verify the file is valid
+7. pause and then discard and verify nothing is written.
 
 Current status: Partial automated evidence passed; manual UI validation still pending. A bounded System Events probe on 2026-06-21 returned UI elements enabled = false, so this environment cannot inspect the app UI; validate manually using the listed steps.
 
