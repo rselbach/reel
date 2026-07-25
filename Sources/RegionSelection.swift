@@ -52,6 +52,69 @@ enum RegionSelectionLabel {
     }
 }
 
+enum RegionAspectConstraint {
+    /// Held while dragging to lock the selection to the shape most demo
+    /// recordings are eventually shown at.
+    static let ratio: CGFloat = 16.0 / 9.0
+    static let label = "16:9"
+
+    /// Builds a ratio-locked rect between the anchor and the pointer. The
+    /// dominant axis of the drag drives the size, so the selection follows
+    /// whichever direction the user is actually pulling.
+    static func rect(anchor: CGPoint, current: CGPoint, ratio: CGFloat = ratio) -> CGRect {
+        let dx = current.x - anchor.x
+        let dy = current.y - anchor.y
+
+        var width = abs(dx)
+        var height = abs(dy)
+        if width / ratio >= height {
+            height = width / ratio
+        } else {
+            width = height * ratio
+        }
+
+        return CGRect(
+            x: dx < 0 ? anchor.x - width : anchor.x,
+            y: dy < 0 ? anchor.y - height : anchor.y,
+            width: width,
+            height: height
+        )
+    }
+
+    /// Re-locks a resized rect to the ratio, holding the corner opposite the
+    /// one being dragged.
+    static func locked(
+        rect: CGRect,
+        handle: RegionAdjustment.Handle,
+        ratio: CGFloat = ratio
+    ) -> CGRect {
+        guard handle != .move else { return rect }
+
+        var width = rect.width
+        var height = rect.height
+        if width / ratio >= height {
+            height = width / ratio
+        } else {
+            width = height * ratio
+        }
+
+        let anchor: CGPoint
+        switch handle {
+        case .bottomLeft: anchor = CGPoint(x: rect.maxX, y: rect.maxY)
+        case .bottomRight: anchor = CGPoint(x: rect.minX, y: rect.maxY)
+        case .topLeft: anchor = CGPoint(x: rect.maxX, y: rect.minY)
+        case .topRight, .move: anchor = CGPoint(x: rect.minX, y: rect.minY)
+        }
+
+        return CGRect(
+            x: min(anchor.x, anchor.x == rect.minX ? anchor.x : anchor.x - width),
+            y: min(anchor.y, anchor.y == rect.minY ? anchor.y : anchor.y - height),
+            width: width,
+            height: height
+        )
+    }
+}
+
 enum RegionAdjustment {
     /// How close to an edge counts as grabbing a corner rather than the body.
     static let handleHitSize: CGFloat = 14
@@ -88,7 +151,8 @@ enum RegionAdjustment {
         handle: Handle,
         delta: CGPoint,
         bounds: CGRect,
-        minimumSize: CGFloat
+        minimumSize: CGFloat,
+        lockedRatio: CGFloat? = nil
     ) -> CGRect {
         var result: CGRect
         switch handle {
@@ -127,6 +191,9 @@ enum RegionAdjustment {
         // A drag past the opposite edge flips the rect; standardizing keeps
         // the result well formed instead of negative.
         result = result.standardized
+        if let lockedRatio {
+            result = RegionAspectConstraint.locked(rect: result, handle: handle, ratio: lockedRatio)
+        }
         result.size.width = min(max(minimumSize, result.width), bounds.width)
         result.size.height = min(max(minimumSize, result.height), bounds.height)
         result.origin.x = min(max(bounds.minX, result.minX), bounds.maxX - result.width)
@@ -266,11 +333,12 @@ final class RegionSelectionView: NSView {
     private var activeHandle: RegionAdjustment.Handle?
     private var handleDragOrigin: CGPoint?
     private var rectAtHandleDragStart: CGRect?
+    private var isRatioLocked = false
     private let hintLabel: NSTextField
 
     private enum Hint {
-        static let draw = "Drag to select the area to record — Esc to cancel"
-        static let adjust = "Drag to adjust — Return to record, Esc to cancel"
+        static let draw = "Drag to select the area to record — hold ⇧ for 16:9, Esc to cancel"
+        static let adjust = "Drag to adjust — hold ⇧ for 16:9, Return to record, Esc to cancel"
     }
 
     override init(frame frameRect: NSRect) {
@@ -345,6 +413,11 @@ final class RegionSelectionView: NSView {
     override func mouseDragged(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
 
+        let lockedRatio = event.modifierFlags.contains(.shift)
+            ? RegionAspectConstraint.ratio
+            : nil
+        isRatioLocked = lockedRatio != nil
+
         if let handle = activeHandle,
            let origin = handleDragOrigin,
            let rect = rectAtHandleDragStart {
@@ -353,19 +426,25 @@ final class RegionSelectionView: NSView {
                 handle: handle,
                 delta: CGPoint(x: point.x - origin.x, y: point.y - origin.y),
                 bounds: bounds,
-                minimumSize: RegionMath.minimumSelectionSize
+                minimumSize: RegionMath.minimumSelectionSize,
+                lockedRatio: lockedRatio
             )
             needsDisplay = true
             return
         }
 
         guard let startPoint else { return }
-        currentRect = CGRect(
-            x: min(startPoint.x, point.x),
-            y: min(startPoint.y, point.y),
-            width: abs(point.x - startPoint.x),
-            height: abs(point.y - startPoint.y)
-        )
+        if lockedRatio != nil {
+            currentRect = RegionAspectConstraint.rect(anchor: startPoint, current: point)
+                .intersection(bounds)
+        } else {
+            currentRect = CGRect(
+                x: min(startPoint.x, point.x),
+                y: min(startPoint.y, point.y),
+                width: abs(point.x - startPoint.x),
+                height: abs(point.y - startPoint.y)
+            )
+        }
         needsDisplay = true
     }
 
@@ -471,7 +550,10 @@ final class RegionSelectionView: NSView {
             .font: NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .medium),
             .foregroundColor: NSColor.white
         ]
-        let text = RegionSelectionLabel.text(for: rect) as NSString
+        let dimensions = RegionSelectionLabel.text(for: rect)
+        let text = (
+            isRatioLocked ? "\(dimensions)  \(RegionAspectConstraint.label)" : dimensions
+        ) as NSString
         let textSize = text.size(withAttributes: attributes)
         let labelSize = CGSize(
             width: textSize.width + RegionSelectionLabel.padding.width * 2,

@@ -837,17 +837,18 @@ Notes:
 
 User story: As a user selecting an area to record, I want to correct the selection before recording starts instead of having to redraw it from scratch.
 
-Expected behavior: Releasing the mouse after drawing an area no longer starts recording. The selection stays on screen with corner handles and can be moved by dragging its body or resized by dragging a corner, always staying at least the minimum size and fully within the screen; dragging a corner past its anchor standardizes the rect rather than inverting it. Return or a double-click inside the selection records it, Escape cancels, and clicking outside starts a fresh selection. The hint text follows the state.
+Expected behavior: Releasing the mouse after drawing an area no longer starts recording. The selection stays on screen with corner handles and can be moved by dragging its body or resized by dragging a corner, always staying at least the minimum size and fully within the screen; dragging a corner past its anchor standardizes the rect rather than inverting it. Holding shift while drawing or resizing locks the selection to 16:9, driven by the dominant axis of the drag and anchored at the opposite corner, with the readout naming the ratio. Return or a double-click inside the selection records it, Escape cancels, and clicking outside starts a fresh selection.
 
 Manual steps:
 
 1. Start an area recording and drag out a selection
 2. verify recording does not start on release and corner handles appear
 3. drag the body to move it and each corner to resize it, verifying it cannot leave the screen or collapse
-4. press Return and verify recording starts with the adjusted area
-5. repeat and confirm with a double-click inside the selection
-6. press Escape and verify nothing is recorded
-7. click outside an adjusted selection and verify a fresh selection begins.
+4. hold shift while drawing and verify the selection locks to 16:9 in all four directions and the readout says so
+5. hold shift while resizing a corner and verify the ratio is preserved
+6. press Return and verify recording starts with the adjusted area
+7. confirm with a double-click
+8. press Escape and verify nothing is recorded.
 
 Current status: Partial automated evidence passed; manual UI validation still pending. A bounded System Events probe on 2026-06-21 returned UI elements enabled = false, so this environment cannot inspect the app UI; validate manually using the listed steps.
 

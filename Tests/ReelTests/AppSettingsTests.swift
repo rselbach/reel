@@ -251,6 +251,61 @@ final class AppSettingsTests: XCTestCase {
     }
 
     @MainActor
+    func testRatioLockedDragFollowsTheDominantAxis() {
+        let anchor = CGPoint(x: 100, y: 100)
+
+        // Wide drag: width wins, height derived from it.
+        let wide = RegionAspectConstraint.rect(anchor: anchor, current: CGPoint(x: 1060, y: 200))
+        XCTAssertEqual(wide.width, 960, accuracy: 0.001)
+        XCTAssertEqual(wide.height, 540, accuracy: 0.001)
+
+        // Tall drag: height wins.
+        let tall = RegionAspectConstraint.rect(anchor: anchor, current: CGPoint(x: 200, y: 640))
+        XCTAssertEqual(tall.height, 540, accuracy: 0.001)
+        XCTAssertEqual(tall.width, 960, accuracy: 0.001)
+
+        XCTAssertEqual(wide.width / wide.height, RegionAspectConstraint.ratio, accuracy: 0.001)
+    }
+
+    @MainActor
+    func testRatioLockedDragWorksInEveryDirection() {
+        let anchor = CGPoint(x: 1000, y: 800)
+
+        // Up and to the left of the anchor.
+        let rect = RegionAspectConstraint.rect(anchor: anchor, current: CGPoint(x: 40, y: 200))
+        XCTAssertEqual(rect.maxX, 1000, accuracy: 0.001)
+        XCTAssertEqual(rect.maxY, 800, accuracy: 0.001)
+        XCTAssertEqual(rect.width / rect.height, RegionAspectConstraint.ratio, accuracy: 0.001)
+    }
+
+    @MainActor
+    func testRatioLockedResizeKeepsTheRatio() {
+        let screen = CGRect(x: 0, y: 0, width: 1920, height: 1080)
+        let rect = CGRect(x: 100, y: 100, width: 960, height: 540)
+
+        let resized = RegionAdjustment.adjusted(
+            rect: rect,
+            handle: .topRight,
+            delta: CGPoint(x: 320, y: 0),
+            bounds: screen,
+            minimumSize: RegionMath.minimumSelectionSize,
+            lockedRatio: RegionAspectConstraint.ratio
+        )
+        XCTAssertEqual(resized.width / resized.height, RegionAspectConstraint.ratio, accuracy: 0.01)
+
+        // Without the lock the ratio is free to change.
+        let unlocked = RegionAdjustment.adjusted(
+            rect: rect,
+            handle: .topRight,
+            delta: CGPoint(x: 320, y: 0),
+            bounds: screen,
+            minimumSize: RegionMath.minimumSelectionSize
+        )
+        XCTAssertEqual(unlocked.height, 540)
+        XCTAssertEqual(unlocked.width, 1280)
+    }
+
+    @MainActor
     func testSelectionHandleHitTesting() {
         let rect = CGRect(x: 100, y: 100, width: 400, height: 300)
 
