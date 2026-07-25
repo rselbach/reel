@@ -935,11 +935,50 @@ class ScreenRecorder: NSObject, ObservableObject {
         ]
     }
 
+    /// Starts the camera ahead of recording so the user can frame themselves
+    /// during the countdown instead of doing it on camera. The session is
+    /// reused by startRecording, so the camera is only opened once.
+    /// Returns false when there is no camera to show.
+    func prepareCameraPreview() async -> Bool {
+        guard settings.recordCamera else { return false }
+        guard cameraCaptureSession == nil else { return true }
+        guard await ensureAVPermission(for: .video) else { return false }
+        guard let device = settings.selectedCamera else { return false }
+
+        do {
+            try startCameraSession(device: device)
+        } catch {
+            logger.warning("Could not start camera preview: \(error.localizedDescription)")
+            return false
+        }
+
+        let running = captureSessionQueue.sync { () -> Bool in
+            cameraCaptureSession?.startRunning()
+            return cameraCaptureSession?.isRunning ?? false
+        }
+        if !running {
+            discardCameraPreview()
+            return false
+        }
+        return true
+    }
+
+    /// Tears down a preview-only camera session, for a cancelled countdown.
+    func discardCameraPreview() {
+        guard !isRecording else { return }
+        disableCameraCaptureAfterStartFailure()
+    }
+
     private func setupCameraCapture(options: RecordingOptions) throws {
+        // The countdown may already have opened the camera for framing.
+        guard cameraCaptureSession == nil else { return }
         guard let device = options.cameraDevice else {
             throw NSError(domain: "ScreenRecorder", code: 2, userInfo: [NSLocalizedDescriptionKey: "No camera available"])
         }
+        try startCameraSession(device: device)
+    }
 
+    private func startCameraSession(device: AVCaptureDevice) throws {
         let output = AVCaptureVideoDataOutput()
         let session = try buildCaptureSession(
             device: device,

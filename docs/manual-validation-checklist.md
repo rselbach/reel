@@ -376,12 +376,15 @@ Notes:
 
 User story: As a user, I want optional camera overlay with configurable camera, position, size, and shape.
 
-Expected behavior: When enabled, Reel requests camera permission, starts a camera capture session, composites latest camera frames into the recording using selected shape and size, and shows a live draggable overlay excluded from screen capture. The overlay is hidden when recording stops, including unexpected not-recording transitions, stream-error abort stops camera capture resources, failed camera startup clears camera resources so no dead overlay is shown, and stale saved camera IDs are labeled as Unavailable device in Settings while recording falls back to default camera.
+Expected behavior: With camera overlay enabled, the camera session is started before the countdown so the user can frame and position the bubble ahead of the take rather than on camera; the same session and the overlay the user positioned carry straight into the recording. Cancelling the countdown tears the preview session down. The overlay window is excluded from capture and the bubble is composited into the file from the camera frames, mirrored only for front-facing cameras.
 
 Manual steps:
 
-1. Enable camera overlay
-2. test camera permission denial/grant, shape/size/position, dragging, stale device label, failed camera start cleanup, stream-error overlay cleanup, and composited output.
+1. Enable the camera overlay and set a countdown of at least three seconds
+2. start a recording and verify the camera bubble appears during the countdown
+3. drag and resize it during the countdown and verify the recording starts with the bubble where it was left
+4. cancel a countdown and verify the camera turns off
+5. verify the composited bubble in the file matches the on-screen position.
 
 Current status: Partial automated evidence passed; manual UI validation still pending. A bounded System Events probe on 2026-06-21 returned UI elements enabled = false, so this environment cannot inspect the app UI; validate manually using the listed steps.
 

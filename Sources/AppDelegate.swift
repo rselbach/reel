@@ -737,6 +737,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private func runCountdown() async -> Bool {
         guard !isCountdownActive else { return false }
         isCountdownActive = true
+
+        if await screenRecorder.prepareCameraPreview() {
+            showCameraOverlayForCountdown()
+        }
+
         let countdown = CountdownOverlay()
         activeCountdown = countdown
         let shouldStart = await countdown.show(
@@ -745,6 +750,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         )
         activeCountdown = nil
         isCountdownActive = false
+
+        if !shouldStart {
+            hideCameraOverlay()
+            screenRecorder.discardCameraPreview()
+        }
         return shouldStart
     }
 
@@ -759,8 +769,34 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     /// Shows the draggable camera overlay if camera recording is enabled.
     private func showCameraOverlayIfNeeded() {
-        guard let options = screenRecorder.activeRecordingOptions,
-              options.recordCamera,
+        guard let options = screenRecorder.activeRecordingOptions, options.recordCamera else { return }
+        presentCameraOverlay(
+            position: options.cameraPosition,
+            sizeFraction: options.cameraSizeFraction,
+            shape: options.cameraShape
+        )
+    }
+
+    /// Brings the camera bubble up during the countdown so the user frames
+    /// themselves before the take rather than on camera. The overlay carries
+    /// straight over into the recording.
+    private func showCameraOverlayForCountdown() {
+        let settings = AppSettings.shared
+        presentCameraOverlay(
+            position: settings.cameraPosition,
+            sizeFraction: settings.cameraSizeFraction,
+            shape: settings.cameraShape
+        )
+    }
+
+    private func presentCameraOverlay(
+        position: AppSettings.CameraOverlayPosition,
+        sizeFraction: CGFloat,
+        shape: AppSettings.CameraOverlayShape
+    ) {
+        // Already framed during the countdown: keep the overlay the user
+        // positioned rather than replacing it.
+        guard cameraOverlayController == nil,
               let session = screenRecorder.activeCameraCaptureSession,
               let bounds = screenRecorder.recordingBounds else {
             return
@@ -770,9 +806,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         cameraOverlayController?.show(
             session: session,
             bounds: bounds,
-            initialPosition: options.cameraPosition,
-            sizeFraction: options.cameraSizeFraction,
-            shape: options.cameraShape,
+            initialPosition: position,
+            sizeFraction: sizeFraction,
+            shape: shape,
             onPositionChanged: { [weak self] x, y in
                 self?.screenRecorder.updateCameraOverlayPosition(x: x, y: y)
             },
