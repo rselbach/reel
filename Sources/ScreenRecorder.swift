@@ -214,9 +214,8 @@ private final class FrameCaptureState {
 class ScreenRecorder: NSObject, ObservableObject {
     @Published private(set) var isRecording = false {
         didSet {
-            if let appDelegate = NSApplication.shared.delegate as? AppDelegate {
-                appDelegate.updateIcon(isRecording: isRecording)
-            }
+            guard oldValue != isRecording else { return }
+            onRecordingStateChanged?(isRecording)
         }
     }
     private(set) var isStarting = false
@@ -238,6 +237,11 @@ class ScreenRecorder: NSObject, ObservableObject {
     /// updated. Lets the app surface the failure instead of burying it in the
     /// menu.
     var onUnexpectedStop: (() -> Void)?
+
+    /// Invoked when recording starts or stops. The recorder drives status item
+    /// artwork, the elapsed timer, and the on-screen overlays this way rather
+    /// than reaching into the app delegate itself.
+    var onRecordingStateChanged: ((Bool) -> Void)?
 
     var countdownTargetFrame: CGRect? {
         switch recordingMode {

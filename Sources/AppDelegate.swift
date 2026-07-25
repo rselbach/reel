@@ -124,6 +124,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         screenRecorder.onUnexpectedStop = { [weak self] in
             self?.handleUnexpectedStop()
         }
+        screenRecorder.onRecordingStateChanged = { [weak self] isRecording in
+            self?.updateIcon(isRecording: isRecording)
+        }
 
         if Bundle.main.bundleIdentifier != nil {
             updaterController = SPUStandardUpdaterController(
@@ -742,7 +745,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         presentWindow(settingsWindow)
     }
 
-    func updateIcon(isRecording: Bool) {
+    private func updateIcon(isRecording: Bool) {
         if !isRecording {
             hideCameraOverlay()
             hideRegionIndicator()
