@@ -159,6 +159,7 @@ class AppSettings: ObservableObject {
         static let textOverlayText = "textOverlayText"
         static let textOverlayPosition = "textOverlayPosition"
         static let recentRecordings = "recentRecordings"
+        static let playSoundCues = "playSoundCues"
         static let rememberedTarget = "rememberedTarget"
     }
 
@@ -243,6 +244,12 @@ class AppSettings: ObservableObject {
 
     @Published var showPreviewAfterRecording: Bool {
         didSet { persist(showPreviewAfterRecording, key: DefaultsKey.showPreviewAfterRecording) }
+    }
+
+    /// Start and stop cues are played through the speakers, so anyone
+    /// recording narration over a live microphone will want them off.
+    @Published var playSoundCues: Bool {
+        didSet { persist(playSoundCues, key: DefaultsKey.playSoundCues) }
     }
 
     static let hotkeyChangedNotification = Notification.Name("AppSettingsHotkeyChanged")
@@ -647,6 +654,7 @@ class AppSettings: ObservableObject {
         self.videoQuality = VideoQuality.fromStored(defaults.string(forKey: DefaultsKey.videoQuality)) ?? .medium
         self.openFinderAfterRecording = defaults.object(forKey: DefaultsKey.openFinderAfterRecording) as? Bool ?? true
         self.showPreviewAfterRecording = defaults.object(forKey: DefaultsKey.showPreviewAfterRecording) as? Bool ?? true
+        self.playSoundCues = defaults.object(forKey: DefaultsKey.playSoundCues) as? Bool ?? true
 
         if let path = defaults.string(forKey: DefaultsKey.outputDirectory) {
             let candidate = URL(fileURLWithPath: path, isDirectory: true)

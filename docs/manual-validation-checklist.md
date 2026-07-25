@@ -6,7 +6,7 @@ Generated from the canonical tracker on 2026-06-21. This checklist is a companio
 
 Environment note: a bounded System Events probe on 2026-06-21 returned `UI elements enabled = false`, so this environment cannot inspect the menu bar, permission prompts, device pickers, or recording UI.
 
-Manual validation required: 34 stories.
+Manual validation required: 35 stories.
 No further manual validation required: 2 stories.
 
 ## Recommended Order
@@ -641,6 +641,25 @@ Manual steps:
 4. record an area and verify the border appears around it
 5. record a full display and verify no border is drawn
 6. stop each recording and verify the border disappears.
+
+Current status: Partial automated evidence passed; manual UI validation still pending. A bounded System Events probe on 2026-06-21 returned UI elements enabled = false, so this environment cannot inspect the app UI; validate manually using the listed steps.
+
+Result: [ ] Pass  [ ] Fail  [ ] Blocked
+
+Notes:
+
+## US-037 - Recording start and stop cues
+
+User story: As a user starting a recording from a global shortcut, I want an audible confirmation so I know the take is rolling without looking at the menu bar.
+
+Expected behavior: A short system sound plays when a recording starts and another when it stops, including when it stops on its own. The start cue is played before capture begins so a live microphone does not record it, and system audio capture already excludes Reel's own process. The cues are controlled by a General setting that defaults to on.
+
+Manual steps:
+
+1. Start and stop a recording and verify a distinct sound plays for each
+2. record with microphone audio and speakers audible, then play back and verify neither cue is in the recording
+3. record system audio and verify the same
+4. turn the setting off in General and verify no cues play.
 
 Current status: Partial automated evidence passed; manual UI validation still pending. A bounded System Events probe on 2026-06-21 returned UI elements enabled = false, so this environment cannot inspect the app UI; validate manually using the listed steps.
 

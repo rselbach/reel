@@ -568,6 +568,13 @@ final class AppSettingsTests: XCTestCase {
     }
 
     @MainActor
+    func testRecordingCuesUseDistinctAvailableSystemSounds() {
+        XCTAssertNotEqual(RecordingCue.start.soundName, RecordingCue.stop.soundName)
+        XCTAssertNotNil(NSSound(named: RecordingCue.start.soundName))
+        XCTAssertNotNil(NSSound(named: RecordingCue.stop.soundName))
+    }
+
+    @MainActor
     func testWindowTrackingPollsFastEnoughToLookAttached() {
         // Anything slower than a few frames reads as the overlay lagging
         // behind the window rather than being attached to it.

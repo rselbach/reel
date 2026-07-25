@@ -75,6 +75,30 @@ enum QuickRecordSummary {
     }
 }
 
+/// Short system sounds confirming a take started or ended, for when the menu
+/// bar is not being watched.
+enum RecordingCue {
+    case start
+    case stop
+
+    var soundName: String {
+        switch self {
+        case .start: return "Tink"
+        case .stop: return "Bottle"
+        }
+    }
+
+    @MainActor
+    func play() {
+        guard AppSettings.shared.playSoundCues else { return }
+        guard let sound = NSSound(named: soundName) else {
+            logger.warning("Missing system sound for recording cue: \(soundName, privacy: .public)")
+            return
+        }
+        sound.play()
+    }
+}
+
 enum WindowTracking {
     /// The recorded window's frame is polled rather than observed. At 1 Hz the
     /// camera overlay and capture border visibly lagged behind a window being
@@ -294,6 +318,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     private func handleUnexpectedStop() {
+        RecordingCue.stop.play()
         rebuildMenu()
         if let message = screenRecorder.errorMessage {
             showErrorAlert(title: AppMenuText.recordingStopped, message: message)
@@ -554,6 +579,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private func stopRecordingFlow() async {
         hideCameraOverlay()
         guard await screenRecorder.stopRecording() else { return }
+        RecordingCue.stop.play()
         rebuildMenu()
         if AppSettings.shared.showPreviewAfterRecording,
            let url = screenRecorder.lastRecordedURL {
@@ -751,11 +777,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         activeCountdown = nil
         isCountdownActive = false
 
-        if !shouldStart {
+        guard shouldStart else {
             hideCameraOverlay()
             screenRecorder.discardCameraPreview()
+            return false
         }
-        return shouldStart
+
+        // Deliberately before capture begins: a cue played once the microphone
+        // is live would land in the recording.
+        RecordingCue.start.play()
+        return true
     }
 
     /// Brings up everything that accompanies a running recording.
