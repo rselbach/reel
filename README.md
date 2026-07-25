@@ -4,12 +4,42 @@ A lightweight macOS screen recording app built with Swift and ScreenCaptureKit.
 
 ## Features
 
-- Record full screen or individual windows
-- Optional camera overlay (circle or rectangle, configurable position and size)
-- Optional text overlay for watermark-style labels
-- Microphone audio capture
+**Capture**
+
+- Record a full display, an individual window, or a selected area
+- Area selection is adjustable before recording, with a live size readout and
+  an optional 16:9 lock
+- Pause and resume mid-take; the pause is removed from the finished file
+- Discard a ruined take without saving it
+- The recording target is remembered across launches, and the menu says what
+  the shortcut will capture
+
+**Output**
+
+- H.264 or HEVC, at native resolution or capped to 1440p, 1080p, or 720p
 - Configurable frame rate and video quality
-- Global hotkey support
+- Window recordings can be framed on a background with rounded corners and a
+  shadow, in solid or gradient presets
+- Click highlighting, so viewers can see clicks and drags
+- Optional camera overlay (circle or rectangle, positioned and sized during the
+  countdown, before the take starts)
+- Optional text overlay for watermark-style labels
+
+**Audio**
+
+- Microphone or system audio capture
+- Live input meter, so a muted microphone is obvious before recording
+
+**After the take**
+
+- Preview with lossless trimming, a smaller 720p copy, or a looping GIF
+- Drag or copy the file straight out of the preview
+- Record Again to go straight into the next take
+
+**Elsewhere**
+
+- Global shortcuts for start/stop, pause, and discard
+- Refuses to start, and stops cleanly, rather than losing a take to a full disk
 - Menu bar app with minimal UI
 - Automatic updates via Sparkle
 
