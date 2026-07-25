@@ -6,7 +6,7 @@ Generated from the canonical tracker on 2026-06-21. This checklist is a companio
 
 Environment note: a bounded System Events probe on 2026-06-21 returned `UI elements enabled = false`, so this environment cannot inspect the menu bar, permission prompts, device pickers, or recording UI.
 
-Manual validation required: 39 stories.
+Manual validation required: 40 stories.
 No further manual validation required: 2 stories.
 
 ## Recommended Order
@@ -742,6 +742,27 @@ Manual steps:
 4. record a window, move the window mid-recording, and verify clicks are still marked in the right place
 5. record an area and verify clicks outside it are not marked
 6. disable the setting and verify no marks appear.
+
+Current status: Partial automated evidence passed; manual UI validation still pending. A bounded System Events probe on 2026-06-21 returned UI elements enabled = false, so this environment cannot inspect the app UI; validate manually using the listed steps.
+
+Result: [ ] Pass  [ ] Fail  [ ] Blocked
+
+Notes:
+
+## US-042 - Framed window recordings
+
+User story: As a user recording a window for a demo, I want it presented on a background with rounded corners and a shadow instead of as a bare rectangle of window pixels.
+
+Expected behavior: With framing enabled, a window recording is composited onto a larger canvas: the captured window is inset with padding proportional to its longer edge, its corners are rounded, and a blurred shadow is cast beneath it, over a solid background chosen from three presets. The canvas is forced to even dimensions and the asset writer is sized to it while the stream still captures at window size. Everything positioned over the capture — the camera bubble, click marks, the caption — is laid out against the inset content rect, so it lands in the same place framed or not. Display and area recordings are unaffected.
+
+Manual steps:
+
+1. Enable framing and record a window
+2. verify the output has even padding on all sides, rounded window corners, a shadow, and the chosen background
+3. switch backgrounds and verify each renders
+4. enable the camera overlay and verify the bubble sits over the window in the same relative position as on screen
+5. click during the recording and verify the click mark lands on the window, not offset into the padding
+6. record a display and an area and verify neither is framed.
 
 Current status: Partial automated evidence passed; manual UI validation still pending. A bounded System Events probe on 2026-06-21 returned UI elements enabled = false, so this environment cannot inspect the app UI; validate manually using the listed steps.
 

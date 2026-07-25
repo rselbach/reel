@@ -72,6 +72,44 @@ enum TextOverlayLayout {
     }
 }
 
+enum WindowFrameLayout {
+    /// Padding around the captured window, as a fraction of its longer edge.
+    static let paddingFraction: CGFloat = 0.05
+    /// Corner radius applied to the captured window, as a fraction of its
+    /// longer edge.
+    static let cornerRadiusFraction: CGFloat = 0.014
+    /// Shadow blur radius, as a fraction of the padding.
+    static let shadowBlurFraction: CGFloat = 0.35
+    static let minimumPadding: CGFloat = 16
+
+    static func padding(contentSize: CGSize) -> CGFloat {
+        let longerEdge = max(contentSize.width, contentSize.height)
+        return max(minimumPadding, (longerEdge * paddingFraction).rounded())
+    }
+
+    static func cornerRadius(contentSize: CGSize) -> CGFloat {
+        let longerEdge = max(contentSize.width, contentSize.height)
+        return (longerEdge * cornerRadiusFraction).rounded()
+    }
+
+    /// Canvas the padded window is drawn onto. Dimensions are forced even,
+    /// which every video encoder requires.
+    static func canvasSize(contentSize: CGSize) -> CGSize {
+        let padding = padding(contentSize: contentSize)
+        let width = Int((contentSize.width + padding * 2).rounded())
+        let height = Int((contentSize.height + padding * 2).rounded())
+        return CGSize(width: width - width % 2, height: height - height % 2)
+    }
+
+    static func contentOrigin(contentSize: CGSize) -> CGPoint {
+        let canvas = canvasSize(contentSize: contentSize)
+        return CGPoint(
+            x: ((canvas.width - contentSize.width) / 2).rounded(),
+            y: ((canvas.height - contentSize.height) / 2).rounded()
+        )
+    }
+}
+
 enum CursorHighlightLayout {
     /// Highlight diameter as a fraction of the frame height, so it reads the
     /// same whether the recording is 720p or native Retina.
@@ -119,10 +157,21 @@ final class FrameCompositor: @unchecked Sendable {
         let mirrored: Bool
     }
 
-    /// A pointer position to mark, in frame pixel coordinates.
+    /// A pointer position to mark, normalized over the content rect.
     struct ClickHighlight {
-        let point: CGPoint
-        let diameter: CGFloat
+        let normalized: CGPoint
+        let diameterFraction: CGFloat
+    }
+
+    /// Draws the captured window inset on a larger background, with rounded
+    /// corners and a drop shadow, the way demo recordings are usually
+    /// presented. Absent for display and area recordings.
+    struct WindowFrame {
+        let canvasSize: CGSize
+        let contentOrigin: CGPoint
+        let cornerRadius: CGFloat
+        let shadowBlur: CGFloat
+        let background: CIColor
     }
 
     private let ciContext: CIContext
@@ -141,6 +190,11 @@ final class FrameCompositor: @unchecked Sendable {
         cache.countLimit = 4
         return cache
     }()
+    private let backgroundCache: NSCache<NSString, CIImage> = {
+        let cache = NSCache<NSString, CIImage>()
+        cache.countLimit = 2
+        return cache
+    }()
 
     init(ciContext: CIContext) {
         self.ciContext = ciContext
@@ -152,6 +206,7 @@ final class FrameCompositor: @unchecked Sendable {
         circularMaskCache.removeAllObjects()
         textOverlayCache.removeAllObjects()
         clickHighlightCache.removeAllObjects()
+        backgroundCache.removeAllObjects()
     }
 
     /// Draws the camera bubble and text overlay over a captured screen frame.
@@ -162,25 +217,46 @@ final class FrameCompositor: @unchecked Sendable {
         camera: CameraOverlay?,
         text: TextOverlay?,
         click: ClickHighlight?,
+        windowFrame: WindowFrame?,
         bufferPool: CVPixelBufferPool?
     ) -> CVPixelBuffer? {
         let screenImage = CIImage(cvPixelBuffer: screenBuffer)
-        let screenWidth = CGFloat(CVPixelBufferGetWidth(screenBuffer))
-        let screenHeight = CGFloat(CVPixelBufferGetHeight(screenBuffer))
-        var composited = screenImage
+        let contentSize = CGSize(
+            width: CGFloat(CVPixelBufferGetWidth(screenBuffer)),
+            height: CGFloat(CVPixelBufferGetHeight(screenBuffer))
+        )
+
+        // Everything positioned over the capture — the camera bubble, click
+        // marks, the caption — is laid out against the content rect, so it
+        // lands in the same place whether or not the window is framed.
+        let contentRect: CGRect
+        let outputSize: CGSize
+        var composited: CIImage
         var didComposite = false
 
+        if let windowFrame {
+            guard let framed = makeFramedContent(screenImage, contentSize: contentSize, frame: windowFrame) else {
+                return nil
+            }
+            composited = framed
+            contentRect = CGRect(origin: windowFrame.contentOrigin, size: contentSize)
+            outputSize = windowFrame.canvasSize
+            didComposite = true
+        } else {
+            composited = screenImage
+            contentRect = CGRect(origin: .zero, size: contentSize)
+            outputSize = contentSize
+        }
+
         if let camera {
-            guard let cameraOverlay = makeCameraOverlay(
-                camera: camera,
-                screenWidth: screenWidth,
-                screenHeight: screenHeight
-            ) else { return nil }
+            guard let cameraOverlay = makeCameraOverlay(camera: camera, contentRect: contentRect) else {
+                return nil
+            }
             composited = cameraOverlay.composited(over: composited)
             didComposite = true
         }
 
-        if let click, let clickImage = makeClickHighlight(click) {
+        if let click, let clickImage = makeClickHighlight(click, contentRect: contentRect) {
             composited = clickImage.composited(over: composited)
             didComposite = true
         }
@@ -188,24 +264,99 @@ final class FrameCompositor: @unchecked Sendable {
         if let text,
            let textImage = makeTextOverlayImage(
                text: text.text,
-               screenWidth: screenWidth,
-               screenHeight: screenHeight,
+               screenWidth: contentRect.width,
+               screenHeight: contentRect.height,
                position: text.position
            ) {
-            composited = textImage.composited(over: composited)
+            composited = textImage
+                .transformed(by: CGAffineTransform(
+                    translationX: contentRect.minX,
+                    y: contentRect.minY
+                ))
+                .composited(over: composited)
             didComposite = true
         }
 
         guard didComposite else { return nil }
 
         guard let outputBuffer = makeOutputBuffer(
-            width: Int(screenWidth),
-            height: Int(screenHeight),
+            width: Int(outputSize.width),
+            height: Int(outputSize.height),
             bufferPool: bufferPool
         ) else { return nil }
 
         ciContext.render(composited, to: outputBuffer)
         return outputBuffer
+    }
+
+    /// Rounds the captured window's corners, drops a shadow beneath it, and
+    /// places it on the background canvas.
+    private func makeFramedContent(
+        _ screenImage: CIImage,
+        contentSize: CGSize,
+        frame: WindowFrame
+    ) -> CIImage? {
+        let canvasRect = CGRect(origin: .zero, size: frame.canvasSize)
+        let background = backgroundImage(color: frame.background, canvasRect: canvasRect)
+
+        guard let roundedMask = roundedRectangle(
+            size: contentSize,
+            cornerRadius: frame.cornerRadius,
+            color: .white
+        ) else { return nil }
+
+        let rounded = screenImage
+            .transformed(by: CGAffineTransform(
+                translationX: -screenImage.extent.origin.x,
+                y: -screenImage.extent.origin.y
+            ))
+            .applyingFilter("CIBlendWithMask", parameters: [
+                kCIInputBackgroundImageKey: CIImage.empty(),
+                kCIInputMaskImageKey: roundedMask
+            ])
+            .transformed(by: CGAffineTransform(
+                translationX: frame.contentOrigin.x,
+                y: frame.contentOrigin.y
+            ))
+
+        var canvas = background
+
+        if frame.shadowBlur > 0,
+           let shadowShape = roundedRectangle(
+               size: contentSize,
+               cornerRadius: frame.cornerRadius,
+               color: CIColor(red: 0, green: 0, blue: 0, alpha: 0.45)
+           ) {
+            // Offset downwards so the shadow reads as cast, not as a halo.
+            let shadow = shadowShape
+                .transformed(by: CGAffineTransform(
+                    translationX: frame.contentOrigin.x,
+                    y: frame.contentOrigin.y - frame.shadowBlur * 0.4
+                ))
+                .applyingFilter("CIGaussianBlur", parameters: [kCIInputRadiusKey: frame.shadowBlur])
+                .cropped(to: canvasRect)
+            canvas = shadow.composited(over: canvas)
+        }
+
+        return rounded.composited(over: canvas).cropped(to: canvasRect)
+    }
+
+    private func backgroundImage(color: CIColor, canvasRect: CGRect) -> CIImage {
+        let key = "bg-\(Int(canvasRect.width))x\(Int(canvasRect.height))-\(color.stringRepresentation)" as NSString
+        if let cached = backgroundCache.object(forKey: key) {
+            return cached
+        }
+        let image = CIImage(color: color).cropped(to: canvasRect)
+        backgroundCache.setObject(image, forKey: key)
+        return image
+    }
+
+    private func roundedRectangle(size: CGSize, cornerRadius: CGFloat, color: CIColor) -> CIImage? {
+        guard let filter = CIFilter(name: "CIRoundedRectangleGenerator") else { return nil }
+        filter.setValue(CIVector(cgRect: CGRect(origin: .zero, size: size)), forKey: "inputExtent")
+        filter.setValue(min(cornerRadius, min(size.width, size.height) / 2), forKey: "inputRadius")
+        filter.setValue(color, forKey: "inputColor")
+        return filter.outputImage?.cropped(to: CGRect(origin: .zero, size: size))
     }
 
     /// Builds the camera bubble exactly as the draggable preview window shows
@@ -214,15 +365,14 @@ final class FrameCompositor: @unchecked Sendable {
     /// padding, so what the user drags on screen is what lands in the file.
     private func makeCameraOverlay(
         camera: CameraOverlay,
-        screenWidth: CGFloat,
-        screenHeight: CGFloat
+        contentRect: CGRect
     ) -> CIImage? {
         var cameraImage = CIImage(cvPixelBuffer: camera.buffer)
         let cameraWidth = CGFloat(CVPixelBufferGetWidth(camera.buffer))
         let cameraHeight = CGFloat(CVPixelBufferGetHeight(camera.buffer))
         let overlaySize = CameraOverlayLayout.overlaySize(
             sizeFraction: camera.sizeFraction,
-            bounds: CGRect(x: 0, y: 0, width: screenWidth, height: screenHeight)
+            bounds: contentRect
         ).rounded()
         guard overlaySize > 0, cameraWidth > 0, cameraHeight > 0 else { return nil }
 
@@ -274,7 +424,7 @@ final class FrameCompositor: @unchecked Sendable {
             x: camera.x,
             y: camera.y,
             overlaySize: overlaySize,
-            bounds: CGRect(x: 0, y: 0, width: screenWidth, height: screenHeight)
+            bounds: contentRect
         )
 
         return cameraImage.transformed(by: CGAffineTransform(translationX: origin.x, y: origin.y))
@@ -283,10 +433,14 @@ final class FrameCompositor: @unchecked Sendable {
     /// A soft filled disc marking where the pointer was pressed. Drawn only
     /// while a button is down, so it reads as a click rather than as a second
     /// cursor following the pointer around.
-    private func makeClickHighlight(_ highlight: ClickHighlight) -> CIImage? {
-        let diameter = highlight.diameter
+    private func makeClickHighlight(_ highlight: ClickHighlight, contentRect: CGRect) -> CIImage? {
+        let diameter = CursorHighlightLayout.diameter(frameHeight: contentRect.height)
         guard diameter > 0 else { return nil }
 
+        let point = CGPoint(
+            x: contentRect.minX + highlight.normalized.x * contentRect.width,
+            y: contentRect.minY + highlight.normalized.y * contentRect.height
+        )
         let radius = diameter / 2
         let cacheKey = "click-\(Int(diameter))" as NSString
         let disc: CIImage
@@ -309,8 +463,8 @@ final class FrameCompositor: @unchecked Sendable {
         }
 
         return disc.transformed(by: CGAffineTransform(
-            translationX: (highlight.point.x - radius).rounded(),
-            y: (highlight.point.y - radius).rounded()
+            translationX: (point.x - radius).rounded(),
+            y: (point.y - radius).rounded()
         ))
     }
 

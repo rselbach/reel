@@ -1,5 +1,6 @@
 import AVFoundation
 import CoreGraphics
+import CoreImage
 import Foundation
 import os.log
 import ServiceManagement
@@ -145,6 +146,8 @@ class AppSettings: ObservableObject {
         static let hasShownWelcome = "hasShownWelcome"
         static let showCursor = "showCursor"
         static let highlightClicks = "highlightClicks"
+        static let frameWindowRecordings = "frameWindowRecordings"
+        static let windowBackground = "windowBackground"
         static let frameRate = "frameRate"
         static let videoQuality = "videoQuality"
         static let videoResolution = "videoResolution"
@@ -228,6 +231,16 @@ class AppSettings: ObservableObject {
     /// drags that the cursor alone does not convey.
     @Published var highlightClicks: Bool {
         didSet { persist(highlightClicks, key: DefaultsKey.highlightClicks) }
+    }
+
+    /// Draws window recordings inset on a background with rounded corners and
+    /// a shadow, rather than as a bare rectangle of window pixels.
+    @Published var frameWindowRecordings: Bool {
+        didSet { persist(frameWindowRecordings, key: DefaultsKey.frameWindowRecordings) }
+    }
+
+    @Published var windowBackground: WindowBackground {
+        didSet { persist(windowBackground.rawValue, key: DefaultsKey.windowBackground) }
     }
 
     @Published var frameRate: Int {
@@ -594,6 +607,28 @@ class AppSettings: ObservableObject {
             ?? AVCaptureDevice.default(for: .video)
     }
 
+    enum WindowBackground: String, StoredAppSetting {
+        case charcoal
+        case slate
+        case linen
+
+        var displayName: String {
+            switch self {
+            case .charcoal: return "Charcoal"
+            case .slate: return "Slate"
+            case .linen: return "Linen"
+            }
+        }
+
+        var ciColor: CIColor {
+            switch self {
+            case .charcoal: return CIColor(red: 0.11, green: 0.11, blue: 0.13)
+            case .slate: return CIColor(red: 0.20, green: 0.25, blue: 0.33)
+            case .linen: return CIColor(red: 0.93, green: 0.91, blue: 0.87)
+            }
+        }
+    }
+
     enum VideoCodec: String, StoredAppSetting {
         case h264
         case hevc
@@ -795,6 +830,8 @@ class AppSettings: ObservableObject {
         self.hasShownWelcome = defaults.bool(forKey: DefaultsKey.hasShownWelcome)
         self.showCursor = defaults.object(forKey: DefaultsKey.showCursor) as? Bool ?? true
         self.highlightClicks = defaults.object(forKey: DefaultsKey.highlightClicks) as? Bool ?? true
+        self.frameWindowRecordings = defaults.bool(forKey: DefaultsKey.frameWindowRecordings)
+        self.windowBackground = WindowBackground.fromStored(defaults.string(forKey: DefaultsKey.windowBackground)) ?? .charcoal
         self.frameRate = Self.sanitizedFrameRate(defaults.object(forKey: DefaultsKey.frameRate) as? Int ?? Self.defaultFrameRate)
         self.videoQuality = VideoQuality.fromStored(defaults.string(forKey: DefaultsKey.videoQuality)) ?? .medium
         self.videoResolution = VideoResolution.fromStored(defaults.string(forKey: DefaultsKey.videoResolution)) ?? .native

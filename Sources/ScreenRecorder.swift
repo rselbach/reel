@@ -49,6 +49,8 @@ struct RecordingOptions {
     var resolutionMaxHeight: CGFloat?
     var videoCodec: AppSettings.VideoCodec
     var highlightClicks: Bool
+    var frameWindowRecordings: Bool
+    var windowBackground: CIColor
     var outputDirectory: URL
     var askWhereToSave: Bool
     var openFinderAfterRecording: Bool
@@ -81,6 +83,8 @@ struct RecordingOptions {
         resolutionMaxHeight = settings.videoResolution.maxHeight
         videoCodec = settings.videoCodec
         highlightClicks = settings.highlightClicks
+        frameWindowRecordings = settings.frameWindowRecordings
+        windowBackground = settings.windowBackground.ciColor
         outputDirectory = settings.outputDirectory
         askWhereToSave = settings.askWhereToSave
         openFinderAfterRecording = settings.openFinderAfterRecording
@@ -116,6 +120,8 @@ private struct FrameWriter {
     let mirrorCamera: Bool
     let textOverlay: TextOverlay?
     let highlightClicks: Bool
+    /// Non-nil when the captured window is drawn inset on a background.
+    let windowFrame: FrameCompositor.WindowFrame?
     var hasWriteFailure = false
     /// Total time spent paused so far. Subtracted from every sample's
     /// timestamp so the output has no gap where the pauses were.
@@ -560,6 +566,17 @@ class ScreenRecorder: NSObject, ObservableObject {
             return
         }
 
+        // Framing draws the window inset on a larger canvas, so the file is
+        // bigger than the capture. The stream still captures at capture size.
+        let windowFrame = Self.windowFrame(
+            for: recordingMode,
+            captureWidth: captureWidth,
+            captureHeight: captureHeight,
+            options: options
+        )
+        let outputWidth = windowFrame.map { Int($0.canvasSize.width) } ?? captureWidth
+        let outputHeight = windowFrame.map { Int($0.canvasSize.height) } ?? captureHeight
+
         do {
             let config = SCStreamConfiguration()
             config.width = captureWidth
@@ -608,7 +625,12 @@ class ScreenRecorder: NSObject, ObservableObject {
                 try setupCameraCapture(options: options)
             }
 
-            try setupAssetWriter(width: config.width, height: config.height, options: options)
+            try setupAssetWriter(
+                width: outputWidth,
+                height: outputHeight,
+                options: options,
+                windowFrame: windowFrame
+            )
 
             stream = SCStream(filter: filter, configuration: config, delegate: self)
 
@@ -807,7 +829,34 @@ class ScreenRecorder: NSObject, ObservableObject {
         }
     }
 
-    private func setupAssetWriter(width: Int, height: Int, options: RecordingOptions) throws {
+    /// Describes the background canvas for a framed window recording, or nil
+    /// when the capture is written as-is.
+    static func windowFrame(
+        for mode: RecordingMode,
+        captureWidth: Int,
+        captureHeight: Int,
+        options: RecordingOptions
+    ) -> FrameCompositor.WindowFrame? {
+        guard mode == .window, options.frameWindowRecordings else { return nil }
+
+        let contentSize = CGSize(width: captureWidth, height: captureHeight)
+        let padding = WindowFrameLayout.padding(contentSize: contentSize)
+
+        return FrameCompositor.WindowFrame(
+            canvasSize: WindowFrameLayout.canvasSize(contentSize: contentSize),
+            contentOrigin: WindowFrameLayout.contentOrigin(contentSize: contentSize),
+            cornerRadius: WindowFrameLayout.cornerRadius(contentSize: contentSize),
+            shadowBlur: (padding * WindowFrameLayout.shadowBlurFraction).rounded(),
+            background: options.windowBackground
+        )
+    }
+
+    private func setupAssetWriter(
+        width: Int,
+        height: Int,
+        options: RecordingOptions,
+        windowFrame: FrameCompositor.WindowFrame?
+    ) throws {
         let outputURL = try makeOutputURL(options: options)
         let assetWriter = try AVAssetWriter(outputURL: outputURL, fileType: .mp4)
         let videoInput = makeVideoInput(
@@ -833,7 +882,8 @@ class ScreenRecorder: NSObject, ObservableObject {
             audioInput: audioInput,
             assetWriter: assetWriter,
             bufferPool: bufferPool,
-            options: options
+            options: options,
+            windowFrame: windowFrame
         )
 
         self.outputURL = outputURL
@@ -975,7 +1025,8 @@ class ScreenRecorder: NSObject, ObservableObject {
         audioInput: AVAssetWriterInput?,
         assetWriter: AVAssetWriter,
         bufferPool: CVPixelBufferPool?,
-        options: RecordingOptions
+        options: RecordingOptions,
+        windowFrame: FrameCompositor.WindowFrame?
     ) {
         let initialPos = options.cameraPosition.normalizedCoordinates
         withFrameLock {
@@ -993,7 +1044,8 @@ class ScreenRecorder: NSObject, ObservableObject {
                 cameraShape: options.cameraShape,
                 mirrorCamera: options.mirrorCamera,
                 textOverlay: options.textOverlay,
-                highlightClicks: options.highlightClicks
+                highlightClicks: options.highlightClicks,
+                windowFrame: windowFrame
             )
         }
     }
@@ -1665,13 +1717,8 @@ extension ScreenRecorder: SCStreamOutput {
 
             let click = pressedCursorPoint.map { normalized in
                 FrameCompositor.ClickHighlight(
-                    point: CGPoint(
-                        x: normalized.x * CGFloat(CVPixelBufferGetWidth(screenBuffer)),
-                        y: normalized.y * CGFloat(CVPixelBufferGetHeight(screenBuffer))
-                    ),
-                    diameter: CursorHighlightLayout.diameter(
-                        frameHeight: CGFloat(CVPixelBufferGetHeight(screenBuffer))
-                    )
+                    normalized: normalized,
+                    diameterFraction: CursorHighlightLayout.diameterFraction
                 )
             }
 
@@ -1685,12 +1732,13 @@ extension ScreenRecorder: SCStreamOutput {
                     mirrored: snapshot.mirrorCamera
                 )
             }
-            if cameraOverlay != nil || snapshot.textOverlay != nil || click != nil {
+            if cameraOverlay != nil || snapshot.textOverlay != nil || click != nil || snapshot.windowFrame != nil {
                 if let composited = compositor.composite(
                     screenBuffer: screenBuffer,
                     camera: cameraOverlay,
                     text: snapshot.textOverlay,
                     click: click,
+                    windowFrame: snapshot.windowFrame,
                     bufferPool: snapshot.bufferPool
                 ) {
                     frameToWrite = composited

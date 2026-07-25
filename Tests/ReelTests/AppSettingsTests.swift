@@ -251,6 +251,52 @@ final class AppSettingsTests: XCTestCase {
     }
 
     @MainActor
+    func testFramedWindowCanvasIsPaddedCenteredAndEvenSized() {
+        let content = CGSize(width: 1440, height: 900)
+        let padding = WindowFrameLayout.padding(contentSize: content)
+        let canvas = WindowFrameLayout.canvasSize(contentSize: content)
+        let origin = WindowFrameLayout.contentOrigin(contentSize: content)
+
+        XCTAssertEqual(canvas.width.truncatingRemainder(dividingBy: 2), 0, "encoders reject odd dimensions")
+        XCTAssertEqual(canvas.height.truncatingRemainder(dividingBy: 2), 0)
+        XCTAssertGreaterThan(canvas.width, content.width)
+        XCTAssertGreaterThan(canvas.height, content.height)
+        XCTAssertEqual(canvas.width, (content.width + padding * 2).rounded())
+
+        // Centered: the same margin on both sides.
+        XCTAssertEqual(origin.x, (canvas.width - content.width) / 2, accuracy: 1)
+        XCTAssertEqual(origin.y, (canvas.height - content.height) / 2, accuracy: 1)
+    }
+
+    @MainActor
+    func testFramedWindowCanvasHandlesOddContentSizes() {
+        let canvas = WindowFrameLayout.canvasSize(contentSize: CGSize(width: 1001, height: 667))
+        XCTAssertEqual(canvas.width.truncatingRemainder(dividingBy: 2), 0)
+        XCTAssertEqual(canvas.height.truncatingRemainder(dividingBy: 2), 0)
+    }
+
+    @MainActor
+    func testFramingAppliesOnlyToWindowRecordings() {
+        var options = RecordingOptions(settings: AppSettings.shared)
+        options.frameWindowRecordings = true
+
+        XCTAssertNotNil(
+            ScreenRecorder.windowFrame(for: .window, captureWidth: 1280, captureHeight: 720, options: options)
+        )
+        XCTAssertNil(
+            ScreenRecorder.windowFrame(for: .display, captureWidth: 1280, captureHeight: 720, options: options)
+        )
+        XCTAssertNil(
+            ScreenRecorder.windowFrame(for: .region, captureWidth: 1280, captureHeight: 720, options: options)
+        )
+
+        options.frameWindowRecordings = false
+        XCTAssertNil(
+            ScreenRecorder.windowFrame(for: .window, captureWidth: 1280, captureHeight: 720, options: options)
+        )
+    }
+
+    @MainActor
     func testCursorMapsFromGlobalScreenSpaceIntoTheFrame() {
         // A capture area on a second display, offset from the global origin.
         let bounds = CGRect(x: 1440, y: 200, width: 1280, height: 720)

@@ -20,6 +20,8 @@ enum SettingsText {
     static let playSoundCues = "Play a sound when recording starts and stops"
     static let showCursor = "Show cursor in recording"
     static let highlightClicks = "Highlight clicks"
+    static let frameWindowRecordings = "Frame window recordings on a background"
+    static let windowBackgroundLabel = "Background:"
     static let frameRate = "Frame rate:"
     static let videoQuality = "Video quality:"
     static let videoResolution = "Resolution:"
@@ -203,6 +205,15 @@ struct RecordingTab: View {
         Form {
             Toggle(SettingsText.showCursor, isOn: $settings.showCursor)
             Toggle(SettingsText.highlightClicks, isOn: $settings.highlightClicks)
+            Toggle(SettingsText.frameWindowRecordings, isOn: $settings.frameWindowRecordings)
+
+            if settings.frameWindowRecordings {
+                Picker(SettingsText.windowBackgroundLabel, selection: $settings.windowBackground) {
+                    ForEach(AppSettings.WindowBackground.allCases, id: \.self) { background in
+                        Text(background.displayName).tag(background)
+                    }
+                }
+            }
 
             Picker(SettingsText.frameRate, selection: $settings.frameRate) {
                 ForEach(AppSettings.supportedFrameRates, id: \.self) { frameRate in
