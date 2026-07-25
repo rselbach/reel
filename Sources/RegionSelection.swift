@@ -30,6 +30,28 @@ enum RegionMath {
     }
 }
 
+enum RegionSelectionLabel {
+    static let margin: CGFloat = 8
+    static let padding = CGSize(width: 10, height: 5)
+
+    static func text(for rect: CGRect) -> String {
+        "\(Int(rect.width.rounded())) × \(Int(rect.height.rounded()))"
+    }
+
+    /// Puts the readout just above the selection, flipping to just below when
+    /// the selection is close enough to the top that it would be clipped.
+    static func origin(for rect: CGRect, labelSize: CGSize, in bounds: CGRect) -> CGPoint {
+        let above = rect.maxY + margin
+        let fitsAbove = above + labelSize.height <= bounds.maxY
+        let y = fitsAbove ? above : max(bounds.minY, rect.maxY - labelSize.height - margin)
+        let x = min(
+            max(bounds.minX, rect.midX - labelSize.width / 2),
+            max(bounds.minX, bounds.maxX - labelSize.width)
+        )
+        return CGPoint(x: x, y: y)
+    }
+}
+
 /// A user-selected screen region to record.
 struct RecordingRegion: Equatable {
     let displayID: CGDirectDisplayID
@@ -233,6 +255,36 @@ final class RegionSelectionView: NSView {
         let path = NSBezierPath(rect: rect.insetBy(dx: -1, dy: -1))
         path.lineWidth = 2
         path.stroke()
+
+        drawSizeReadout(for: rect)
+    }
+
+    /// Demo recordings are usually uploaded somewhere with a target size, so
+    /// the exact dimensions matter while the area is being drawn.
+    private func drawSizeReadout(for rect: CGRect) {
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .medium),
+            .foregroundColor: NSColor.white
+        ]
+        let text = RegionSelectionLabel.text(for: rect) as NSString
+        let textSize = text.size(withAttributes: attributes)
+        let labelSize = CGSize(
+            width: textSize.width + RegionSelectionLabel.padding.width * 2,
+            height: textSize.height + RegionSelectionLabel.padding.height * 2
+        )
+        let origin = RegionSelectionLabel.origin(for: rect, labelSize: labelSize, in: bounds)
+        let labelRect = CGRect(origin: origin, size: labelSize)
+
+        NSColor.black.withAlphaComponent(0.75).setFill()
+        NSBezierPath(roundedRect: labelRect, xRadius: 4, yRadius: 4).fill()
+
+        text.draw(
+            at: CGPoint(
+                x: labelRect.minX + RegionSelectionLabel.padding.width,
+                y: labelRect.minY + RegionSelectionLabel.padding.height
+            ),
+            withAttributes: attributes
+        )
     }
 }
 

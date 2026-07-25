@@ -251,6 +251,49 @@ final class AppSettingsTests: XCTestCase {
     }
 
     @MainActor
+    func testSelectionReadoutReportsPixelDimensions() {
+        XCTAssertEqual(
+            RegionSelectionLabel.text(for: CGRect(x: 10, y: 20, width: 1920, height: 1080)),
+            "1920 × 1080"
+        )
+        XCTAssertEqual(
+            RegionSelectionLabel.text(for: CGRect(x: 0, y: 0, width: 640.4, height: 360.6)),
+            "640 × 361"
+        )
+    }
+
+    @MainActor
+    func testSelectionReadoutStaysOnScreen() {
+        let screen = CGRect(x: 0, y: 0, width: 1920, height: 1080)
+        let labelSize = CGSize(width: 90, height: 24)
+
+        // Normal case: centered just above the selection.
+        let above = RegionSelectionLabel.origin(
+            for: CGRect(x: 800, y: 400, width: 300, height: 200),
+            labelSize: labelSize,
+            in: screen
+        )
+        XCTAssertEqual(above.y, 600 + RegionSelectionLabel.margin)
+        XCTAssertEqual(above.x, 950 - 45)
+
+        // Selection against the top edge: flipped inside rather than clipped.
+        let flipped = RegionSelectionLabel.origin(
+            for: CGRect(x: 800, y: 900, width: 300, height: 180),
+            labelSize: labelSize,
+            in: screen
+        )
+        XCTAssertLessThanOrEqual(flipped.y + labelSize.height, screen.maxY)
+
+        // Selection against the left edge: kept inside horizontally.
+        let clampedLeft = RegionSelectionLabel.origin(
+            for: CGRect(x: 0, y: 400, width: 40, height: 40),
+            labelSize: labelSize,
+            in: screen
+        )
+        XCTAssertGreaterThanOrEqual(clampedLeft.x, screen.minX)
+    }
+
+    @MainActor
     func testGIFSamplingHitsTargetFrameRateForShortClips() {
         let sampling = GIFExport.frames(start: 2, end: 7)
         XCTAssertEqual(sampling.times.count, 60, "5 seconds at 12 fps")
