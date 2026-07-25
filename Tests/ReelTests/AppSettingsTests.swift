@@ -227,6 +227,14 @@ final class AppSettingsTests: XCTestCase {
     }
 
     @MainActor
+    func testHotkeyActionIdentifiersAreDistinctAndNonZero() {
+        let ids = HotkeyAction.allCases.map(\.rawValue)
+        XCTAssertEqual(Set(ids).count, ids.count, "Carbon needs a distinct id per hot key")
+        XCTAssertFalse(ids.contains(0), "0 is reserved as an unset EventHotKeyID")
+        XCTAssertEqual(HotkeyAction.toggleRecording.rawValue, 1)
+    }
+
+    @MainActor
     func testHotkeyDisplayStringForDefaultShortcut() {
         XCTAssertEqual(AppSettings.HotkeyCombo.default.displayString, "⇧⌘R")
     }

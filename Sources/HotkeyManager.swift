@@ -17,34 +17,56 @@ enum CarbonModifierTranslation {
     }
 }
 
+/// A globally registered shortcut. Carbon identifies hot keys by a numeric id
+/// within a signature, so the raw values double as those ids and must stay
+/// stable and distinct.
+enum HotkeyAction: UInt32, CaseIterable {
+    case toggleRecording = 1
+}
+
 /// Carbon event handler; must be a C function, so it trampolines back into
 /// the manager. Hot key events arrive on the main thread via the event
 /// dispatcher target, matching the manager's MainActor isolation.
 private let hotkeyEventHandler: EventHandlerUPP = { _, event, userData in
     guard let event, let userData else { return OSStatus(eventNotHandledErr) }
+
+    var hotKeyID = EventHotKeyID()
+    let status = GetEventParameter(
+        event,
+        EventParamName(kEventParamDirectObject),
+        EventParamType(typeEventHotKeyID),
+        nil,
+        MemoryLayout<EventHotKeyID>.size,
+        nil,
+        &hotKeyID
+    )
+    guard status == noErr else { return OSStatus(eventNotHandledErr) }
+
     let kind = GetEventKind(event)
     let manager = Unmanaged<HotkeyManager>.fromOpaque(userData).takeUnretainedValue()
     return MainActor.assumeIsolated {
-        manager.handleHotKeyEvent(kind: kind)
+        manager.handleHotKeyEvent(kind: kind, hotKeyID: hotKeyID)
     }
 }
 
-/// Registers the global recording shortcut with Carbon's RegisterEventHotKey,
-/// which — unlike a CGEvent tap — needs no Accessibility permission and
-/// consumes the key combination system-wide by design.
+/// Registers global shortcuts with Carbon's RegisterEventHotKey, which —
+/// unlike a CGEvent tap — needs no Accessibility permission and consumes the
+/// key combination system-wide by design.
 @MainActor
 class HotkeyManager {
     static let shared = HotkeyManager()
 
-    var onToggleRecording: (() -> Void)?
+    /// Fired once per press of a registered shortcut.
+    var onTrigger: ((HotkeyAction) -> Void)?
     var onHotkeyDisabled: ((String) -> Void)?
 
-    private var hotKeyRef: EventHotKeyRef?
+    private var hotKeyRefs: [HotkeyAction: EventHotKeyRef] = [:]
+    private var combos: [HotkeyAction: AppSettings.HotkeyCombo] = [:]
     private var eventHandler: EventHandlerRef?
     private var isStarted = false
-    // Carbon delivers repeated kEventHotKeyPressed events while the key is
-    // held (auto-repeat); only the first press before a release should toggle.
-    private var isHotkeyHeld = false
+    // Carbon delivers repeated kEventHotKeyPressed events while a key is held
+    // (auto-repeat); only the first press before a release should fire.
+    private var heldActions: Set<HotkeyAction> = []
 
     private static let signature: OSType = 0x5245_454C  // "REEL"
 
@@ -54,11 +76,17 @@ class HotkeyManager {
         guard !isStarted else { return }
         isStarted = true
         installEventHandlerIfNeeded()
-        registerCurrentHotkey()
+
+        combos[.toggleRecording] = AppSettings.shared.recordingHotkey
+        for action in HotkeyAction.allCases {
+            register(action)
+        }
     }
 
     func stop() {
-        unregisterHotkey()
+        for action in HotkeyAction.allCases {
+            unregister(action)
+        }
         if let eventHandler {
             RemoveEventHandler(eventHandler)
             self.eventHandler = nil
@@ -66,21 +94,27 @@ class HotkeyManager {
         isStarted = false
     }
 
-    /// Re-registers the shortcut after the user records a new combination.
-    func updateHotkey(_ combo: AppSettings.HotkeyCombo) {
+    /// Re-registers one shortcut after the user records a new combination.
+    func updateHotkey(_ combo: AppSettings.HotkeyCombo, for action: HotkeyAction) {
+        combos[action] = combo
         guard isStarted else { return }
-        registerCurrentHotkey()
+        register(action)
     }
 
-    func handleHotKeyEvent(kind: UInt32) -> OSStatus {
+    func handleHotKeyEvent(kind: UInt32, hotKeyID: EventHotKeyID) -> OSStatus {
+        guard hotKeyID.signature == Self.signature,
+              let action = HotkeyAction(rawValue: hotKeyID.id) else {
+            return OSStatus(eventNotHandledErr)
+        }
+
         switch kind {
         case UInt32(kEventHotKeyPressed):
-            guard !isHotkeyHeld else { return noErr }
-            isHotkeyHeld = true
-            onToggleRecording?()
+            guard !heldActions.contains(action) else { return noErr }
+            heldActions.insert(action)
+            onTrigger?(action)
             return noErr
         case UInt32(kEventHotKeyReleased):
-            isHotkeyHeld = false
+            heldActions.remove(action)
             return noErr
         default:
             return OSStatus(eventNotHandledErr)
@@ -105,20 +139,20 @@ class HotkeyManager {
         )
         if status != noErr {
             logger.error("InstallEventHandler failed (status: \(status))")
-            onHotkeyDisabled?("Failed to enable the global hotkey (error \(status)).")
+            onHotkeyDisabled?("Failed to enable global hotkeys (error \(status)).")
         }
     }
 
-    private func registerCurrentHotkey() {
-        unregisterHotkey()
+    private func register(_ action: HotkeyAction) {
+        unregister(action)
 
-        let combo = AppSettings.shared.recordingHotkey
+        guard let combo = combos[action] else { return }
         guard combo.isUsableGlobalShortcut else {
-            logger.warning("Refusing to register unusable global shortcut")
+            logger.warning("Refusing to register unusable global shortcut for \(action.rawValue)")
             return
         }
 
-        let hotKeyID = EventHotKeyID(signature: Self.signature, id: 1)
+        let hotKeyID = EventHotKeyID(signature: Self.signature, id: action.rawValue)
         var ref: EventHotKeyRef?
         let status = RegisterEventHotKey(
             UInt32(combo.keyCode),
@@ -130,21 +164,20 @@ class HotkeyManager {
         )
 
         guard status == noErr, let ref else {
-            logger.error("RegisterEventHotKey failed (status: \(status))")
+            logger.error("RegisterEventHotKey failed for \(action.rawValue) (status: \(status))")
             onHotkeyDisabled?(
                 "Failed to register the global shortcut \(combo.displayString). It may already be in use by another app."
             )
             return
         }
 
-        hotKeyRef = ref
-        isHotkeyHeld = false
+        hotKeyRefs[action] = ref
+        heldActions.remove(action)
     }
 
-    private func unregisterHotkey() {
-        if let hotKeyRef {
-            UnregisterEventHotKey(hotKeyRef)
-            self.hotKeyRef = nil
-        }
+    private func unregister(_ action: HotkeyAction) {
+        guard let ref = hotKeyRefs.removeValue(forKey: action) else { return }
+        UnregisterEventHotKey(ref)
+        heldActions.remove(action)
     }
 }

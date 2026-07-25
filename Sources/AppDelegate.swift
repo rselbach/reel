@@ -198,8 +198,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     private func setupHotkey() {
-        HotkeyManager.shared.onToggleRecording = { [weak self] in
-            self?.handleToggleRecording()
+        HotkeyManager.shared.onTrigger = { [weak self] action in
+            switch action {
+            case .toggleRecording:
+                self?.handleToggleRecording()
+            }
         }
 
         HotkeyManager.shared.onHotkeyDisabled = { [weak self] message in
