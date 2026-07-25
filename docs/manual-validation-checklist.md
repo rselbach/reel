@@ -6,7 +6,7 @@ Generated from the canonical tracker on 2026-06-21. This checklist is a companio
 
 Environment note: a bounded System Events probe on 2026-06-21 returned `UI elements enabled = false`, so this environment cannot inspect the menu bar, permission prompts, device pickers, or recording UI.
 
-Manual validation required: 40 stories.
+Manual validation required: 41 stories.
 No further manual validation required: 2 stories.
 
 ## Recommended Order
@@ -763,6 +763,27 @@ Manual steps:
 4. enable the camera overlay and verify the bubble sits over the window in the same relative position as on screen
 5. click during the recording and verify the mark lands on the window, not offset into the padding
 6. record a display and an area and verify neither is framed.
+
+Current status: Partial automated evidence passed; manual UI validation still pending. A bounded System Events probe on 2026-06-21 returned UI elements enabled = false, so this environment cannot inspect the app UI; validate manually using the listed steps.
+
+Result: [ ] Pass  [ ] Fail  [ ] Blocked
+
+Notes:
+
+## US-043 - Microphone input meter
+
+User story: As a user recording narration, I want to see that my microphone is live before I start so I do not lose a ten-minute take to a muted input.
+
+Expected behavior: With microphone audio selected, the Recording settings tab shows a live level meter fed by a metering-only capture session on the chosen device. Levels come from the capture connection's audio channel power reading, mapped from decibels onto 0 to 1 with a floor at -60 dB, and the bar turns green once the input is clearly audible. The session runs only while the tab is visible and the microphone source is selected, and restarts when the device changes. Missing devices, denied permission, and inputs that cannot be opened each surface their own message.
+
+Manual steps:
+
+1. Open Settings, Recording, enable Record audio with the Microphone source
+2. speak and verify the meter moves and turns green
+3. mute the input and verify it drops and stays orange
+4. switch to another input device and verify the meter follows it
+5. switch the source to System Audio and verify metering stops
+6. close Settings and verify the microphone is released.
 
 Current status: Partial automated evidence passed; manual UI validation still pending. A bounded System Events probe on 2026-06-21 returned UI elements enabled = false, so this environment cannot inspect the app UI; validate manually using the listed steps.
 

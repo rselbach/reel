@@ -251,6 +251,27 @@ final class AppSettingsTests: XCTestCase {
     }
 
     @MainActor
+    func testAudioLevelScaleMapsDecibelsOntoTheMeter() {
+        XCTAssertEqual(AudioLevelScale.normalized(decibels: 0), 1, accuracy: 0.0001)
+        XCTAssertEqual(AudioLevelScale.normalized(decibels: -30), 0.5, accuracy: 0.0001)
+        XCTAssertEqual(AudioLevelScale.normalized(decibels: AudioLevelScale.floorDecibels), 0, accuracy: 0.0001)
+
+        // Below the floor and out of range readings clamp rather than
+        // producing a negative or oversized bar.
+        XCTAssertEqual(AudioLevelScale.normalized(decibels: -120), 0, accuracy: 0.0001)
+        XCTAssertEqual(AudioLevelScale.normalized(decibels: 12), 1, accuracy: 0.0001)
+        XCTAssertEqual(AudioLevelScale.normalized(decibels: -.infinity), 0)
+        XCTAssertEqual(AudioLevelScale.normalized(decibels: .nan), 0)
+    }
+
+    @MainActor
+    func testAudioLevelAudibilityDistinguishesSilenceFromSpeech() {
+        // Room tone sits near the floor; speech is well above it.
+        XCTAssertFalse(AudioLevelScale.isAudible(level: AudioLevelScale.normalized(decibels: -58)))
+        XCTAssertTrue(AudioLevelScale.isAudible(level: AudioLevelScale.normalized(decibels: -20)))
+    }
+
+    @MainActor
     func testBackgroundPresetsCoverSolidAndGradientFills() {
         var solids = 0
         var gradients = 0

@@ -186,6 +186,7 @@ struct DevicePicker: View {
 
 struct RecordingTab: View {
     @ObservedObject var settings: AppSettings
+    @StateObject private var levelMonitor = AudioLevelMonitor()
 
     /// Presets write their fraction; a corner-drag size that matches no
     /// preset shows as a "Custom (n%)" entry instead of lying about which
@@ -199,6 +200,10 @@ struct RecordingTab: View {
                 }
             }
         )
+    }
+
+    private var shouldMeter: Bool {
+        settings.recordAudio && settings.audioSource == .microphone
     }
 
     var body: some View {
@@ -262,6 +267,20 @@ struct RecordingTab: View {
                         devices: settings.availableAudioDevices,
                         selection: $settings.audioDeviceID
                     )
+
+                    // A muted or misrouted input is otherwise only discovered
+                    // after a take is already ruined.
+                    HStack {
+                        Text(AudioLevelText.label)
+                        AudioLevelMeter(level: levelMonitor.level)
+                    }
+
+                    if let error = levelMonitor.errorMessage {
+                        Text(error)
+                            .font(.caption)
+                            .foregroundColor(.orange)
+                            .lineLimit(2)
+                    }
                 }
             }
 
@@ -316,6 +335,18 @@ struct RecordingTab: View {
                 }
             }
         }
+        .onAppear { refreshMetering() }
+        .onDisappear { levelMonitor.stop() }
+        .onChange(of: shouldMeter) { refreshMetering() }
+        .onChange(of: settings.audioDeviceID) { refreshMetering() }
+    }
+
+    private func refreshMetering() {
+        guard shouldMeter else {
+            levelMonitor.stop()
+            return
+        }
+        levelMonitor.start(device: settings.selectedAudioDevice)
     }
 }
 
