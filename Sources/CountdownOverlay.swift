@@ -20,6 +20,12 @@ enum CountdownLayout {
             height: hudSize
         )
     }
+
+    /// The HUD never takes key focus, so Esc cannot reach it. Clicking it and
+    /// pressing the recording shortcut again are the two ways out.
+    static func cancelHint(shortcut: String) -> String {
+        "Click or press \(shortcut) to cancel"
+    }
 }
 
 @MainActor
@@ -59,7 +65,7 @@ class CountdownOverlay {
 
         let window = CountdownWindow(
             contentRect: hudFrame,
-            styleMask: .borderless,
+            styleMask: [.borderless, .nonactivatingPanel],
             backing: .buffered,
             defer: false
         )
@@ -68,12 +74,15 @@ class CountdownOverlay {
         window.backgroundColor = .clear
         window.hasShadow = true
         window.isReleasedWhenClosed = false
+        // Reel is an accessory app and is rarely the active one; without this
+        // the panel would vanish the moment focus returns to the demo target.
+        window.hidesOnDeactivate = false
         window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        window.onCancel = { [weak self] in
+
+        let content = CountdownContentView(frame: NSRect(origin: .zero, size: hudFrame.size))
+        content.onClick = { [weak self] in
             self?.cancelled = true
         }
-
-        let content = NSView(frame: NSRect(origin: .zero, size: hudFrame.size))
         content.wantsLayer = true
         content.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.7).cgColor
         content.layer?.cornerRadius = 28
@@ -87,7 +96,11 @@ class CountdownOverlay {
         label.autoresizingMask = [.width]
         content.addSubview(label)
 
-        let hint = NSTextField(labelWithString: "Click or Esc to cancel")
+        let hint = NSTextField(
+            labelWithString: CountdownLayout.cancelHint(
+                shortcut: AppSettings.shared.recordingHotkey.displayString
+            )
+        )
         hint.font = NSFont.systemFont(ofSize: 11)
         hint.textColor = NSColor.white.withAlphaComponent(0.7)
         hint.alignment = .center
@@ -95,8 +108,11 @@ class CountdownOverlay {
         hint.autoresizingMask = [.width]
         content.addSubview(hint)
 
-        window.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        // Deliberately not makeKeyAndOrderFront/activate: the whole point of
+        // the countdown is to give the user time to leave the app they are
+        // about to demo in front. Taking key or activating Reel here means
+        // recording starts with the wrong window focused.
+        window.orderFrontRegardless()
 
         self.window = window
         self.label = label
@@ -137,21 +153,21 @@ class CountdownOverlay {
     }
 }
 
-class CountdownWindow: NSWindow {
-    var onCancel: (() -> Void)?
+/// Non-activating panel: it floats above everything without making Reel the
+/// active app, so the window the user is about to record keeps its focus.
+class CountdownWindow: NSPanel {
+    override var canBecomeKey: Bool { false }
+    override var canBecomeMain: Bool { false }
+}
 
-    override var canBecomeKey: Bool { true }
-    override var canBecomeMain: Bool { true }
+/// Accepts the very first click even though the panel never becomes key, so a
+/// single click on the HUD cancels instead of merely focusing it.
+final class CountdownContentView: NSView {
+    var onClick: (() -> Void)?
 
-    override func keyDown(with event: NSEvent) {
-        if event.keyCode == KeyCode.escape {
-            onCancel?()
-        } else {
-            super.keyDown(with: event)
-        }
-    }
+    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     override func mouseDown(with event: NSEvent) {
-        onCancel?()
+        onClick?()
     }
 }

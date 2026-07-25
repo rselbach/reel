@@ -375,6 +375,15 @@ final class AppSettingsTests: XCTestCase {
     }
 
     @MainActor
+    func testCountdownCancelHintNamesTheRecordingShortcut() {
+        XCTAssertEqual(
+            CountdownLayout.cancelHint(shortcut: "⇧⌘R"),
+            "Click or press ⇧⌘R to cancel"
+        )
+        XCTAssertFalse(CountdownLayout.cancelHint(shortcut: "⇧⌘R").contains("Esc"))
+    }
+
+    @MainActor
     func testCountdownDurationSanitizationAllowsOnlySupportedValues() {
         XCTAssertEqual(AppSettings.sanitizedCountdownDuration(0), 0)
         XCTAssertEqual(AppSettings.sanitizedCountdownDuration(3), 3)

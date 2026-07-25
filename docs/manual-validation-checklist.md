@@ -150,12 +150,16 @@ Notes:
 
 User story: As a user, I want a countdown before recording starts so I can prepare the screen.
 
-Expected behavior: CountdownOverlay shows a red bar over the target frame with 3, 2, 1, supports Escape cancellation, then starts recording only if not cancelled. Both hotkey and recording-dialog start paths prevent overlapping countdowns.
+Expected behavior: CountdownOverlay shows a non-activating HUD panel centered over the target frame counting 3, 2, 1, then starts recording only if not cancelled. The panel never becomes key and never activates Reel, so the window being demoed keeps focus; cancellation is by clicking the HUD or pressing the recording shortcut again. Both hotkey and recording-dialog start paths prevent overlapping countdowns.
 
 Manual steps:
 
-1. Start recording
-2. verify countdown appears over target frame, counts 3-2-1, Escape cancels, and repeated start/hotkey attempts do not create overlapping countdowns.
+1. Focus a text field in another app
+2. press the recording hotkey
+3. verify the countdown HUD appears without Reel activating and the other app keeps keyboard focus
+4. verify clicking the HUD cancels
+5. verify pressing the hotkey again during the countdown cancels
+6. verify repeated start attempts do not create overlapping countdowns.
 
 Current status: Partial automated evidence passed; manual UI validation still pending. A bounded System Events probe on 2026-06-21 returned UI elements enabled = false, so this environment cannot inspect the app UI; validate manually using the listed steps.
 
