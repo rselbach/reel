@@ -2,6 +2,7 @@ import AppKit
 import os.log
 import Sparkle
 import SwiftUI
+import UniformTypeIdentifiers
 
 private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "com.rselbach.reel", category: "AppDelegate")
 
@@ -126,6 +127,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
         screenRecorder.onRecordingStateChanged = { [weak self] isRecording in
             self?.updateIcon(isRecording: isRecording)
+        }
+        screenRecorder.requestSaveDestination = { [weak self] request in
+            await self?.promptForSaveDestination(request)
         }
 
         if Bundle.main.bundleIdentifier != nil {
@@ -516,6 +520,29 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
            let url = screenRecorder.lastRecordedURL {
             showPreview(for: url)
         }
+    }
+
+    /// Runs the "Ask each time" save panel on the recorder's behalf.
+    private func promptForSaveDestination(_ request: SaveDestinationRequest) async -> URL? {
+        // As a menu bar (accessory) app there is usually no key window when a
+        // recording stops; without activation the save panel can open behind
+        // the frontmost app.
+        NSApp.activate(ignoringOtherApps: true)
+
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.mpeg4Movie]
+        panel.nameFieldStringValue = request.suggestedName
+        panel.directoryURL = request.directory
+
+        let response: NSApplication.ModalResponse
+        if let keyWindow = NSApp.keyWindow {
+            response = await panel.beginSheetModal(for: keyWindow)
+        } else {
+            response = panel.runModal()
+        }
+
+        guard response == .OK else { return nil }
+        return panel.url
     }
 
     private func showPreview(for url: URL) {

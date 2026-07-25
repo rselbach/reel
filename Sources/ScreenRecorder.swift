@@ -3,7 +3,6 @@ import CoreImage
 import os.log
 import ScreenCaptureKit
 import SwiftUI
-import UniformTypeIdentifiers
 
 private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "com.rselbach.reel", category: "ScreenRecorder")
 
@@ -20,76 +19,6 @@ private enum RecordingConstants {
     static let maxH264Size = CGSize(width: 4096, height: 2304)
 }
 
-enum RecordingFileNaming {
-    static func sanitizedTimestamp(from date: Date) -> String {
-        ISO8601DateFormatter().string(from: date)
-            .replacingOccurrences(of: ":", with: "-")
-    }
-
-    static func fileName(date: Date, randomID: String) -> String {
-        "Reel-\(sanitizedTimestamp(from: date))-\(randomID).mp4"
-    }
-}
-
-enum RecordingDiskSpace {
-    /// A recording is refused unless the destination volume can hold at least
-    /// this many minutes at the configured bitrate. This is a floor, not a
-    /// guarantee: long takes are protected separately, while running.
-    static let minimumMinutes: Double = 2
-
-    /// Video bitrate converted to bytes, plus headroom for the AAC audio
-    /// track and container overhead.
-    static func bytesPerSecond(bitrate: Int) -> Int64 {
-        Int64(Double(bitrate) / 8 * 1.1)
-    }
-
-    static func requiredBytes(bitrate: Int) -> Int64 {
-        bytesPerSecond(bitrate: bitrate) * Int64(minimumMinutes * 60)
-    }
-
-    static func recordableSeconds(availableBytes: Int64, bitrate: Int) -> Double {
-        let perSecond = bytesPerSecond(bitrate: bitrate)
-        guard perSecond > 0 else { return .infinity }
-        return Double(max(0, availableBytes)) / Double(perSecond)
-    }
-
-    /// How often a running recording re-checks the destination volume.
-    static let checkInterval: TimeInterval = 10
-
-    /// A running recording ends once free space drops below this many seconds
-    /// of capture — early enough that the writer can still be finalized into a
-    /// playable file.
-    static let stopSeconds: Double = 30
-
-    static func isCriticallyLow(availableBytes: Int64, bitrate: Int) -> Bool {
-        recordableSeconds(availableBytes: availableBytes, bitrate: bitrate) < stopSeconds
-    }
-
-    static func lowSpaceReason(availableBytes: Int64) -> String {
-        let free = ByteCountFormatter.string(
-            fromByteCount: max(0, availableBytes),
-            countStyle: .file
-        )
-        return "the disk is almost full (\(free) left)"
-    }
-
-    /// Non-nil when the destination volume cannot hold a usable recording.
-    static func shortfallMessage(availableBytes: Int64, bitrate: Int, directory: URL) -> String? {
-        guard availableBytes < requiredBytes(bitrate: bitrate) else { return nil }
-
-        let free = ByteCountFormatter.string(
-            fromByteCount: max(0, availableBytes),
-            countStyle: .file
-        )
-        let seconds = Int(recordableSeconds(availableBytes: availableBytes, bitrate: bitrate))
-        return """
-            Not enough free space in \(directory.path()) to record. \
-            \(free) available, about \(seconds)s at the current video quality. \
-            Free up space or lower the video quality in Settings.
-            """
-    }
-}
-
 enum RecordingFinalizationLogic {
     static func shouldRevealInFinder(openFinderAfterRecording: Bool, showPreviewAfterRecording: Bool) -> Bool {
         openFinderAfterRecording && !showPreviewAfterRecording
@@ -100,18 +29,10 @@ enum RecordingFinalizationLogic {
     }
 }
 
-private enum RecordingError: LocalizedError {
-    case outputDirectoryCreationFailed(URL, Error)
-    case outputDirectoryNotWritable(URL)
-
-    var errorDescription: String? {
-        switch self {
-        case .outputDirectoryCreationFailed(let url, let error):
-            "Unable to prepare output directory \(url.path()): \(error.localizedDescription)"
-        case .outputDirectoryNotWritable(let url):
-            "Output directory is not writable: \(url.path())"
-        }
-    }
+/// What the app needs to put in front of the user to pick a destination.
+struct SaveDestinationRequest {
+    let suggestedName: String
+    let directory: URL
 }
 
 struct TextOverlay {
@@ -233,6 +154,12 @@ class ScreenRecorder: NSObject, ObservableObject {
     /// artwork, the elapsed timer, and the on-screen overlays this way rather
     /// than reaching into the app delegate itself.
     var onRecordingStateChanged: ((Bool) -> Void)?
+
+    /// Asks where to put a finished recording when the user chose "Ask each
+    /// time". Returning nil discards it. The recorder owns the temporary
+    /// file's lifetime but never presents UI itself; leaving this unset keeps
+    /// the recording at its default location rather than losing it.
+    var requestSaveDestination: (@MainActor (SaveDestinationRequest) async -> URL?)?
 
     var countdownTargetFrame: CGRect? {
         switch recordingMode {
@@ -729,7 +656,7 @@ class ScreenRecorder: NSObject, ObservableObject {
 
     private func diskSpaceShortfall(options: RecordingOptions) -> String? {
         let directory = options.outputDirectory
-        guard let available = Self.availableCapacity(at: directory) else { return nil }
+        guard let available = RecordingFileStore.availableCapacity(at: directory) else { return nil }
         return RecordingDiskSpace.shortfallMessage(
             availableBytes: available,
             bitrate: options.videoBitrate,
@@ -737,23 +664,10 @@ class ScreenRecorder: NSObject, ObservableObject {
         )
     }
 
-    /// Free space the system is willing to give up for important user data.
-    /// Returns nil when the volume cannot be queried (a missing directory,
-    /// most often), in which case the recording is allowed to proceed.
-    private static func availableCapacity(at url: URL) -> Int64? {
-        do {
-            let values = try url.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
-            return values.volumeAvailableCapacityForImportantUsage
-        } catch {
-            logger.warning("Could not read free space for \(url.path()): \(error.localizedDescription)")
-            return nil
-        }
-    }
-
     private func makeOutputURL(options: RecordingOptions) throws -> URL {
         let outputDir = options.outputDirectory
         do {
-            return try makeOutputURL(in: outputDir)
+            return try RecordingFileStore.makeOutputURL(in: outputDir)
         } catch {
             logger.warning("Configured output directory unavailable (\(outputDir.path()), using fallback: \(error.localizedDescription))")
             let fallback = AppSettings.defaultOutputDirectory()
@@ -761,54 +675,8 @@ class ScreenRecorder: NSObject, ObservableObject {
             // Keep the in-flight snapshot pointing at the directory actually
             // being written to, so the save panel and space checks agree.
             activeOptions?.outputDirectory = fallback
-            return try makeOutputURL(in: fallback)
+            return try RecordingFileStore.makeOutputURL(in: fallback)
         }
-    }
-
-    private func makeOutputURL(in outputDir: URL) throws -> URL {
-        do {
-            try FileManager.default.createDirectory(at: outputDir, withIntermediateDirectories: true)
-        } catch {
-            throw RecordingError.outputDirectoryCreationFailed(outputDir, error)
-        }
-
-        let values: URLResourceValues
-        do {
-            values = try outputDir.resourceValues(forKeys: [.isDirectoryKey, .isWritableKey])
-        } catch {
-            throw RecordingError.outputDirectoryCreationFailed(outputDir, error)
-        }
-
-        guard values.isDirectory == true else {
-            throw RecordingError.outputDirectoryCreationFailed(
-                outputDir,
-                NSError(domain: "ScreenRecorder", code: 6, userInfo: [NSLocalizedDescriptionKey: "Output path is not a directory"])
-            )
-        }
-
-        if values.isWritable != true {
-            throw RecordingError.outputDirectoryNotWritable(outputDir)
-        }
-
-        let date = Date()
-        for _ in 0..<64 {
-            let randomID = String(UUID().uuidString.prefix(8))
-            let candidate = outputDir.appendingPathComponent(
-                RecordingFileNaming.fileName(date: date, randomID: randomID)
-            )
-            if !FileManager.default.fileExists(atPath: candidate.path()) {
-                return candidate
-            }
-        }
-
-        throw RecordingError.outputDirectoryCreationFailed(
-            outputDir,
-            NSError(
-                domain: "ScreenRecorder",
-                code: 7,
-                userInfo: [NSLocalizedDescriptionKey: "Unable to generate unique recording filename"]
-            )
-        )
     }
 
     private func persistSettingOutputDirectory(_ url: URL) {
@@ -1053,23 +921,12 @@ class ScreenRecorder: NSObject, ObservableObject {
         var finalURL = tempURL
         var replacementWarning: FileReplacementWarning?
 
-        if options.askWhereToSave {
-            // As a menu bar (accessory) app there is usually no key window
-            // when a recording stops; without activation the save panel can
-            // open behind the frontmost app.
-            NSApp.activate(ignoringOtherApps: true)
-            let panel = NSSavePanel()
-            panel.allowedContentTypes = [.mpeg4Movie]
-            panel.nameFieldStringValue = tempURL.lastPathComponent
-            panel.directoryURL = options.outputDirectory
-
-            let response: NSApplication.ModalResponse
-            if let keyWindow = NSApp.keyWindow {
-                response = await panel.beginSheetModal(for: keyWindow)
-            } else {
-                response = panel.runModal()
-            }
-            guard response == .OK, let url = panel.url else {
+        if options.askWhereToSave, let requestSaveDestination {
+            let request = SaveDestinationRequest(
+                suggestedName: tempURL.lastPathComponent,
+                directory: options.outputDirectory
+            )
+            guard let url = await requestSaveDestination(request) else {
                 logger.info("Save cancelled; discarding temporary recording")
                 discardTempRecording(tempURL)
                 lastRecordedURL = nil
@@ -1121,9 +978,7 @@ class ScreenRecorder: NSObject, ObservableObject {
 
     private func discardTempRecording(_ tempURL: URL) {
         do {
-            if FileManager.default.fileExists(atPath: tempURL.path()) {
-                try FileManager.default.removeItem(at: tempURL)
-            }
+            try RecordingFileStore.discard(tempURL)
         } catch {
             logger.error("Failed to remove temporary recording at \(tempURL.path(), privacy: .public): \(error.localizedDescription, privacy: .public)")
             if errorMessage == nil {
@@ -1234,7 +1089,7 @@ class ScreenRecorder: NSObject, ObservableObject {
 
         let options = activeOptions ?? RecordingOptions(settings: settings)
         let directory = outputURL?.deletingLastPathComponent() ?? options.outputDirectory
-        guard let available = Self.availableCapacity(at: directory),
+        guard let available = RecordingFileStore.availableCapacity(at: directory),
               RecordingDiskSpace.isCriticallyLow(
                   availableBytes: available,
                   bitrate: options.videoBitrate
@@ -1367,7 +1222,6 @@ class ScreenRecorder: NSObject, ObservableObject {
 
         return dest
     }
-
 
     private nonisolated func handleAppendFailure(_ writer: inout FrameWriter, context: String) {
         writer.hasWriteFailure = true
