@@ -459,8 +459,23 @@ struct ThumbnailCard: View {
     let isLoading: Bool
     let action: () -> Void
     var onDoubleClick: (() -> Void)? = nil
-    
+
+    /// A real button rather than stacked tap gestures: those made every
+    /// single click wait to see whether a second one followed, and left the
+    /// card unreachable from the keyboard.
     var body: some View {
+        Button(action: action) {
+            card
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(title)
+        .accessibilityAddTraits(isSelected ? [.isSelected] : [])
+        .simultaneousGesture(
+            TapGesture(count: 2).onEnded { onDoubleClick?() }
+        )
+    }
+
+    private var card: some View {
         VStack(spacing: 6) {
             ZStack {
                 RoundedRectangle(cornerRadius: 6)
@@ -501,11 +516,5 @@ struct ThumbnailCard: View {
             .foregroundColor(isSelected ? .accentColor : .primary)
         }
         .contentShape(Rectangle())
-        .onTapGesture(count: 2) {
-            onDoubleClick?()
-        }
-        .onTapGesture(count: 1) {
-            action()
-        }
     }
 }
