@@ -251,6 +251,26 @@ final class AppSettingsTests: XCTestCase {
     }
 
     @MainActor
+    func testBackgroundPresetsCoverSolidAndGradientFills() {
+        var solids = 0
+        var gradients = 0
+        var keys = Set<String>()
+
+        for background in AppSettings.WindowBackground.allCases {
+            switch background.fill {
+            case .solid: solids += 1
+            case .linearGradient: gradients += 1
+            }
+            keys.insert(background.fill.cacheKey)
+        }
+
+        XCTAssertGreaterThan(solids, 0)
+        XCTAssertGreaterThan(gradients, 0)
+        // Distinct cache keys, or one background would render as another.
+        XCTAssertEqual(keys.count, AppSettings.WindowBackground.allCases.count)
+    }
+
+    @MainActor
     func testFramedWindowCanvasIsPaddedCenteredAndEvenSized() {
         let content = CGSize(width: 1440, height: 900)
         let padding = WindowFrameLayout.padding(contentSize: content)

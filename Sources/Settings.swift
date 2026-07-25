@@ -611,20 +611,37 @@ class AppSettings: ObservableObject {
         case charcoal
         case slate
         case linen
+        case dusk
+        case mist
 
         var displayName: String {
             switch self {
             case .charcoal: return "Charcoal"
             case .slate: return "Slate"
             case .linen: return "Linen"
+            case .dusk: return "Dusk (gradient)"
+            case .mist: return "Mist (gradient)"
             }
         }
 
-        var ciColor: CIColor {
+        var fill: FrameCompositor.BackgroundFill {
             switch self {
-            case .charcoal: return CIColor(red: 0.11, green: 0.11, blue: 0.13)
-            case .slate: return CIColor(red: 0.20, green: 0.25, blue: 0.33)
-            case .linen: return CIColor(red: 0.93, green: 0.91, blue: 0.87)
+            case .charcoal:
+                return .solid(CIColor(red: 0.11, green: 0.11, blue: 0.13))
+            case .slate:
+                return .solid(CIColor(red: 0.20, green: 0.25, blue: 0.33))
+            case .linen:
+                return .solid(CIColor(red: 0.93, green: 0.91, blue: 0.87))
+            case .dusk:
+                return .linearGradient(
+                    from: CIColor(red: 0.13, green: 0.11, blue: 0.28),
+                    to: CIColor(red: 0.45, green: 0.24, blue: 0.44)
+                )
+            case .mist:
+                return .linearGradient(
+                    from: CIColor(red: 0.85, green: 0.89, blue: 0.93),
+                    to: CIColor(red: 0.68, green: 0.75, blue: 0.84)
+                )
             }
         }
     }

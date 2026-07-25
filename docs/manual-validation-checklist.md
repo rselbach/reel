@@ -753,15 +753,15 @@ Notes:
 
 User story: As a user recording a window for a demo, I want it presented on a background with rounded corners and a shadow instead of as a bare rectangle of window pixels.
 
-Expected behavior: With framing enabled, a window recording is composited onto a larger canvas: the captured window is inset with padding proportional to its longer edge, its corners are rounded, and a blurred shadow is cast beneath it, over a solid background chosen from three presets. The canvas is forced to even dimensions and the asset writer is sized to it while the stream still captures at window size. Everything positioned over the capture — the camera bubble, click marks, the caption — is laid out against the inset content rect, so it lands in the same place framed or not. Display and area recordings are unaffected.
+Expected behavior: With framing enabled, a window recording is composited onto a larger canvas: the captured window is inset with padding proportional to its longer edge, its corners are rounded, and a blurred shadow is cast beneath it. The background is one of five presets — three solid colours and two corner-to-corner linear gradients — rendered once per canvas size and cached. The canvas is forced to even dimensions and the asset writer is sized to it while the stream still captures at window size. Everything positioned over the capture is laid out against the inset content rect, so it lands in the same place framed or not. Display and area recordings are unaffected.
 
 Manual steps:
 
 1. Enable framing and record a window
 2. verify the output has even padding on all sides, rounded window corners, a shadow, and the chosen background
-3. switch backgrounds and verify each renders
+3. step through all five backgrounds and verify the three solids and two gradients each render, with gradients running corner to corner
 4. enable the camera overlay and verify the bubble sits over the window in the same relative position as on screen
-5. click during the recording and verify the click mark lands on the window, not offset into the padding
+5. click during the recording and verify the mark lands on the window, not offset into the padding
 6. record a display and an area and verify neither is framed.
 
 Current status: Partial automated evidence passed; manual UI validation still pending. A bounded System Events probe on 2026-06-21 returned UI elements enabled = false, so this environment cannot inspect the app UI; validate manually using the listed steps.

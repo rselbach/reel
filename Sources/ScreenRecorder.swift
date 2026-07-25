@@ -50,7 +50,7 @@ struct RecordingOptions {
     var videoCodec: AppSettings.VideoCodec
     var highlightClicks: Bool
     var frameWindowRecordings: Bool
-    var windowBackground: CIColor
+    var windowBackground: FrameCompositor.BackgroundFill
     var outputDirectory: URL
     var askWhereToSave: Bool
     var openFinderAfterRecording: Bool
@@ -84,7 +84,7 @@ struct RecordingOptions {
         videoCodec = settings.videoCodec
         highlightClicks = settings.highlightClicks
         frameWindowRecordings = settings.frameWindowRecordings
-        windowBackground = settings.windowBackground.ciColor
+        windowBackground = settings.windowBackground.fill
         outputDirectory = settings.outputDirectory
         askWhereToSave = settings.askWhereToSave
         openFinderAfterRecording = settings.openFinderAfterRecording

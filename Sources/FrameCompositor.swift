@@ -171,7 +171,24 @@ final class FrameCompositor: @unchecked Sendable {
         let contentOrigin: CGPoint
         let cornerRadius: CGFloat
         let shadowBlur: CGFloat
-        let background: CIColor
+        let background: BackgroundFill
+    }
+
+    /// How the canvas behind a framed window is painted.
+    enum BackgroundFill {
+        case solid(CIColor)
+        /// Interpolated corner to corner, bottom-left to top-right.
+        case linearGradient(from: CIColor, to: CIColor)
+
+        /// Stable identity for caching the rendered canvas.
+        var cacheKey: String {
+            switch self {
+            case .solid(let color):
+                return "solid-\(color.stringRepresentation)"
+            case .linearGradient(let from, let to):
+                return "gradient-\(from.stringRepresentation)-\(to.stringRepresentation)"
+            }
+        }
     }
 
     private let ciContext: CIContext
@@ -297,7 +314,9 @@ final class FrameCompositor: @unchecked Sendable {
         frame: WindowFrame
     ) -> CIImage? {
         let canvasRect = CGRect(origin: .zero, size: frame.canvasSize)
-        let background = backgroundImage(color: frame.background, canvasRect: canvasRect)
+        guard let background = backgroundImage(fill: frame.background, canvasRect: canvasRect) else {
+            return nil
+        }
 
         guard let roundedMask = roundedRectangle(
             size: contentSize,
@@ -341,12 +360,26 @@ final class FrameCompositor: @unchecked Sendable {
         return rounded.composited(over: canvas).cropped(to: canvasRect)
     }
 
-    private func backgroundImage(color: CIColor, canvasRect: CGRect) -> CIImage {
-        let key = "bg-\(Int(canvasRect.width))x\(Int(canvasRect.height))-\(color.stringRepresentation)" as NSString
+    private func backgroundImage(fill: BackgroundFill, canvasRect: CGRect) -> CIImage? {
+        let key = "bg-\(Int(canvasRect.width))x\(Int(canvasRect.height))-\(fill.cacheKey)" as NSString
         if let cached = backgroundCache.object(forKey: key) {
             return cached
         }
-        let image = CIImage(color: color).cropped(to: canvasRect)
+
+        let image: CIImage
+        switch fill {
+        case .solid(let color):
+            image = CIImage(color: color).cropped(to: canvasRect)
+        case .linearGradient(let from, let to):
+            guard let gradient = CIFilter(name: "CILinearGradient") else { return nil }
+            gradient.setValue(CIVector(x: canvasRect.minX, y: canvasRect.minY), forKey: "inputPoint0")
+            gradient.setValue(CIVector(x: canvasRect.maxX, y: canvasRect.maxY), forKey: "inputPoint1")
+            gradient.setValue(from, forKey: "inputColor0")
+            gradient.setValue(to, forKey: "inputColor1")
+            guard let rendered = gradient.outputImage?.cropped(to: canvasRect) else { return nil }
+            image = rendered
+        }
+
         backgroundCache.setObject(image, forKey: key)
         return image
     }
