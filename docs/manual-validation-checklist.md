@@ -411,13 +411,14 @@ Notes:
 
 User story: As a user, I want a global shortcut to start or stop recording.
 
-Expected behavior: If Accessibility permission exists, HotkeyManager starts a CG event tap for the configured combo. Matching keydown consumes the event and toggles recording. Missing Accessibility permission adds an Enable Keyboard Shortcuts menu item. Stored hotkeys that are not suitable for global capture fall back to the default shortcut.
+Expected behavior: A Carbon-registered global shortcut toggles recording from anywhere without Accessibility permission. Starting this way skips the picker, so the status item menu and tooltip name the target the shortcut will capture — a display, a window, or an area with its pixel size — and say nothing when no target is selected and the shortcut would open the picker instead. The remembered selection is re-validated before each shortcut start, falling back to the picker when it no longer exists.
 
 Manual steps:
 
-1. Grant Accessibility
-2. verify global hotkey starts/stops recording and consumes the event
-3. revoke permission and verify Enable Keyboard Shortcuts menu item/flow.
+1. Record a window, then open the status item menu and verify it names that window under Start Recording
+2. hover the status item and verify the tooltip names the same target
+3. switch to an area recording and verify both show the area and its size
+4. clear the selection by closing the recorded window and verify the summary disappears and the shortcut opens the picker.
 
 Current status: Partial automated evidence passed; manual UI validation still pending. A bounded System Events probe on 2026-06-21 returned UI elements enabled = false, so this environment cannot inspect the app UI; validate manually using the listed steps.
 

@@ -568,6 +568,52 @@ final class AppSettingsTests: XCTestCase {
     }
 
     @MainActor
+    func testQuickRecordSummaryNamesEachTargetKind() {
+        XCTAssertEqual(
+            QuickRecordSummary.text(
+                mode: .display,
+                displayLabel: "Display 2",
+                windowLabel: nil,
+                regionSize: nil
+            ),
+            "Shortcut records: Display 2"
+        )
+        XCTAssertEqual(
+            QuickRecordSummary.text(
+                mode: .window,
+                displayLabel: nil,
+                windowLabel: "Spanish 101",
+                regionSize: nil
+            ),
+            "Shortcut records: Spanish 101"
+        )
+        XCTAssertEqual(
+            QuickRecordSummary.text(
+                mode: .region,
+                displayLabel: nil,
+                windowLabel: nil,
+                regionSize: CGSize(width: 1280, height: 720)
+            ),
+            "Shortcut records: Area (1280 × 720)"
+        )
+    }
+
+    @MainActor
+    func testQuickRecordSummaryIsAbsentWithoutATarget() {
+        // Nothing selected means the shortcut opens the picker, so promising
+        // a target would be a lie.
+        XCTAssertNil(
+            QuickRecordSummary.text(mode: .display, displayLabel: nil, windowLabel: nil, regionSize: nil)
+        )
+        XCTAssertNil(
+            QuickRecordSummary.text(mode: .window, displayLabel: "Display 1", windowLabel: nil, regionSize: nil)
+        )
+        XCTAssertNil(
+            QuickRecordSummary.text(mode: .region, displayLabel: nil, windowLabel: nil, regionSize: nil)
+        )
+    }
+
+    @MainActor
     func testLastAreaLabelNamesTheRememberedSize() {
         XCTAssertEqual(
             RecordingDialogLogic.lastAreaLabel(size: CGSize(width: 1280, height: 720)),

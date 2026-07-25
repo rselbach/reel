@@ -49,6 +49,32 @@ enum StatusItemClickLogic {
     }
 }
 
+enum QuickRecordSummary {
+    static let prefix = "Shortcut records: "
+
+    /// One line naming what the recording shortcut would capture right now.
+    /// Returns nil when nothing is selected yet, in which case the shortcut
+    /// opens the picker instead and there is nothing to promise.
+    static func text(
+        mode: RecordingMode,
+        displayLabel: String?,
+        windowLabel: String?,
+        regionSize: CGSize?
+    ) -> String? {
+        switch mode {
+        case .display:
+            return displayLabel.map { prefix + $0 }
+        case .window:
+            return windowLabel.map { prefix + $0 }
+        case .region:
+            guard let regionSize else { return nil }
+            let width = Int(regionSize.width.rounded())
+            let height = Int(regionSize.height.rounded())
+            return "\(prefix)Area (\(width) × \(height))"
+        }
+    }
+}
+
 enum RecordingElapsedFormat {
     static func string(seconds: Int) -> String {
         let clamped = max(0, seconds)
@@ -341,6 +367,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private func addRecordingItems(to menu: NSMenu) {
         guard screenRecorder.isRecording else {
             menu.addItem(NSMenuItem(title: AppMenuText.startRecording, action: #selector(showRecordingDialog), keyEquivalent: "r"))
+            // The shortcut starts recording without showing the picker, so say
+            // what it is pointed at rather than leaving the user to guess.
+            if let summary = quickRecordSummary {
+                let summaryItem = NSMenuItem(title: summary, action: nil, keyEquivalent: "")
+                summaryItem.isEnabled = false
+                menu.addItem(summaryItem)
+            }
             return
         }
         let recordingItem = NSMenuItem(title: AppMenuText.recordingInProgress, action: nil, keyEquivalent: "")
@@ -628,6 +661,31 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
     }
     
+    private var quickRecordSummary: String? {
+        QuickRecordSummary.text(
+            mode: screenRecorder.recordingMode,
+            displayLabel: selectedDisplayLabel,
+            windowLabel: screenRecorder.selectedWindow.map { window in
+                RecordingDialogLogic.windowTitle(
+                    appName: window.owningApplication?.applicationName,
+                    windowTitle: window.title
+                )
+            },
+            regionSize: screenRecorder.selectedRegion?.rect.size
+        )
+    }
+
+    private var selectedDisplayLabel: String? {
+        guard let displayID = screenRecorder.selectedDisplayID,
+              let index = screenRecorder.availableDisplays.firstIndex(where: { $0.displayID == displayID }) else {
+            return nil
+        }
+        return RecordingDialogLogic.displayTitle(
+            index: index,
+            displayCount: screenRecorder.availableDisplays.count
+        )
+    }
+
     /// The recorder's current target expressed as a picker selection, so
     /// reopening the picker starts on whatever was recorded last instead of
     /// forcing a fresh choice every time.
@@ -809,7 +867,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             button.imagePosition = .imageLeft
             button.toolTip = isRecording
                 ? "Reel — click to stop recording"
-                : "Reel"
+                : quickRecordSummary.map { "Reel — \($0)" } ?? "Reel"
         }
 
         if isRecording {
