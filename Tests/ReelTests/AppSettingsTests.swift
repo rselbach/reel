@@ -568,6 +568,14 @@ final class AppSettingsTests: XCTestCase {
     }
 
     @MainActor
+    func testWindowTrackingPollsFastEnoughToLookAttached() {
+        // Anything slower than a few frames reads as the overlay lagging
+        // behind the window rather than being attached to it.
+        XCTAssertLessThanOrEqual(WindowTracking.interval, 1.0 / 10)
+        XCTAssertGreaterThan(WindowTracking.interval, 0)
+    }
+
+    @MainActor
     func testQuickRecordSummaryNamesEachTargetKind() {
         XCTAssertEqual(
             QuickRecordSummary.text(

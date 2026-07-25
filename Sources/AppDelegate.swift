@@ -75,6 +75,14 @@ enum QuickRecordSummary {
     }
 }
 
+enum WindowTracking {
+    /// The recorded window's frame is polled rather than observed. At 1 Hz the
+    /// camera overlay and capture border visibly lagged behind a window being
+    /// dragged; CGWindowListCopyWindowInfo for a single window is cheap enough
+    /// to run at something closer to UI rates.
+    static let interval: TimeInterval = 1.0 / 15
+}
+
 enum RecordingElapsedFormat {
     static func string(seconds: Int) -> String {
         let clamped = max(0, seconds)
@@ -793,7 +801,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             return
         }
 
-        let timer = Timer(timeInterval: 1.0, repeats: true) { [weak self] _ in
+        let timer = Timer(timeInterval: WindowTracking.interval, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 self?.syncOverlayToRecordedWindow(windowID: windowID)
             }
