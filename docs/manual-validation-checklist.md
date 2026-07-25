@@ -6,7 +6,7 @@ Generated from the canonical tracker on 2026-06-21. This checklist is a companio
 
 Environment note: a bounded System Events probe on 2026-06-21 returned `UI elements enabled = false`, so this environment cannot inspect the menu bar, permission prompts, device pickers, or recording UI.
 
-Manual validation required: 43 stories.
+Manual validation required: 44 stories.
 No further manual validation required: 2 stories.
 
 ## Recommended Order
@@ -826,6 +826,28 @@ Manual steps:
 2. trim the recording and verify the GIF covers only the trimmed range
 3. export a GIF from a recording several minutes long and verify it still spans the whole range and plays at real speed rather than being cut short
 4. verify the GIF opens in Finder preview and a browser.
+
+Current status: Partial automated evidence passed; manual UI validation still pending. A bounded System Events probe on 2026-06-21 returned UI elements enabled = false, so this environment cannot inspect the app UI; validate manually using the listed steps.
+
+Result: [ ] Pass  [ ] Fail  [ ] Blocked
+
+Notes:
+
+## US-046 - Adjustable area selection
+
+User story: As a user selecting an area to record, I want to correct the selection before recording starts instead of having to redraw it from scratch.
+
+Expected behavior: Releasing the mouse after drawing an area no longer starts recording. The selection stays on screen with corner handles and can be moved by dragging its body or resized by dragging a corner, always staying at least the minimum size and fully within the screen; dragging a corner past its anchor standardizes the rect rather than inverting it. Return or a double-click inside the selection records it, Escape cancels, and clicking outside starts a fresh selection. The hint text follows the state.
+
+Manual steps:
+
+1. Start an area recording and drag out a selection
+2. verify recording does not start on release and corner handles appear
+3. drag the body to move it and each corner to resize it, verifying it cannot leave the screen or collapse
+4. press Return and verify recording starts with the adjusted area
+5. repeat and confirm with a double-click inside the selection
+6. press Escape and verify nothing is recorded
+7. click outside an adjusted selection and verify a fresh selection begins.
 
 Current status: Partial automated evidence passed; manual UI validation still pending. A bounded System Events probe on 2026-06-21 returned UI elements enabled = false, so this environment cannot inspect the app UI; validate manually using the listed steps.
 

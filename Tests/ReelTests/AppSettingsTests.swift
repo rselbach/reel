@@ -251,6 +251,73 @@ final class AppSettingsTests: XCTestCase {
     }
 
     @MainActor
+    func testSelectionHandleHitTesting() {
+        let rect = CGRect(x: 100, y: 100, width: 400, height: 300)
+
+        XCTAssertEqual(RegionAdjustment.handle(at: CGPoint(x: 100, y: 100), in: rect), .bottomLeft)
+        XCTAssertEqual(RegionAdjustment.handle(at: CGPoint(x: 500, y: 100), in: rect), .bottomRight)
+        XCTAssertEqual(RegionAdjustment.handle(at: CGPoint(x: 100, y: 400), in: rect), .topLeft)
+        XCTAssertEqual(RegionAdjustment.handle(at: CGPoint(x: 500, y: 400), in: rect), .topRight)
+        XCTAssertEqual(RegionAdjustment.handle(at: CGPoint(x: 300, y: 250), in: rect), .move)
+        XCTAssertNil(RegionAdjustment.handle(at: CGPoint(x: 900, y: 250), in: rect))
+    }
+
+    @MainActor
+    func testSelectionMoveStaysOnScreen() {
+        let screen = CGRect(x: 0, y: 0, width: 1920, height: 1080)
+        let rect = CGRect(x: 100, y: 100, width: 400, height: 300)
+
+        let moved = RegionAdjustment.adjusted(
+            rect: rect,
+            handle: .move,
+            delta: CGPoint(x: 50, y: -30),
+            bounds: screen,
+            minimumSize: RegionMath.minimumSelectionSize
+        )
+        XCTAssertEqual(moved, CGRect(x: 150, y: 70, width: 400, height: 300))
+
+        // Dragged past the edge: clamped, not pushed off screen.
+        let clamped = RegionAdjustment.adjusted(
+            rect: rect,
+            handle: .move,
+            delta: CGPoint(x: -500, y: -500),
+            bounds: screen,
+            minimumSize: RegionMath.minimumSelectionSize
+        )
+        XCTAssertEqual(clamped.minX, 0)
+        XCTAssertEqual(clamped.minY, 0)
+        XCTAssertEqual(clamped.size, rect.size, "moving must not resize")
+    }
+
+    @MainActor
+    func testSelectionResizeAnchorsTheOppositeCornerAndEnforcesAMinimum() {
+        let screen = CGRect(x: 0, y: 0, width: 1920, height: 1080)
+        let rect = CGRect(x: 100, y: 100, width: 400, height: 300)
+
+        let grown = RegionAdjustment.adjusted(
+            rect: rect,
+            handle: .topRight,
+            delta: CGPoint(x: 100, y: 50),
+            bounds: screen,
+            minimumSize: RegionMath.minimumSelectionSize
+        )
+        XCTAssertEqual(grown, CGRect(x: 100, y: 100, width: 500, height: 350))
+
+        // Dragged back past the anchor: standardized and held at the minimum
+        // rather than becoming negative.
+        let collapsed = RegionAdjustment.adjusted(
+            rect: rect,
+            handle: .topRight,
+            delta: CGPoint(x: -800, y: -800),
+            bounds: screen,
+            minimumSize: RegionMath.minimumSelectionSize
+        )
+        XCTAssertGreaterThanOrEqual(collapsed.width, RegionMath.minimumSelectionSize)
+        XCTAssertGreaterThanOrEqual(collapsed.height, RegionMath.minimumSelectionSize)
+        XCTAssertTrue(screen.contains(collapsed))
+    }
+
+    @MainActor
     func testSelectionReadoutReportsPixelDimensions() {
         XCTAssertEqual(
             RegionSelectionLabel.text(for: CGRect(x: 10, y: 20, width: 1920, height: 1080)),

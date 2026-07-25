@@ -52,6 +52,89 @@ enum RegionSelectionLabel {
     }
 }
 
+enum RegionAdjustment {
+    /// How close to an edge counts as grabbing a corner rather than the body.
+    static let handleHitSize: CGFloat = 14
+
+    enum Handle: Equatable {
+        case bottomLeft
+        case bottomRight
+        case topLeft
+        case topRight
+        case move
+    }
+
+    static func handle(at point: CGPoint, in rect: CGRect, hitSize: CGFloat = handleHitSize) -> Handle? {
+        guard rect.insetBy(dx: -hitSize, dy: -hitSize).contains(point) else { return nil }
+
+        let nearLeft = abs(point.x - rect.minX) <= hitSize
+        let nearRight = abs(point.x - rect.maxX) <= hitSize
+        let nearBottom = abs(point.y - rect.minY) <= hitSize
+        let nearTop = abs(point.y - rect.maxY) <= hitSize
+
+        switch (nearLeft, nearRight, nearBottom, nearTop) {
+        case (true, _, true, _): return .bottomLeft
+        case (_, true, true, _): return .bottomRight
+        case (true, _, _, true): return .topLeft
+        case (_, true, _, true): return .topRight
+        default: return rect.contains(point) ? .move : nil
+        }
+    }
+
+    /// Applies a drag to the selection, keeping it at least minimumSize on
+    /// each edge and entirely within the screen.
+    static func adjusted(
+        rect: CGRect,
+        handle: Handle,
+        delta: CGPoint,
+        bounds: CGRect,
+        minimumSize: CGFloat
+    ) -> CGRect {
+        var result: CGRect
+        switch handle {
+        case .move:
+            result = rect.offsetBy(dx: delta.x, dy: delta.y)
+        case .bottomLeft:
+            result = CGRect(
+                x: rect.minX + delta.x,
+                y: rect.minY + delta.y,
+                width: rect.width - delta.x,
+                height: rect.height - delta.y
+            )
+        case .bottomRight:
+            result = CGRect(
+                x: rect.minX,
+                y: rect.minY + delta.y,
+                width: rect.width + delta.x,
+                height: rect.height - delta.y
+            )
+        case .topLeft:
+            result = CGRect(
+                x: rect.minX + delta.x,
+                y: rect.minY,
+                width: rect.width - delta.x,
+                height: rect.height + delta.y
+            )
+        case .topRight:
+            result = CGRect(
+                x: rect.minX,
+                y: rect.minY,
+                width: rect.width + delta.x,
+                height: rect.height + delta.y
+            )
+        }
+
+        // A drag past the opposite edge flips the rect; standardizing keeps
+        // the result well formed instead of negative.
+        result = result.standardized
+        result.size.width = min(max(minimumSize, result.width), bounds.width)
+        result.size.height = min(max(minimumSize, result.height), bounds.height)
+        result.origin.x = min(max(bounds.minX, result.minX), bounds.maxX - result.width)
+        result.origin.y = min(max(bounds.minY, result.minY), bounds.maxY - result.height)
+        return result
+    }
+}
+
 /// A user-selected screen region to record.
 struct RecordingRegion: Equatable {
     let displayID: CGDirectDisplayID
@@ -158,10 +241,9 @@ final class RegionSelectionWindow: NSWindow {
     override var canBecomeKey: Bool { true }
 
     override func keyDown(with event: NSEvent) {
-        if event.keyCode == KeyCode.escape {
-            onCancel?()
-        } else {
+        guard selectionView?.handleKeyDown(event) == true else {
             super.keyDown(with: event)
+            return
         }
     }
 }
@@ -170,12 +252,29 @@ final class RegionSelectionView: NSView {
     var onSelection: ((CGRect) -> Void)?
     var onCancel: (() -> Void)?
 
+    private enum Phase {
+        case idle
+        /// Dragging out a new selection.
+        case drawing
+        /// Selection drawn; the user can nudge it before committing.
+        case adjusting
+    }
+
+    private var phase: Phase = .idle
     private var startPoint: NSPoint?
     private var currentRect: CGRect?
+    private var activeHandle: RegionAdjustment.Handle?
+    private var handleDragOrigin: CGPoint?
+    private var rectAtHandleDragStart: CGRect?
     private let hintLabel: NSTextField
 
+    private enum Hint {
+        static let draw = "Drag to select the area to record — Esc to cancel"
+        static let adjust = "Drag to adjust — Return to record, Esc to cancel"
+    }
+
     override init(frame frameRect: NSRect) {
-        hintLabel = NSTextField(labelWithString: "Drag to select the area to record — Esc to cancel")
+        hintLabel = NSTextField(labelWithString: Hint.draw)
         super.init(frame: frameRect)
 
         hintLabel.font = NSFont.systemFont(ofSize: 14, weight: .medium)
@@ -183,21 +282,30 @@ final class RegionSelectionView: NSView {
         hintLabel.backgroundColor = NSColor.black.withAlphaComponent(0.6)
         hintLabel.drawsBackground = true
         hintLabel.alignment = .center
-        hintLabel.sizeToFit()
-        let padded = NSRect(
-            x: (frameRect.width - hintLabel.frame.width - 24) / 2,
-            y: frameRect.height - 80,
-            width: hintLabel.frame.width + 24,
-            height: hintLabel.frame.height + 12
-        )
-        hintLabel.frame = padded
         hintLabel.autoresizingMask = [.minXMargin, .maxXMargin, .minYMargin]
         addSubview(hintLabel)
+        layoutHint()
     }
 
     required init?(coder: NSCoder) {
         hintLabel = NSTextField(labelWithString: "")
         super.init(coder: coder)
+    }
+
+    private func layoutHint() {
+        hintLabel.sizeToFit()
+        hintLabel.frame = NSRect(
+            x: (bounds.width - hintLabel.frame.width - 24) / 2,
+            y: bounds.height - 80,
+            width: hintLabel.frame.width + 24,
+            height: hintLabel.frame.height + 12
+        )
+    }
+
+    private func showHint(_ text: String) {
+        hintLabel.stringValue = text
+        hintLabel.isHidden = false
+        layoutHint()
     }
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
@@ -207,15 +315,51 @@ final class RegionSelectionView: NSView {
     }
 
     override func mouseDown(with event: NSEvent) {
-        startPoint = convert(event.locationInWindow, from: nil)
+        let point = convert(event.locationInWindow, from: nil)
+
+        // A double-click inside a drawn selection is the fast path to record.
+        if phase == .adjusting, event.clickCount >= 2, let rect = currentRect, rect.contains(point) {
+            commit()
+            return
+        }
+
+        // Grabbing the selection or one of its corners adjusts it; anywhere
+        // else starts a fresh selection.
+        if phase == .adjusting,
+           let rect = currentRect,
+           let handle = RegionAdjustment.handle(at: point, in: rect) {
+            activeHandle = handle
+            handleDragOrigin = point
+            rectAtHandleDragStart = rect
+            return
+        }
+
+        phase = .drawing
+        startPoint = point
         currentRect = nil
+        activeHandle = nil
         hintLabel.isHidden = true
         needsDisplay = true
     }
 
     override func mouseDragged(with event: NSEvent) {
-        guard let startPoint else { return }
         let point = convert(event.locationInWindow, from: nil)
+
+        if let handle = activeHandle,
+           let origin = handleDragOrigin,
+           let rect = rectAtHandleDragStart {
+            currentRect = RegionAdjustment.adjusted(
+                rect: rect,
+                handle: handle,
+                delta: CGPoint(x: point.x - origin.x, y: point.y - origin.y),
+                bounds: bounds,
+                minimumSize: RegionMath.minimumSelectionSize
+            )
+            needsDisplay = true
+            return
+        }
+
+        guard let startPoint else { return }
         currentRect = CGRect(
             x: min(startPoint.x, point.x),
             y: min(startPoint.y, point.y),
@@ -226,18 +370,50 @@ final class RegionSelectionView: NSView {
     }
 
     override func mouseUp(with event: NSEvent) {
-        defer {
-            startPoint = nil
-            currentRect = nil
+        if activeHandle != nil {
+            activeHandle = nil
+            handleDragOrigin = nil
+            rectAtHandleDragStart = nil
+            return
         }
+
+        startPoint = nil
+
         guard let rect = currentRect,
               rect.width >= RegionMath.minimumSelectionSize,
               rect.height >= RegionMath.minimumSelectionSize else {
             // Stray click or tiny drag: keep waiting for a real selection.
-            hintLabel.isHidden = false
+            currentRect = nil
+            phase = .idle
+            showHint(Hint.draw)
             needsDisplay = true
             return
         }
+
+        // Drawing no longer commits: the selection stays put so it can be
+        // nudged into place before recording starts.
+        phase = .adjusting
+        showHint(Hint.adjust)
+        needsDisplay = true
+    }
+
+    /// Called by the window, which owns key handling.
+    func handleKeyDown(_ event: NSEvent) -> Bool {
+        switch event.keyCode {
+        case KeyCode.escape:
+            onCancel?()
+            return true
+        case KeyCode.return:
+            guard phase == .adjusting else { return true }
+            commit()
+            return true
+        default:
+            return false
+        }
+    }
+
+    private func commit() {
+        guard let rect = currentRect else { return }
         onSelection?(rect)
     }
 
@@ -256,7 +432,36 @@ final class RegionSelectionView: NSView {
         path.lineWidth = 2
         path.stroke()
 
+        if phase == .adjusting {
+            drawHandles(for: rect)
+        }
         drawSizeReadout(for: rect)
+    }
+
+    /// Corner dots, so it is obvious the selection can still be changed.
+    private func drawHandles(for rect: CGRect) {
+        let size: CGFloat = 8
+        let corners = [
+            CGPoint(x: rect.minX, y: rect.minY),
+            CGPoint(x: rect.maxX, y: rect.minY),
+            CGPoint(x: rect.minX, y: rect.maxY),
+            CGPoint(x: rect.maxX, y: rect.maxY)
+        ]
+
+        for corner in corners {
+            let dot = CGRect(
+                x: corner.x - size / 2,
+                y: corner.y - size / 2,
+                width: size,
+                height: size
+            )
+            NSColor.white.setFill()
+            NSBezierPath(ovalIn: dot).fill()
+            NSColor.controlAccentColor.setStroke()
+            let outline = NSBezierPath(ovalIn: dot)
+            outline.lineWidth = 1.5
+            outline.stroke()
+        }
     }
 
     /// Demo recordings are usually uploaded somewhere with a target size, so
