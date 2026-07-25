@@ -283,14 +283,16 @@ Notes:
 
 User story: As a user, I want to trim the start/end of a recording and export a new MP4.
 
-Expected behavior: Trim handles maintain at least 0.5s range. Save Trimmed appears only after trim changes, prompts for MP4 path, exports to a hidden temporary MP4, and replaces the selected destination only after export succeeds; existing destination files are restored if replacement fails. After export, Reel reports an inline error if Finder cannot reveal the saved trimmed video.
+Expected behavior: The preview offers two exports of the current trim range: Save Trimmed, which re-muxes losslessly with the passthrough preset and appears only when a trim is set, and Smaller Copy, which re-encodes at 720p for sharing. Both write to a temporary file beside the destination and commit it atomically, restoring the original if the replace fails, and report a preset the recording cannot use rather than failing silently. Exports reveal the result in Finder.
 
 Manual steps:
 
-1. In preview, adjust trim start/end
-2. export to new and existing paths
-3. cancel save
-4. verify rollback preserves existing file on failure and Finder reveal failure shows inline warning.
+1. Record something, trim it, and use Save Trimmed
+2. verify the output covers the trimmed range and is lossless
+3. use Smaller Copy on the same recording and verify the output is 720p tall and noticeably smaller
+4. verify both reveal in Finder
+5. verify Smaller Copy is available without a trim set
+6. overwrite an existing file with each and verify the original is not lost if the write fails.
 
 Current status: Partial automated evidence passed; manual UI validation still pending. A bounded System Events probe on 2026-06-21 returned UI elements enabled = false, so this environment cannot inspect the app UI; validate manually using the listed steps.
 

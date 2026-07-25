@@ -101,6 +101,8 @@ enum PostRecordingText {
     static let dragHint = "Drag this recording into Slack, Mail, or Finder"
     static let delete = "Delete"
     static let saveTrimmed = "Save Trimmed..."
+    static let exportSmaller = "Smaller Copy..."
+    static let exportSmallerHelp = "Re-encodes at 720p for sharing in chat, issues, and pull requests."
     static let keyframeNote = "Trimming is lossless; the start point snaps to the nearest keyframe."
     static let done = "Done"
     static let recordAgain = "Record Again"
@@ -217,10 +219,16 @@ struct PostRecordingView: View {
 
                 if hasTrimChanges {
                     Button(PostRecordingText.saveTrimmed) {
-                        Task { await exportTrimmedVideo() }
+                        Task { await export(preset: AVAssetExportPresetPassthrough, suffix: "trimmed") }
                     }
                     .disabled(isExporting)
                 }
+
+                Button(PostRecordingText.exportSmaller) {
+                    Task { await export(preset: AVAssetExportPreset1280x720, suffix: "720p") }
+                }
+                .disabled(isExporting)
+                .help(PostRecordingText.exportSmallerHelp)
 
                 if isExporting {
                     ProgressView()
@@ -322,24 +330,26 @@ struct PostRecordingView: View {
         }
     }
 
-    private func exportTrimmedVideo() async {
+    /// Writes a copy of the current trim range using the given export preset:
+    /// passthrough for a lossless trim, a sized preset for a smaller file.
+    private func export(preset: String, suffix: String) async {
         guard !isExporting else { return }
         isExporting = true
         exportError = nil
 
-        guard let outputURL = await selectExportURL() else {
+        guard let outputURL = await selectExportURL(suffix: suffix) else {
             isExporting = false
             return
         }
 
         do {
-            let warning = try await trimVideo(to: outputURL)
+            let warning = try await exportVideo(to: outputURL, preset: preset)
             if let warning {
                 exportError = warning.localizedDescription
             }
             let revealed = NSWorkspace.shared.selectFile(outputURL.path(), inFileViewerRootedAtPath: "")
             if !revealed {
-                let revealError = "Trimmed video saved, but Finder could not reveal it."
+                let revealError = "Video saved, but Finder could not reveal it."
                 exportError = exportError.map { "\($0)\n\(revealError)" } ?? revealError
             }
         } catch {
@@ -349,11 +359,11 @@ struct PostRecordingView: View {
         isExporting = false
     }
 
-    private func selectExportURL() async -> URL? {
+    private func selectExportURL(suffix: String) async -> URL? {
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.mpeg4Movie]
         let originalName = videoURL.deletingPathExtension().lastPathComponent
-        panel.nameFieldStringValue = "\(originalName)-trimmed.mp4"
+        panel.nameFieldStringValue = "\(originalName)-\(suffix).mp4"
         panel.directoryURL = videoURL.deletingLastPathComponent()
 
         let response: NSApplication.ModalResponse
@@ -367,7 +377,7 @@ struct PostRecordingView: View {
         return panel.url
     }
 
-    private func trimVideo(to outputURL: URL) async throws -> FileReplacementWarning? {
+    private func exportVideo(to outputURL: URL, preset: String) async throws -> FileReplacementWarning? {
         let asset = AVURLAsset(url: videoURL)
         let tempURL = outputURL
             .deletingLastPathComponent()
@@ -388,11 +398,11 @@ struct PostRecordingView: View {
         let endTime = CMTime(seconds: trimEnd, preferredTimescale: 600)
         let timeRange = CMTimeRange(start: startTime, end: endTime)
 
-        // Passthrough re-muxes without re-encoding: lossless and near-instant for
-        // a pure trim, whereas HighestQuality would re-encode the whole video.
-        let session = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetPassthrough)
-        guard let session else {
-            throw ExportError.sessionCreationFailed
+        // Passthrough re-muxes without re-encoding: lossless and near-instant
+        // for a pure trim. A sized preset re-encodes, which is the point when
+        // the goal is a smaller file.
+        guard let session = AVAssetExportSession(asset: asset, presetName: preset) else {
+            throw ExportError.presetUnavailable(preset)
         }
         session.timeRange = timeRange
         try await session.export(to: tempURL, as: .mp4)
@@ -401,11 +411,12 @@ struct PostRecordingView: View {
 }
 
 enum ExportError: LocalizedError {
-    case sessionCreationFailed
+    case presetUnavailable(String)
 
     var errorDescription: String? {
         switch self {
-        case .sessionCreationFailed: return "Could not create export session"
+        case .presetUnavailable(let preset):
+            return "This recording cannot be exported with the \(preset) preset."
         }
     }
 }
