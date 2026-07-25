@@ -103,6 +103,7 @@ enum PostRecordingText {
     static let saveTrimmed = "Save Trimmed..."
     static let keyframeNote = "Trimming is lossless; the start point snaps to the nearest keyframe."
     static let done = "Done"
+    static let recordAgain = "Record Again"
     static let deleteConfirmationTitle = "Delete recording?"
     static let deleteConfirmationMessage = "This will permanently remove the file from disk."
 }
@@ -117,6 +118,7 @@ struct PostRecordingView: View {
     let videoURL: URL
     let onDismiss: () -> Void
     let onRevealInFinder: () -> Void
+    let onRecordAgain: () -> Void
     let onDelete: () -> Void
 
     @State private var player: AVPlayer?
@@ -206,6 +208,12 @@ struct PostRecordingView: View {
                 .foregroundColor(.red)
 
                 Spacer()
+
+                // The next thing after watching a take back is almost always
+                // another take of the same thing.
+                Button(PostRecordingText.recordAgain) {
+                    onRecordAgain()
+                }
 
                 if hasTrimChanges {
                     Button(PostRecordingText.saveTrimmed) {

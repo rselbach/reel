@@ -264,13 +264,14 @@ Notes:
 
 User story: As a user, I want a preview window after capture so I can inspect, reveal, delete, or finish with the recording.
 
-Expected behavior: If preview is enabled and lastRecordedURL exists, a resizable Recording Preview window opens with AVPlayerView, Reveal in Finder, Delete with confirmation, optional Save Trimmed, progress, errors, and Done. Closing the window clears AppDelegate preview state so later previews can open. Reveal in Finder shows a warning alert if Finder cannot reveal the recording.
+Expected behavior: When enabled, a preview window opens after each recording with playback, a trim slider, a draggable file chip, copy, reveal, delete, Record Again, and export actions. Record Again closes the preview and reopens the recording picker, since another take of the same thing is the usual next step.
 
 Manual steps:
 
-1. Enable preview
-2. record
-3. verify preview opens, plays, Done closes, title-bar close allows later previews, Reveal works or shows warning on failure.
+1. Record something with preview enabled
+2. verify the preview opens and plays
+3. press Record Again and verify the preview closes and the picker opens with the previous target preselected
+4. verify Done closes the preview without deleting the file.
 
 Current status: Partial automated evidence passed; manual UI validation still pending. A bounded System Events probe on 2026-06-21 returned UI elements enabled = false, so this environment cannot inspect the app UI; validate manually using the listed steps.
 

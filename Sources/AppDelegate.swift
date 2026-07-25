@@ -709,6 +709,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                     alert.runModal()
                 }
             },
+            onRecordAgain: { [weak self] in
+                guard let self else { return }
+                self.previewWindow?.close()
+                self.previewWindow = nil
+                self.showRecordingDialog()
+            },
             onDelete: { [weak self] in
                 do {
                     try FileManager.default.removeItem(at: url)

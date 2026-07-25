@@ -705,6 +705,7 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(PostRecordingText.delete, "Delete")
         XCTAssertEqual(PostRecordingText.saveTrimmed, "Save Trimmed...")
         XCTAssertEqual(PostRecordingText.done, "Done")
+        XCTAssertEqual(PostRecordingText.recordAgain, "Record Again")
         XCTAssertEqual(PostRecordingText.deleteConfirmationTitle, "Delete recording?")
         XCTAssertEqual(PostRecordingText.deleteConfirmationMessage, "This will permanently remove the file from disk.")
     }
