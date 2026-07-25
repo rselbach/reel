@@ -10,6 +10,8 @@ enum WelcomeText {
     static let permissionExplainer = "Reel needs macOS screen recording permission to capture your screen."
     static let grantPermission = "Grant Screen Recording Access"
     static let relaunchNote = "After granting access in System Settings, macOS requires relaunching Reel before recording works."
+    static let relaunchNow = "Relaunch Reel"
+    static let relaunchFailedTitle = "Could not relaunch Reel"
     static let getStarted = "Get Started"
 }
 
@@ -21,6 +23,13 @@ struct WelcomeView: View {
     @ObservedObject var settings = AppSettings.shared
     let onRequestPermission: () -> Void
     let onDismiss: () -> Void
+    @State private var relaunchError: String?
+
+    /// Relaunching only makes sense for a real app bundle; under `swift run`
+    /// there is nothing for the workspace to open.
+    private var canRelaunch: Bool {
+        Bundle.main.bundleIdentifier != nil
+    }
 
     var body: some View {
         VStack(spacing: 16) {
@@ -67,6 +76,12 @@ struct WelcomeView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
+
+                    if canRelaunch {
+                        Button(WelcomeText.relaunchNow) {
+                            relaunch()
+                        }
+                    }
                 }
             }
 
@@ -79,5 +94,37 @@ struct WelcomeView: View {
         }
         .padding(32)
         .frame(width: 440)
+        .alert(
+            WelcomeText.relaunchFailedTitle,
+            isPresented: Binding(
+                get: { relaunchError != nil },
+                set: { if !$0 { relaunchError = nil } }
+            )
+        ) {
+            Button("OK") { relaunchError = nil }
+        } message: {
+            Text(relaunchError ?? "")
+        }
+    }
+
+    /// Starts a second instance and quits this one. macOS refuses a duplicate
+    /// launch of the same bundle unless a new instance is requested
+    /// explicitly, so the flag is required rather than optional.
+    private func relaunch() {
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.createsNewApplicationInstance = true
+
+        NSWorkspace.shared.openApplication(
+            at: Bundle.main.bundleURL,
+            configuration: configuration
+        ) { _, error in
+            Task { @MainActor in
+                guard let error else {
+                    NSApp.terminate(nil)
+                    return
+                }
+                relaunchError = error.localizedDescription
+            }
+        }
     }
 }

@@ -220,6 +220,13 @@ final class AppSettingsTests: XCTestCase {
     }
 
     @MainActor
+    func testWelcomeTextPairsTheRelaunchNoteWithAnAction() {
+        XCTAssertTrue(WelcomeText.relaunchNote.contains("relaunching Reel"))
+        XCTAssertEqual(WelcomeText.relaunchNow, "Relaunch Reel")
+        XCTAssertEqual(WelcomeText.relaunchFailedTitle, "Could not relaunch Reel")
+    }
+
+    @MainActor
     func testSettingsWindowIsTallEnoughForTheRecordingTab() {
         // The Recording tab is the tallest: 6 always-visible controls, 3
         // dividers, and up to 9 more rows once camera and text overlay are on.

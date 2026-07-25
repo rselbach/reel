@@ -41,14 +41,15 @@ Notes:
 
 User story: As a first-time user, I want clear guidance when screen recording permission is missing so I can enable the app.
 
-Expected behavior: When permission is absent, the menu shows a disabled permission-required item plus Open System Settings and Check Permission actions. Permission refresh updates displays/windows and menu state. Permission menu labels are centralized in AppMenuText and covered by unit tests.
+Expected behavior: The first-run welcome window explains the menu bar icon and the recording shortcut, then requests screen recording permission with context. When permission is not yet in effect it explains that macOS requires a relaunch and offers a Relaunch Reel button that starts a fresh instance and quits the current one; relaunch failures are surfaced in an alert. The status item menu separately offers Open System Settings and Check Permission while permission is missing.
 
 Manual steps:
 
-1. Run with Screen Recording permission denied/reset
-2. open status menu
-3. verify permission-required disabled item, Open System Settings, and Check Permission appear
-4. grant permission and verify menu changes after Check Permission/relaunch as macOS requires.
+1. Launch Reel with screen recording permission revoked
+2. verify the welcome window explains the permission and the relaunch requirement
+3. grant access in System Settings
+4. press Relaunch Reel and verify a new instance starts and the old one quits
+5. verify recording works after the relaunch.
 
 Current status: Partial automated evidence passed; manual UI validation still pending. A bounded System Events probe on 2026-06-21 returned UI elements enabled = false, so this environment cannot inspect the app UI; validate manually using the listed steps.
 
