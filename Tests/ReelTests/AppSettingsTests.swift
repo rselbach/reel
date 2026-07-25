@@ -1,5 +1,6 @@
 import AVFoundation
 import Carbon
+import SwiftUI
 import XCTest
 @testable import Reel
 
@@ -1133,6 +1134,52 @@ final class AppSettingsTests: XCTestCase {
     func testDrawingAnAreaIsDistinctFromReusingOne() {
         XCTAssertNotEqual(RecordingSelection.region, RecordingSelection.lastRegion)
         XCTAssertEqual(RecordingSelection.lastRegion, RecordingSelection.lastRegion)
+    }
+
+    @MainActor
+    func testPickerColumnCountMatchesTheAdaptiveGrid() {
+        // 508pt of usable width at a 160pt minimum and 12pt spacing fits three.
+        XCTAssertEqual(
+            PickerNavigation.columnCount(availableWidth: 508, minimum: 160, spacing: 12),
+            3
+        )
+        XCTAssertEqual(
+            PickerNavigation.columnCount(availableWidth: 160, minimum: 160, spacing: 12),
+            1
+        )
+        // Degenerate inputs still yield a usable step.
+        XCTAssertEqual(PickerNavigation.columnCount(availableWidth: 0, minimum: 160, spacing: 12), 1)
+        XCTAssertEqual(PickerNavigation.columnCount(availableWidth: 508, minimum: 0, spacing: 12), 1)
+    }
+
+    @MainActor
+    func testArrowKeysStepByOneAndByRowWithoutWrapping() {
+        XCTAssertEqual(
+            PickerNavigation.nextIndex(from: 0, direction: .right, count: 9, columns: 3),
+            1
+        )
+        XCTAssertEqual(
+            PickerNavigation.nextIndex(from: 4, direction: .down, count: 9, columns: 3),
+            7
+        )
+        XCTAssertEqual(
+            PickerNavigation.nextIndex(from: 4, direction: .up, count: 9, columns: 3),
+            1
+        )
+
+        // Clamped at both ends: holding an arrow settles rather than cycling.
+        XCTAssertEqual(
+            PickerNavigation.nextIndex(from: 0, direction: .left, count: 9, columns: 3),
+            0
+        )
+        XCTAssertEqual(
+            PickerNavigation.nextIndex(from: 8, direction: .down, count: 9, columns: 3),
+            8
+        )
+        XCTAssertEqual(
+            PickerNavigation.nextIndex(from: 0, direction: .right, count: 0, columns: 3),
+            0
+        )
     }
 
     @MainActor

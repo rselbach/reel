@@ -557,7 +557,7 @@ Notes:
 
 User story: As a user, I want to refresh the recording picker and understand why it is empty so I can recover without closing and reopening it.
 
-Expected behavior: RecordingDialog always shows the refresh control, including when no windows are listed, and preselects the target the recorder is currently pointed at. Area recording offers both drawing a fresh area and reusing the remembered one, the latter labelled with its pixel size. With no windows but at least one display it explains that no open windows were found; with neither displays nor windows it explains the screen recording permission may not be in effect and offers a button that opens the System Settings privacy pane.
+Expected behavior: RecordingDialog always shows the refresh control, including when no windows are listed, and preselects the target the recorder is currently pointed at. Thumbnails are buttons, so selection is immediate and reachable from the keyboard, and arrow keys move between displays and windows in the order shown — one step for left and right, one row for up and down, using the same column count the adaptive grid lays out, clamped at both ends. Area recording offers both drawing a fresh area and reusing the remembered one. Empty states distinguish no open windows from nothing recordable at all, the latter offering a button to the System Settings privacy pane.
 
 Manual steps:
 
@@ -565,7 +565,10 @@ Manual steps:
 2. verify the empty state explains the permission and the System Settings button opens the privacy pane
 3. grant permission, press refresh, and verify displays and windows appear
 4. record a window, reopen the picker, and verify that window is preselected
-5. record an area, reopen the picker, and verify Use Last Area appears with the right dimensions and starts recording without redrawing.
+5. move through the cards with the arrow keys and verify left and right step one card and up and down step one row without wrapping
+6. press Return and verify recording starts with the highlighted card
+7. double-click a card and verify it starts immediately
+8. record an area and verify Use Last Area appears with the right dimensions.
 
 Current status: Partial automated evidence passed; manual UI validation still pending. A bounded System Events probe on 2026-06-21 returned UI elements enabled = false, so this environment cannot inspect the app UI; validate manually using the listed steps.
 

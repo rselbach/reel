@@ -82,6 +82,35 @@ enum RecordingDialogLogic {
     }
 }
 
+enum PickerNavigation {
+    /// Columns the adaptive grid lays out at a given width. Mirrors the
+    /// GridItem configuration, so arrow keys step by the row the user sees.
+    static func columnCount(availableWidth: CGFloat, minimum: CGFloat, spacing: CGFloat) -> Int {
+        guard availableWidth > 0, minimum > 0 else { return 1 }
+        return max(1, Int((availableWidth + spacing) / (minimum + spacing)))
+    }
+
+    /// Next selected index for an arrow key. Movement is clamped rather than
+    /// wrapped, so holding an arrow settles at an end instead of cycling.
+    static func nextIndex(
+        from index: Int,
+        direction: MoveCommandDirection,
+        count: Int,
+        columns: Int
+    ) -> Int {
+        guard count > 0 else { return 0 }
+        let step: Int
+        switch direction {
+        case .left: step = -1
+        case .right: step = 1
+        case .up: step = -max(1, columns)
+        case .down: step = max(1, columns)
+        @unknown default: step = 0
+        }
+        return min(max(0, index + step), count - 1)
+    }
+}
+
 /// Read-only snapshot wrapper for fanning ScreenCaptureKit objects (and the
 /// NSImages made from them) out to concurrent thumbnail tasks. SCDisplay/
 /// SCWindow/NSImage are not Sendable, but these are immutable snapshots that
@@ -150,7 +179,37 @@ struct RecordingDialog: View {
     }
     
     private let thumbnailSize = CGSize(width: 160, height: 100)
-    private let columns = [GridItem(.adaptive(minimum: 160, maximum: 200), spacing: 12)]
+    private static let gridMinimum: CGFloat = 160
+    private static let gridSpacing: CGFloat = 12
+    private static let gridWidth: CGFloat = 540 - 32
+    private let columns = [
+        GridItem(.adaptive(minimum: gridMinimum, maximum: 200), spacing: gridSpacing)
+    ]
+
+    /// Everything the arrow keys can move between, in the order shown.
+    private var orderedSelections: [RecordingSelection] {
+        displays.map { .display($0.displayID) } + filteredWindows.map { .window($0) }
+    }
+
+    private func moveSelection(_ direction: MoveCommandDirection) {
+        let targets = orderedSelections
+        guard !targets.isEmpty else { return }
+
+        let current = selection.flatMap { targets.firstIndex(of: $0) } ?? 0
+        let columns = PickerNavigation.columnCount(
+            availableWidth: Self.gridWidth,
+            minimum: Self.gridMinimum,
+            spacing: Self.gridSpacing
+        )
+        selection = targets[
+            PickerNavigation.nextIndex(
+                from: current,
+                direction: direction,
+                count: targets.count,
+                columns: columns
+            )
+        ]
+    }
     
     var body: some View {
         VStack(spacing: 0) {
@@ -302,6 +361,7 @@ struct RecordingDialog: View {
         .task {
             await loadThumbnails()
         }
+        .onMoveCommand { moveSelection($0) }
         .onAppear { refreshMetering() }
         .onDisappear { levelMonitor.stop() }
         .onChange(of: recordAudio) {
