@@ -1,5 +1,6 @@
 import AppKit
 import AVKit
+import UniformTypeIdentifiers
 import os.log
 import SwiftUI
 
@@ -102,12 +103,37 @@ enum PostRecordingText {
     static let delete = "Delete"
     static let saveTrimmed = "Save Trimmed..."
     static let exportSmaller = "Smaller Copy..."
+    static let exportGIF = "GIF..."
+    static let exportGIFHelp = "Silent, looping, capped in size and frame count for README and issue embeds."
     static let exportSmallerHelp = "Re-encodes at 720p for sharing in chat, issues, and pull requests."
     static let keyframeNote = "Trimming is lossless; the start point snaps to the nearest keyframe."
     static let done = "Done"
     static let recordAgain = "Record Again"
     static let deleteConfirmationTitle = "Delete recording?"
     static let deleteConfirmationMessage = "This will permanently remove the file from disk."
+}
+
+enum GIFExport {
+    /// GIF has no interframe compression worth the name, so both the frame
+    /// rate and the pixel width stay modest.
+    static let frameRate: Double = 12
+    static let maxWidth: CGFloat = 800
+    /// Roughly 25 seconds at the target frame rate. Longer ranges are sampled
+    /// more sparsely rather than cut short, so the whole range is represented.
+    static let maxFrames = 300
+
+    /// Sample times across a trim range, plus the per-frame delay that plays
+    /// them back at real speed.
+    static func frames(start: Double, end: Double) -> (times: [Double], delay: Double) {
+        let duration = max(0, end - start)
+        guard duration > 0 else { return ([start], 1 / frameRate) }
+
+        let ideal = Int((duration * frameRate).rounded())
+        let count = min(maxFrames, max(1, ideal))
+        let spacing = duration / Double(count)
+
+        return ((0..<count).map { start + spacing * Double($0) }, spacing)
+    }
 }
 
 enum PostRecordingLogic {
@@ -229,6 +255,12 @@ struct PostRecordingView: View {
                 }
                 .disabled(isExporting)
                 .help(PostRecordingText.exportSmallerHelp)
+
+                Button(PostRecordingText.exportGIF) {
+                    Task { await exportGIF() }
+                }
+                .disabled(isExporting)
+                .help(PostRecordingText.exportGIFHelp)
 
                 if isExporting {
                     ProgressView()
@@ -359,11 +391,74 @@ struct PostRecordingView: View {
         isExporting = false
     }
 
-    private func selectExportURL(suffix: String) async -> URL? {
+    private func exportGIF() async {
+        guard !isExporting else { return }
+        isExporting = true
+        exportError = nil
+
+        guard let outputURL = await selectExportURL(suffix: "gif", contentType: .gif) else {
+            isExporting = false
+            return
+        }
+
+        do {
+            try await writeGIF(to: outputURL)
+            let revealed = NSWorkspace.shared.selectFile(outputURL.path(), inFileViewerRootedAtPath: "")
+            if !revealed {
+                exportError = "GIF saved, but Finder could not reveal it."
+            }
+        } catch {
+            exportError = "GIF export failed: \(error.localizedDescription)"
+        }
+
+        isExporting = false
+    }
+
+    private func writeGIF(to outputURL: URL) async throws {
+        let asset = AVURLAsset(url: videoURL)
+        let generator = AVAssetImageGenerator(asset: asset)
+        generator.appliesPreferredTrackTransform = true
+        generator.requestedTimeToleranceBefore = .zero
+        generator.requestedTimeToleranceAfter = .zero
+        // Scales to fit while preserving aspect ratio.
+        generator.maximumSize = CGSize(width: GIFExport.maxWidth, height: GIFExport.maxWidth)
+
+        let sampling = GIFExport.frames(start: trimStart, end: trimEnd)
+
+        guard let destination = CGImageDestinationCreateWithURL(
+            outputURL as CFURL,
+            UTType.gif.identifier as CFString,
+            sampling.times.count,
+            nil
+        ) else {
+            throw ExportError.gifDestinationUnavailable
+        }
+
+        CGImageDestinationSetProperties(destination, [
+            kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFLoopCount: 0]
+        ] as CFDictionary)
+
+        let frameProperties = [
+            kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFDelayTime: sampling.delay]
+        ] as CFDictionary
+
+        for seconds in sampling.times {
+            let time = CMTime(seconds: seconds, preferredTimescale: 600)
+            let frame = try await generator.image(at: time)
+            CGImageDestinationAddImage(destination, frame.image, frameProperties)
+        }
+
+        guard CGImageDestinationFinalize(destination) else {
+            throw ExportError.gifWriteFailed
+        }
+    }
+
+    private func selectExportURL(suffix: String, contentType: UTType = .mpeg4Movie) async -> URL? {
         let panel = NSSavePanel()
-        panel.allowedContentTypes = [.mpeg4Movie]
+        panel.allowedContentTypes = [contentType]
         let originalName = videoURL.deletingPathExtension().lastPathComponent
-        panel.nameFieldStringValue = "\(originalName)-\(suffix).mp4"
+        let fileExtension = contentType == .gif ? "gif" : "mp4"
+        panel.nameFieldStringValue = "\(originalName)-\(suffix).\(fileExtension)"
         panel.directoryURL = videoURL.deletingLastPathComponent()
 
         let response: NSApplication.ModalResponse
@@ -412,11 +507,17 @@ struct PostRecordingView: View {
 
 enum ExportError: LocalizedError {
     case presetUnavailable(String)
+    case gifDestinationUnavailable
+    case gifWriteFailed
 
     var errorDescription: String? {
         switch self {
         case .presetUnavailable(let preset):
             return "This recording cannot be exported with the \(preset) preset."
+        case .gifDestinationUnavailable:
+            return "Could not create the GIF file."
+        case .gifWriteFailed:
+            return "The GIF could not be written."
         }
     }
 }

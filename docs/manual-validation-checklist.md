@@ -6,7 +6,7 @@ Generated from the canonical tracker on 2026-06-21. This checklist is a companio
 
 Environment note: a bounded System Events probe on 2026-06-21 returned `UI elements enabled = false`, so this environment cannot inspect the menu bar, permission prompts, device pickers, or recording UI.
 
-Manual validation required: 42 stories.
+Manual validation required: 43 stories.
 No further manual validation required: 2 stories.
 
 ## Recommended Order
@@ -807,6 +807,25 @@ Manual steps:
 3. record again from the picker with both off and verify neither is captured
 4. press the global shortcut and verify it uses the Settings defaults rather than the last picker choice
 5. verify the picker meter responds while the microphone toggle is on.
+
+Current status: Partial automated evidence passed; manual UI validation still pending. A bounded System Events probe on 2026-06-21 returned UI elements enabled = false, so this environment cannot inspect the app UI; validate manually using the listed steps.
+
+Result: [ ] Pass  [ ] Fail  [ ] Blocked
+
+Notes:
+
+## US-045 - GIF export
+
+User story: As a user putting a demo in a README, an issue, or a pull request, I want a looping GIF without taking the recording into another tool.
+
+Expected behavior: The preview exports the current trim range as an infinitely looping GIF. Frames are sampled at 12 fps and scaled to fit 800 pixels preserving aspect ratio; ranges longer than 300 frames are sampled more sparsely across the whole range rather than truncated, with the per-frame delay set from the actual spacing so playback stays at real speed. Failures to create or finalize the file are reported rather than leaving a partial GIF unexplained.
+
+Manual steps:
+
+1. Record a few seconds, export a GIF, and verify it loops, plays at the right speed, and is no wider than 800 pixels
+2. trim the recording and verify the GIF covers only the trimmed range
+3. export a GIF from a recording several minutes long and verify it still spans the whole range and plays at real speed rather than being cut short
+4. verify the GIF opens in Finder preview and a browser.
 
 Current status: Partial automated evidence passed; manual UI validation still pending. A bounded System Events probe on 2026-06-21 returned UI elements enabled = false, so this environment cannot inspect the app UI; validate manually using the listed steps.
 

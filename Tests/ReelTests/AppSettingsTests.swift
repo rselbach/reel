@@ -251,6 +251,33 @@ final class AppSettingsTests: XCTestCase {
     }
 
     @MainActor
+    func testGIFSamplingHitsTargetFrameRateForShortClips() {
+        let sampling = GIFExport.frames(start: 2, end: 7)
+        XCTAssertEqual(sampling.times.count, 60, "5 seconds at 12 fps")
+        XCTAssertEqual(sampling.times.first ?? -1, 2, accuracy: 0.0001)
+        XCTAssertEqual(sampling.delay, 1.0 / GIFExport.frameRate, accuracy: 0.0001)
+        XCTAssertLessThan(sampling.times.last ?? .infinity, 7)
+    }
+
+    @MainActor
+    func testGIFSamplingThinsLongClipsRatherThanTruncatingThem() {
+        // Ten minutes: far beyond the frame cap.
+        let sampling = GIFExport.frames(start: 0, end: 600)
+        XCTAssertEqual(sampling.times.count, GIFExport.maxFrames)
+        // The whole range is still represented, just sampled more sparsely,
+        // and the delay keeps playback at real speed.
+        XCTAssertGreaterThan(sampling.times.last ?? 0, 590)
+        XCTAssertEqual(sampling.delay, 600 / Double(GIFExport.maxFrames), accuracy: 0.0001)
+    }
+
+    @MainActor
+    func testGIFSamplingHandlesAnEmptyRange() {
+        let sampling = GIFExport.frames(start: 4, end: 4)
+        XCTAssertEqual(sampling.times, [4])
+        XCTAssertGreaterThan(sampling.delay, 0)
+    }
+
+    @MainActor
     func testPerTakeOverridesReplaceOnlyWhatTheyName() {
         let settings = AppSettings.shared
         let originalAudio = settings.recordAudio
