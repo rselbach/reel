@@ -32,6 +32,9 @@ enum RecordingDialogText {
     static let openSystemSettings = "Open System Settings..."
     static let openSystemSettingsFailed = "Could not open System Settings."
     static let selectArea = "Select Area to Record..."
+    static let forThisRecording = "For this recording"
+    static let recordAudio = "Microphone"
+    static let recordCamera = "Camera"
 }
 
 enum RecordingDialogLogic {
@@ -93,6 +96,8 @@ struct RecordingDialog: View {
     let onRefresh: @MainActor () async -> (displays: [SCDisplay], windows: [SCWindow])
     /// Size of the remembered area, when there is one to offer reusing.
     let lastRegionSize: CGSize?
+    /// Applied to this take only, leaving the saved defaults alone.
+    let onOverridesChanged: (RecordingOverrides) -> Void
 
     @State private var displays: [SCDisplay]
     @State private var windows: [SCWindow]
@@ -102,20 +107,28 @@ struct RecordingDialog: View {
     @State private var isLoading = true
     @State private var searchText = ""
     @State private var settingsError: String?
+    @State private var recordAudio: Bool
+    @State private var recordCamera: Bool
+    @StateObject private var levelMonitor = AudioLevelMonitor()
 
     init(
         availableDisplays: [SCDisplay],
         availableWindows: [SCWindow],
         initialSelection: RecordingSelection?,
         lastRegionSize: CGSize?,
+        initialOverrides: RecordingOverrides,
         onStart: @escaping (RecordingSelection) -> Void,
         onCancel: @escaping () -> Void,
-        onRefresh: @escaping @MainActor () async -> (displays: [SCDisplay], windows: [SCWindow])
+        onRefresh: @escaping @MainActor () async -> (displays: [SCDisplay], windows: [SCWindow]),
+        onOverridesChanged: @escaping (RecordingOverrides) -> Void
     ) {
         self.onStart = onStart
         self.onCancel = onCancel
         self.onRefresh = onRefresh
         self.lastRegionSize = lastRegionSize
+        self.onOverridesChanged = onOverridesChanged
+        _recordAudio = State(initialValue: initialOverrides.recordAudio ?? false)
+        _recordCamera = State(initialValue: initialOverrides.recordCamera ?? false)
         _displays = State(initialValue: availableDisplays)
         _windows = State(initialValue: availableWindows)
         _selection = State(initialValue: RecordingDialogLogic.validPreselection(
@@ -248,14 +261,33 @@ struct RecordingDialog: View {
 
             Divider()
             
+            // Changing the microphone or camera for one take should not mean
+            // opening Settings and coming back.
+            HStack(spacing: 12) {
+                Text(RecordingDialogText.forThisRecording)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                Toggle(RecordingDialogText.recordAudio, isOn: $recordAudio)
+                Toggle(RecordingDialogText.recordCamera, isOn: $recordCamera)
+
+                if recordAudio, AppSettings.shared.audioSource == .microphone {
+                    AudioLevelMeter(level: levelMonitor.level)
+                        .frame(width: 80)
+                }
+
+                Spacer()
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 10)
+
             HStack {
                 Button("Cancel") {
                     onCancel()
                 }
                 .keyboardShortcut(.cancelAction)
-                
+
                 Spacer()
-                
+
                 Button("Start Recording") {
                     if let selection {
                         onStart(selection)
@@ -266,10 +298,17 @@ struct RecordingDialog: View {
             }
             .padding(16)
         }
-        .frame(width: 540, height: 480)
+        .frame(width: 540, height: 540)
         .task {
             await loadThumbnails()
         }
+        .onAppear { refreshMetering() }
+        .onDisappear { levelMonitor.stop() }
+        .onChange(of: recordAudio) {
+            publishOverrides()
+            refreshMetering()
+        }
+        .onChange(of: recordCamera) { publishOverrides() }
     }
     
     /// Shown in place of the window grid. Missing displays *and* windows
@@ -304,6 +343,20 @@ struct RecordingDialog: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 16)
+    }
+
+    private func publishOverrides() {
+        onOverridesChanged(
+            RecordingOverrides(recordAudio: recordAudio, recordCamera: recordCamera)
+        )
+    }
+
+    private func refreshMetering() {
+        guard recordAudio, AppSettings.shared.audioSource == .microphone else {
+            levelMonitor.stop()
+            return
+        }
+        levelMonitor.start(device: AppSettings.shared.selectedAudioDevice)
     }
 
     private func openScreenCaptureSettings() {

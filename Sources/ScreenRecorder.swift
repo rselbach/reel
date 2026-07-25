@@ -27,6 +27,17 @@ enum RecordingFinalizationLogic {
     }
 }
 
+/// Per-recording changes to the persisted settings, chosen in the picker and
+/// applied to one take only.
+struct RecordingOverrides: Equatable {
+    var recordAudio: Bool?
+    var recordCamera: Bool?
+
+    static let none = RecordingOverrides()
+
+    var isEmpty: Bool { self == .none }
+}
+
 /// What the app needs to put in front of the user to pick a destination.
 struct SaveDestinationRequest {
     let suggestedName: String
@@ -76,7 +87,7 @@ struct RecordingOptions {
     }
 
     @MainActor
-    init(settings: AppSettings) {
+    init(settings: AppSettings, overrides: RecordingOverrides = .none) {
         frameRate = settings.frameRate
         showCursor = settings.showCursor
         videoBitrate = settings.videoQuality.bitrate
@@ -90,12 +101,15 @@ struct RecordingOptions {
         openFinderAfterRecording = settings.openFinderAfterRecording
         showPreviewAfterRecording = settings.showPreviewAfterRecording
 
-        recordAudio = settings.recordAudio
-        audioSource = settings.audioSource
-        audioDevice = settings.recordAudio ? settings.selectedAudioDevice : nil
+        let wantsAudio = overrides.recordAudio ?? settings.recordAudio
+        let wantsCamera = overrides.recordCamera ?? settings.recordCamera
 
-        recordCamera = settings.recordCamera
-        cameraDevice = settings.recordCamera ? settings.selectedCamera : nil
+        recordAudio = wantsAudio
+        audioSource = settings.audioSource
+        audioDevice = wantsAudio ? settings.selectedAudioDevice : nil
+
+        recordCamera = wantsCamera
+        cameraDevice = wantsCamera ? settings.selectedCamera : nil
         cameraShape = settings.cameraShape
         cameraPosition = settings.cameraPosition
         cameraSizeFraction = settings.cameraSizeFraction
@@ -289,6 +303,10 @@ class ScreenRecorder: NSObject, ObservableObject {
     private var outputURL: URL?
     /// Settings snapshot for the recording currently in flight.
     private var activeOptions: RecordingOptions?
+    /// Applied to the next recording only, then cleared. Set by the picker so
+    /// a take can turn the microphone or camera on or off without changing the
+    /// saved defaults.
+    var pendingOverrides: RecordingOverrides = .none
     private var lowSpaceTimer: Timer?
     private var cursorTimer: Timer?
     private let captureSessionQueue = DispatchQueue(label: "com.rselbach.reel.capture")
@@ -509,7 +527,8 @@ class ScreenRecorder: NSObject, ObservableObject {
 
         // Snapshot settings once so nothing edited mid-take can change the
         // recording that is already running.
-        let options = RecordingOptions(settings: settings)
+        let options = RecordingOptions(settings: settings, overrides: pendingOverrides)
+        pendingOverrides = .none
         activeOptions = options
 
         let filter: SCContentFilter
@@ -1138,7 +1157,7 @@ class ScreenRecorder: NSObject, ObservableObject {
     /// reused by startRecording, so the camera is only opened once.
     /// Returns false when there is no camera to show.
     func prepareCameraPreview() async -> Bool {
-        guard settings.recordCamera else { return false }
+        guard pendingOverrides.recordCamera ?? settings.recordCamera else { return false }
         guard cameraCaptureSession == nil else { return true }
         guard await ensureAVPermission(for: .video) else { return false }
         guard let device = settings.selectedCamera else { return false }

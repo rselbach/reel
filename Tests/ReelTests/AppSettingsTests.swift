@@ -251,6 +251,46 @@ final class AppSettingsTests: XCTestCase {
     }
 
     @MainActor
+    func testPerTakeOverridesReplaceOnlyWhatTheyName() {
+        let settings = AppSettings.shared
+        let originalAudio = settings.recordAudio
+        let originalCamera = settings.recordCamera
+        defer {
+            settings.recordAudio = originalAudio
+            settings.recordCamera = originalCamera
+        }
+
+        settings.recordAudio = false
+        settings.recordCamera = false
+
+        let audioOnly = RecordingOptions(
+            settings: settings,
+            overrides: RecordingOverrides(recordAudio: true, recordCamera: nil)
+        )
+        XCTAssertTrue(audioOnly.recordAudio)
+        XCTAssertFalse(audioOnly.recordCamera, "an unset override must fall through to the setting")
+
+        settings.recordCamera = true
+        let cameraOff = RecordingOptions(
+            settings: settings,
+            overrides: RecordingOverrides(recordAudio: nil, recordCamera: false)
+        )
+        XCTAssertFalse(cameraOff.recordCamera)
+        XCTAssertNil(cameraOff.cameraDevice, "no camera is opened for a take that turned it off")
+    }
+
+    @MainActor
+    func testEmptyOverridesLeaveTheSavedDefaultsAlone() {
+        let settings = AppSettings.shared
+        let plain = RecordingOptions(settings: settings)
+        let explicit = RecordingOptions(settings: settings, overrides: .none)
+
+        XCTAssertTrue(RecordingOverrides.none.isEmpty)
+        XCTAssertEqual(plain.recordAudio, settings.recordAudio)
+        XCTAssertEqual(explicit.recordCamera, settings.recordCamera)
+    }
+
+    @MainActor
     func testAudioLevelScaleMapsDecibelsOntoTheMeter() {
         XCTAssertEqual(AudioLevelScale.normalized(decibels: 0), 1, accuracy: 0.0001)
         XCTAssertEqual(AudioLevelScale.normalized(decibels: -30), 0.5, accuracy: 0.0001)

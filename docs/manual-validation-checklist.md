@@ -6,7 +6,7 @@ Generated from the canonical tracker on 2026-06-21. This checklist is a companio
 
 Environment note: a bounded System Events probe on 2026-06-21 returned `UI elements enabled = false`, so this environment cannot inspect the menu bar, permission prompts, device pickers, or recording UI.
 
-Manual validation required: 41 stories.
+Manual validation required: 42 stories.
 No further manual validation required: 2 stories.
 
 ## Recommended Order
@@ -784,6 +784,26 @@ Manual steps:
 4. switch to another input device and verify the meter follows it
 5. switch the source to System Audio and verify metering stops
 6. close Settings and verify the microphone is released.
+
+Current status: Partial automated evidence passed; manual UI validation still pending. A bounded System Events probe on 2026-06-21 returned UI elements enabled = false, so this environment cannot inspect the app UI; validate manually using the listed steps.
+
+Result: [ ] Pass  [ ] Fail  [ ] Blocked
+
+Notes:
+
+## US-044 - Per-recording microphone and camera toggles
+
+User story: As a user, I want to turn the microphone or camera on or off for one take without opening Settings and changing my defaults.
+
+Expected behavior: The recording picker carries microphone and camera toggles under a For this recording heading, seeded from the saved defaults, plus a compact input meter while the microphone is on. Their state is published to the recorder as overrides that apply to the next take only and are cleared once it starts, leaving the saved settings untouched. An override that is unset falls through to the setting. Turning the camera off means no camera is opened, including for the countdown preview. Starting from the global shortcut skips the picker and therefore uses the saved defaults.
+
+Manual steps:
+
+1. With camera and microphone off in Settings, open the picker, turn both on, and record
+2. verify the take has narration and a camera bubble and that Settings still shows both off
+3. record again from the picker with both off and verify neither is captured
+4. press the global shortcut and verify it uses the Settings defaults rather than the last picker choice
+5. verify the picker meter responds while the microphone toggle is on.
 
 Current status: Partial automated evidence passed; manual UI validation still pending. A bounded System Events probe on 2026-06-21 returned UI elements enabled = false, so this environment cannot inspect the app UI; validate manually using the listed steps.
 

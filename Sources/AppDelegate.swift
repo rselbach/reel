@@ -323,6 +323,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                     return
                 }
 
+                self.screenRecorder.pendingOverrides = .none
                 guard await self.runCountdown() else { return }
                 await self.screenRecorder.startRecording()
                 self.recordingDidStart()
@@ -747,6 +748,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 availableWindows: screenRecorder.availableWindows,
                 initialSelection: currentRecordingSelection,
                 lastRegionSize: screenRecorder.selectedRegion?.rect.size,
+                initialOverrides: RecordingOverrides(
+                    recordAudio: AppSettings.shared.recordAudio,
+                    recordCamera: AppSettings.shared.recordCamera
+                ),
                 onStart: { [weak self] selection in
                     guard let self else { return }
                     self.recordingDialogWindow?.close()
@@ -761,6 +766,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                     guard let self else { return ([], []) }
                     await self.screenRecorder.refreshWindows()
                     return (self.screenRecorder.availableDisplays, self.screenRecorder.availableWindows)
+                },
+                onOverridesChanged: { [weak self] overrides in
+                    self?.screenRecorder.pendingOverrides = overrides
                 }
             )
 
