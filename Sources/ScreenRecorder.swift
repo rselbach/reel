@@ -609,9 +609,10 @@ class ScreenRecorder: NSObject, ObservableObject {
         }
     }
 
-    /// Updates the camera overlay size during recording. Session-only: the
-    /// persisted Small/Medium/Large preset is untouched, so the next
-    /// recording starts back at the preset size.
+    /// Updates the camera overlay size the compositor uses while a recording
+    /// is in flight. Persisting the new size is a separate step the overlay
+    /// window triggers once a corner drag ends, so the size carries over to
+    /// the next recording.
     /// - Parameter fraction: Overlay width as a fraction of the recording width.
     func updateCameraOverlaySize(fraction: CGFloat) {
         withFrameLock {
