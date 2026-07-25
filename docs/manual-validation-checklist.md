@@ -6,7 +6,7 @@ Generated from the canonical tracker on 2026-06-21. This checklist is a companio
 
 Environment note: a bounded System Events probe on 2026-06-21 returned `UI elements enabled = false`, so this environment cannot inspect the menu bar, permission prompts, device pickers, or recording UI.
 
-Manual validation required: 30 stories.
+Manual validation required: 31 stories.
 No further manual validation required: 2 stories.
 
 ## Recommended Order
@@ -557,6 +557,25 @@ Manual steps:
 2. verify the empty state explains the permission and the System Settings button opens the privacy pane
 3. grant permission, press refresh, and verify displays and windows appear
 4. close all windows of every app and verify the picker explains no open windows were found while still offering refresh.
+
+Current status: Partial automated evidence passed; manual UI validation still pending. A bounded System Events probe on 2026-06-21 returned UI elements enabled = false, so this environment cannot inspect the app UI; validate manually using the listed steps.
+
+Result: [ ] Pass  [ ] Fail  [ ] Blocked
+
+Notes:
+
+## US-033 - Free space pre-flight check
+
+User story: As a user, I want Reel to refuse to start a recording it cannot store so a full disk does not destroy the take.
+
+Expected behavior: Before allocating any capture resources, startRecording reads the output volume's available capacity for important usage and compares it against two minutes of recording at the configured video quality bitrate. Below that floor the recording is refused with a message naming the free space, the approximate recordable duration, and the two ways out. When the volume cannot be queried the recording proceeds.
+
+Manual steps:
+
+1. Point the output folder at a nearly full volume
+2. start a recording and verify it is refused with a message naming the free space and approximate duration
+3. free up space and verify recording starts normally
+4. set the output folder to a path that does not exist and verify recording still starts.
 
 Current status: Partial automated evidence passed; manual UI validation still pending. A bounded System Events probe on 2026-06-21 returned UI elements enabled = false, so this environment cannot inspect the app UI; validate manually using the listed steps.
 

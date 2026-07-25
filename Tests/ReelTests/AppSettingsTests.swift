@@ -44,6 +44,74 @@ final class AppSettingsTests: XCTestCase {
     }
 
     @MainActor
+    func testDiskSpaceRequirementScalesWithBitrate() {
+        let medium = AppSettings.VideoQuality.medium.bitrate
+        let maximum = AppSettings.VideoQuality.maximum.bitrate
+
+        XCTAssertEqual(RecordingDiskSpace.bytesPerSecond(bitrate: medium), 1_375_000)
+        XCTAssertGreaterThan(
+            RecordingDiskSpace.requiredBytes(bitrate: maximum),
+            RecordingDiskSpace.requiredBytes(bitrate: medium)
+        )
+        XCTAssertEqual(
+            RecordingDiskSpace.requiredBytes(bitrate: medium),
+            RecordingDiskSpace.bytesPerSecond(bitrate: medium) * 120
+        )
+    }
+
+    @MainActor
+    func testDiskSpaceShortfallOnlyReportedBelowTheFloor() {
+        let bitrate = AppSettings.VideoQuality.medium.bitrate
+        let required = RecordingDiskSpace.requiredBytes(bitrate: bitrate)
+        let directory = URL(fileURLWithPath: "/Users/troy/Movies", isDirectory: true)
+
+        XCTAssertNil(
+            RecordingDiskSpace.shortfallMessage(
+                availableBytes: required,
+                bitrate: bitrate,
+                directory: directory
+            )
+        )
+        XCTAssertNil(
+            RecordingDiskSpace.shortfallMessage(
+                availableBytes: required * 10,
+                bitrate: bitrate,
+                directory: directory
+            )
+        )
+
+        let message = RecordingDiskSpace.shortfallMessage(
+            availableBytes: required - 1,
+            bitrate: bitrate,
+            directory: directory
+        )
+        XCTAssertNotNil(message)
+        XCTAssertTrue(message?.contains("Movies") ?? false)
+        XCTAssertTrue(message?.contains("video quality") ?? false)
+    }
+
+    @MainActor
+    func testDiskSpaceRecordableSecondsHandlesEmptyVolume() {
+        let bitrate = AppSettings.VideoQuality.high.bitrate
+        XCTAssertEqual(
+            RecordingDiskSpace.recordableSeconds(availableBytes: 0, bitrate: bitrate),
+            0
+        )
+        XCTAssertEqual(
+            RecordingDiskSpace.recordableSeconds(availableBytes: -100, bitrate: bitrate),
+            0
+        )
+        XCTAssertEqual(
+            RecordingDiskSpace.recordableSeconds(
+                availableBytes: RecordingDiskSpace.bytesPerSecond(bitrate: bitrate) * 30,
+                bitrate: bitrate
+            ),
+            30,
+            accuracy: 0.001
+        )
+    }
+
+    @MainActor
     func testVideoQualityBitrates() {
         XCTAssertEqual(AppSettings.VideoQuality.low.bitrate, 5_000_000)
         XCTAssertEqual(AppSettings.VideoQuality.medium.bitrate, 10_000_000)

@@ -47,6 +47,45 @@ enum RecordingFileNaming {
     }
 }
 
+enum RecordingDiskSpace {
+    /// A recording is refused unless the destination volume can hold at least
+    /// this many minutes at the configured bitrate. This is a floor, not a
+    /// guarantee: long takes are protected separately, while running.
+    static let minimumMinutes: Double = 2
+
+    /// Video bitrate converted to bytes, plus headroom for the AAC audio
+    /// track and container overhead.
+    static func bytesPerSecond(bitrate: Int) -> Int64 {
+        Int64(Double(bitrate) / 8 * 1.1)
+    }
+
+    static func requiredBytes(bitrate: Int) -> Int64 {
+        bytesPerSecond(bitrate: bitrate) * Int64(minimumMinutes * 60)
+    }
+
+    static func recordableSeconds(availableBytes: Int64, bitrate: Int) -> Double {
+        let perSecond = bytesPerSecond(bitrate: bitrate)
+        guard perSecond > 0 else { return .infinity }
+        return Double(max(0, availableBytes)) / Double(perSecond)
+    }
+
+    /// Non-nil when the destination volume cannot hold a usable recording.
+    static func shortfallMessage(availableBytes: Int64, bitrate: Int, directory: URL) -> String? {
+        guard availableBytes < requiredBytes(bitrate: bitrate) else { return nil }
+
+        let free = ByteCountFormatter.string(
+            fromByteCount: max(0, availableBytes),
+            countStyle: .file
+        )
+        let seconds = Int(recordableSeconds(availableBytes: availableBytes, bitrate: bitrate))
+        return """
+            Not enough free space in \(directory.path()) to record. \
+            \(free) available, about \(seconds)s at the current video quality. \
+            Free up space or lower the video quality in Settings.
+            """
+    }
+}
+
 enum RecordingFinalizationLogic {
     static func shouldRevealInFinder(openFinderAfterRecording: Bool, showPreviewAfterRecording: Bool) -> Bool {
         openFinderAfterRecording && !showPreviewAfterRecording
@@ -438,6 +477,13 @@ class ScreenRecorder: NSObject, ObservableObject {
             return
         }
 
+        // A writer that fails mid-recording cannot be finalized, so a full
+        // disk destroys the whole take. Refuse up front instead.
+        if let shortfall = diskSpaceShortfall() {
+            errorMessage = shortfall
+            return
+        }
+
         do {
             let config = SCStreamConfiguration()
             config.width = captureWidth
@@ -659,6 +705,29 @@ class ScreenRecorder: NSObject, ObservableObject {
                 code: 4,
                 userInfo: [NSLocalizedDescriptionKey: "Cannot start writer: \(reason)"]
             )
+        }
+    }
+
+    private func diskSpaceShortfall() -> String? {
+        let directory = settings.outputDirectory
+        guard let available = Self.availableCapacity(at: directory) else { return nil }
+        return RecordingDiskSpace.shortfallMessage(
+            availableBytes: available,
+            bitrate: settings.videoQuality.bitrate,
+            directory: directory
+        )
+    }
+
+    /// Free space the system is willing to give up for important user data.
+    /// Returns nil when the volume cannot be queried (a missing directory,
+    /// most often), in which case the recording is allowed to proceed.
+    private static func availableCapacity(at url: URL) -> Int64? {
+        do {
+            let values = try url.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
+            return values.volumeAvailableCapacityForImportantUsage
+        } catch {
+            logger.warning("Could not read free space for \(url.path()): \(error.localizedDescription)")
+            return nil
         }
     }
 
