@@ -69,6 +69,26 @@ enum RecordingDiskSpace {
         return Double(max(0, availableBytes)) / Double(perSecond)
     }
 
+    /// How often a running recording re-checks the destination volume.
+    static let checkInterval: TimeInterval = 10
+
+    /// A running recording ends once free space drops below this many seconds
+    /// of capture — early enough that the writer can still be finalized into a
+    /// playable file.
+    static let stopSeconds: Double = 30
+
+    static func isCriticallyLow(availableBytes: Int64, bitrate: Int) -> Bool {
+        recordableSeconds(availableBytes: availableBytes, bitrate: bitrate) < stopSeconds
+    }
+
+    static func lowSpaceReason(availableBytes: Int64) -> String {
+        let free = ByteCountFormatter.string(
+            fromByteCount: max(0, availableBytes),
+            countStyle: .file
+        )
+        return "the disk is almost full (\(free) left)"
+    }
+
     /// Non-nil when the destination volume cannot hold a usable recording.
     static func shortfallMessage(availableBytes: Int64, bitrate: Int, directory: URL) -> String? {
         guard availableBytes < requiredBytes(bitrate: bitrate) else { return nil }
@@ -254,6 +274,7 @@ class ScreenRecorder: NSObject, ObservableObject {
     private var cameraCaptureSession: AVCaptureSession?
     private var cameraOutput: AVCaptureVideoDataOutput?
     private var outputURL: URL?
+    private var lowSpaceTimer: Timer?
     private let captureSessionQueue = DispatchQueue(label: "com.rselbach.reel.capture")
     // Reused across recordings; CIContext is cheap to hold but unnecessary
     // to recreate per recording.
@@ -545,6 +566,7 @@ class ScreenRecorder: NSObject, ObservableObject {
             let failures = startCaptureSessions()
             lastRecordedURL = nil
             isRecording = true
+            startLowSpaceMonitor()
 
             // Surface capture session failures as warnings (recording continues without them)
             if failures.cameraFailed {
@@ -1113,6 +1135,7 @@ class ScreenRecorder: NSObject, ObservableObject {
     }
 
     private func cleanup() {
+        stopLowSpaceMonitor()
         stream = nil
         outputURL = nil
         assetWriter = nil
@@ -1132,10 +1155,25 @@ class ScreenRecorder: NSObject, ObservableObject {
     }
 
     /// Ends the recording after the stream stopped on its own (recorded window
-    /// closed, display disconnected, screen locked). Frames already written are
+    /// closed, display disconnected, screen locked).
+    private func handleStreamStopped(dueTo error: Error) async {
+        await endRecordingUnexpectedly(
+            savedMessage: "Recording stopped unexpectedly (\(error.localizedDescription)). The partial recording was saved.",
+            discardedMessage: "Recording stopped before any frames were captured: \(error.localizedDescription)",
+            stoppingStream: false
+        )
+    }
+
+    /// Ends a recording that the user did not stop. Frames already written are
     /// finalized into a playable file; the recording is only discarded when
     /// nothing was captured yet.
-    private func handleStreamStopped(dueTo error: Error) async {
+    /// - Parameter stoppingStream: true when the stream is still running and
+    ///   has to be told to stop, false when it already stopped on its own.
+    private func endRecordingUnexpectedly(
+        savedMessage: String,
+        discardedMessage: String,
+        stoppingStream: Bool
+    ) async {
         guard isRecording, !isStopping else { return }
         isStopping = true
         defer { finishStopping() }
@@ -1143,23 +1181,74 @@ class ScreenRecorder: NSObject, ObservableObject {
         signalCaptureStop()
         stopCaptureSessions()
 
+        if stoppingStream {
+            do {
+                try await stream?.stopCapture()
+            } catch {
+                logger.warning("Failed to stop capture during automatic stop: \(error.localizedDescription)")
+            }
+        }
+
         let hasCapturedFrames = withFrameLock { frameState.frameWriter?.startTime != nil }
         if hasCapturedFrames {
             await finalizeRecording()
             if lastRecordedURL != nil {
-                errorMessage = "Recording stopped unexpectedly (\(error.localizedDescription)). The partial recording was saved."
+                errorMessage = savedMessage
             }
         } else {
             assetWriter?.cancelWriting()
             if let outputURL {
                 discardTempRecording(outputURL)
             }
-            errorMessage = "Recording stopped before any frames were captured: \(error.localizedDescription)"
+            errorMessage = discardedMessage
         }
 
         cleanup()
         isRecording = false
         onUnexpectedStop?()
+    }
+
+    /// Polls the destination volume while recording and ends the take before
+    /// the writer runs out of room. A writer that fails cannot be finalized,
+    /// so stopping early is the only way to keep what has been captured.
+    private func startLowSpaceMonitor() {
+        stopLowSpaceMonitor()
+        let timer = Timer(
+            timeInterval: RecordingDiskSpace.checkInterval,
+            repeats: true
+        ) { [weak self] _ in
+            Task { @MainActor in
+                await self?.stopIfSpaceCriticallyLow()
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        lowSpaceTimer = timer
+    }
+
+    private func stopLowSpaceMonitor() {
+        lowSpaceTimer?.invalidate()
+        lowSpaceTimer = nil
+    }
+
+    private func stopIfSpaceCriticallyLow() async {
+        guard isRecording, !isStopping else { return }
+
+        let directory = outputURL?.deletingLastPathComponent() ?? settings.outputDirectory
+        guard let available = Self.availableCapacity(at: directory),
+              RecordingDiskSpace.isCriticallyLow(
+                  availableBytes: available,
+                  bitrate: settings.videoQuality.bitrate
+              ) else {
+            return
+        }
+
+        let reason = RecordingDiskSpace.lowSpaceReason(availableBytes: available)
+        logger.warning("Stopping recording early: \(reason, privacy: .public)")
+        await endRecordingUnexpectedly(
+            savedMessage: "Recording stopped because \(reason). What was captured so far was saved.",
+            discardedMessage: "Recording stopped before any frames were captured because \(reason)",
+            stoppingStream: true
+        )
     }
 
     private func startCaptureSessions() -> (audioFailed: Bool, cameraFailed: Bool) {

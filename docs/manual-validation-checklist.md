@@ -6,7 +6,7 @@ Generated from the canonical tracker on 2026-06-21. This checklist is a companio
 
 Environment note: a bounded System Events probe on 2026-06-21 returned `UI elements enabled = false`, so this environment cannot inspect the menu bar, permission prompts, device pickers, or recording UI.
 
-Manual validation required: 31 stories.
+Manual validation required: 32 stories.
 No further manual validation required: 2 stories.
 
 ## Recommended Order
@@ -576,6 +576,24 @@ Manual steps:
 2. start a recording and verify it is refused with a message naming the free space and approximate duration
 3. free up space and verify recording starts normally
 4. set the output folder to a path that does not exist and verify recording still starts.
+
+Current status: Partial automated evidence passed; manual UI validation still pending. A bounded System Events probe on 2026-06-21 returned UI elements enabled = false, so this environment cannot inspect the app UI; validate manually using the listed steps.
+
+Result: [ ] Pass  [ ] Fail  [ ] Blocked
+
+Notes:
+
+## US-034 - Low disk space auto-stop
+
+User story: As a user recording a long demo, I want Reel to end the take while the file can still be saved rather than losing everything when the disk fills.
+
+Expected behavior: While recording, a timer re-checks the destination volume every ten seconds. Once free space falls below thirty seconds of capture at the configured bitrate, the recording ends through the shared automatic-stop path: the stream is stopped, captured frames are finalized into a playable file, and the message explains the disk was almost full and how much space was left. Recordings that had captured no frames yet are discarded instead. The monitor is torn down on every recording teardown path.
+
+Manual steps:
+
+1. Start a recording on a volume with a few hundred megabytes free
+2. fill the volume from another process while recording
+3. verify the recording stops on its own within about ten seconds, the resulting file plays back, and the message names the remaining space.
 
 Current status: Partial automated evidence passed; manual UI validation still pending. A bounded System Events probe on 2026-06-21 returned UI elements enabled = false, so this environment cannot inspect the app UI; validate manually using the listed steps.
 

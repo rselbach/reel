@@ -112,6 +112,36 @@ final class AppSettingsTests: XCTestCase {
     }
 
     @MainActor
+    func testLowSpaceStopTriggersBeforeTheWriterRunsOut() {
+        let bitrate = AppSettings.VideoQuality.medium.bitrate
+        let perSecond = RecordingDiskSpace.bytesPerSecond(bitrate: bitrate)
+
+        XCTAssertFalse(
+            RecordingDiskSpace.isCriticallyLow(availableBytes: perSecond * 60, bitrate: bitrate)
+        )
+        XCTAssertTrue(
+            RecordingDiskSpace.isCriticallyLow(availableBytes: perSecond * 10, bitrate: bitrate)
+        )
+        XCTAssertTrue(
+            RecordingDiskSpace.isCriticallyLow(availableBytes: 0, bitrate: bitrate)
+        )
+
+        // The stop floor has to sit below the start floor, otherwise every
+        // recording that is allowed to start stops itself immediately.
+        XCTAssertLessThan(
+            RecordingDiskSpace.stopSeconds,
+            RecordingDiskSpace.minimumMinutes * 60
+        )
+    }
+
+    @MainActor
+    func testLowSpaceReasonNamesRemainingSpace() {
+        let reason = RecordingDiskSpace.lowSpaceReason(availableBytes: 5_000_000)
+        XCTAssertTrue(reason.contains("disk is almost full"))
+        XCTAssertTrue(reason.contains("MB"))
+    }
+
+    @MainActor
     func testVideoQualityBitrates() {
         XCTAssertEqual(AppSettings.VideoQuality.low.bitrate, 5_000_000)
         XCTAssertEqual(AppSettings.VideoQuality.medium.bitrate, 10_000_000)
