@@ -174,6 +174,64 @@ class ScreenRecorder: NSObject, ObservableObject {
         }
     }
 
+    /// Re-applies the target remembered from a previous launch. Must run after
+    /// shareable content has loaded, since the display, window, or region has
+    /// to still exist before it can be selected. Anything that has gone away
+    /// leaves the current selection alone.
+    func restoreRememberedTarget() {
+        guard let target = settings.rememberedTarget else { return }
+
+        switch target {
+        case .display(let displayID):
+            guard availableDisplays.contains(where: { $0.displayID == displayID }) else { return }
+            selectedDisplayID = displayID
+            recordingMode = .display
+
+        case .window(let bundleID, let title):
+            guard let index = RememberedTargetMatching.bestMatchIndex(
+                bundleIDs: availableWindows.map { $0.owningApplication?.bundleIdentifier },
+                titles: availableWindows.map { $0.title },
+                wantedBundleID: bundleID,
+                wantedTitle: title
+            ) else { return }
+            selectedWindow = availableWindows[index]
+            recordingMode = .window
+
+        case .region(let displayID, let x, let y, let width, let height):
+            let rect = CGRect(x: x, y: y, width: width, height: height)
+            guard let display = availableDisplays.first(where: { $0.displayID == displayID }),
+                  CGRect(origin: .zero, size: display.frame.size).contains(rect) else {
+                return
+            }
+            selectedRegion = RecordingRegion(displayID: displayID, rect: rect)
+            recordingMode = .region
+        }
+    }
+
+    /// Records what this take captured so the next launch starts here.
+    private func rememberCurrentTarget() {
+        switch recordingMode {
+        case .display:
+            guard let selectedDisplayID else { return }
+            settings.rememberedTarget = .display(selectedDisplayID)
+
+        case .window:
+            guard let window = selectedWindow,
+                  let bundleID = window.owningApplication?.bundleIdentifier else { return }
+            settings.rememberedTarget = .window(bundleID: bundleID, title: window.title)
+
+        case .region:
+            guard let region = selectedRegion else { return }
+            settings.rememberedTarget = .region(
+                displayID: region.displayID,
+                x: region.rect.origin.x,
+                y: region.rect.origin.y,
+                width: region.rect.width,
+                height: region.rect.height
+            )
+        }
+    }
+
     private func regionDisplay(for region: RecordingRegion) -> SCDisplay? {
         availableDisplays.first { $0.displayID == region.displayID }
     }
@@ -490,6 +548,7 @@ class ScreenRecorder: NSObject, ObservableObject {
             let failures = startCaptureSessions()
             lastRecordedURL = nil
             isRecording = true
+            rememberCurrentTarget()
             startLowSpaceMonitor()
 
             // Surface capture session failures as warnings (recording continues without them)

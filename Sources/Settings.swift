@@ -19,6 +19,35 @@ enum RecentRecordingsLogic {
     }
 }
 
+/// The recording target remembered between launches.
+///
+/// Windows are identified by owning application and title rather than by
+/// CGWindowID, which is only meaningful while that particular window exists.
+enum RememberedTarget: Codable, Equatable {
+    case display(CGDirectDisplayID)
+    case window(bundleID: String, title: String?)
+    case region(displayID: CGDirectDisplayID, x: Double, y: Double, width: Double, height: Double)
+}
+
+enum RememberedTargetMatching {
+    /// Picks the window that best matches a remembered target: same app and
+    /// same title if that window is still open, otherwise any window of the
+    /// same app, so relaunching into a renamed window still works.
+    static func bestMatchIndex(
+        bundleIDs: [String?],
+        titles: [String?],
+        wantedBundleID: String,
+        wantedTitle: String?
+    ) -> Int? {
+        let candidates = bundleIDs.indices.filter { bundleIDs[$0] == wantedBundleID }
+        if let wantedTitle,
+           let exact = candidates.first(where: { titles.indices.contains($0) && titles[$0] == wantedTitle }) {
+            return exact
+        }
+        return candidates.first
+    }
+}
+
 /// String-backed setting whose rawValue is a stable storage key, decoupled
 /// from the label shown in the UI so rewording a label never resets stored
 /// preferences.
@@ -130,6 +159,7 @@ class AppSettings: ObservableObject {
         static let textOverlayText = "textOverlayText"
         static let textOverlayPosition = "textOverlayPosition"
         static let recentRecordings = "recentRecordings"
+        static let rememberedTarget = "rememberedTarget"
     }
 
     private func persist(_ value: Any?, key: String) {
@@ -303,6 +333,33 @@ class AppSettings: ObservableObject {
 
     @Published var textOverlayPosition: TextOverlayPosition {
         didSet { persist(textOverlayPosition.rawValue, key: DefaultsKey.textOverlayPosition) }
+    }
+
+    /// What the last recording captured, so a relaunch does not silently fall
+    /// back to the primary display.
+    @Published var rememberedTarget: RememberedTarget? {
+        didSet {
+            guard let rememberedTarget else {
+                UserDefaults.standard.removeObject(forKey: DefaultsKey.rememberedTarget)
+                return
+            }
+            do {
+                let data = try JSONEncoder().encode(rememberedTarget)
+                UserDefaults.standard.set(data, forKey: DefaultsKey.rememberedTarget)
+            } catch {
+                logger.warning("Failed to persist remembered recording target: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    private static func loadRememberedTarget(from defaults: UserDefaults) -> RememberedTarget? {
+        guard let data = defaults.data(forKey: DefaultsKey.rememberedTarget) else { return nil }
+        do {
+            return try JSONDecoder().decode(RememberedTarget.self, from: data)
+        } catch {
+            logger.warning("Failed to decode remembered recording target: \(error.localizedDescription)")
+            return nil
+        }
     }
 
     static let maxRecentRecordings = 5
@@ -634,6 +691,7 @@ class AppSettings: ObservableObject {
         self.textOverlayPosition = TextOverlayPosition.fromStored(defaults.string(forKey: DefaultsKey.textOverlayPosition)) ?? .center
 
         self.recentRecordingPaths = defaults.stringArray(forKey: DefaultsKey.recentRecordings) ?? []
+        self.rememberedTarget = Self.loadRememberedTarget(from: defaults)
     }
 
     private func updateLaunchAtLogin() {

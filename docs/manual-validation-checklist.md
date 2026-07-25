@@ -6,7 +6,7 @@ Generated from the canonical tracker on 2026-06-21. This checklist is a companio
 
 Environment note: a bounded System Events probe on 2026-06-21 returned `UI elements enabled = false`, so this environment cannot inspect the menu bar, permission prompts, device pickers, or recording UI.
 
-Manual validation required: 32 stories.
+Manual validation required: 33 stories.
 No further manual validation required: 2 stories.
 
 ## Recommended Order
@@ -594,6 +594,27 @@ Manual steps:
 1. Start a recording on a volume with a few hundred megabytes free
 2. fill the volume from another process while recording
 3. verify the recording stops on its own within about ten seconds, the resulting file plays back, and the message names the remaining space.
+
+Current status: Partial automated evidence passed; manual UI validation still pending. A bounded System Events probe on 2026-06-21 returned UI elements enabled = false, so this environment cannot inspect the app UI; validate manually using the listed steps.
+
+Result: [ ] Pass  [ ] Fail  [ ] Blocked
+
+Notes:
+
+## US-035 - Remembered recording target
+
+User story: As a user, I want Reel to remember what I last recorded so the hotkey does not silently fall back to the primary display after a relaunch.
+
+Expected behavior: A successful recording start persists its target: a display ID, an owning application bundle ID plus window title, or a display-local region rect. On the next launch, once shareable content has loaded, the target is restored. A remembered window is matched by app and title first and by app alone if the title changed, so a renamed window is still found; targets whose display, window, or region no longer exists leave the current selection untouched.
+
+Manual steps:
+
+1. Record a specific window
+2. quit and relaunch Reel
+3. press the hotkey and verify the same window is recorded rather than the primary display
+4. repeat with an area selection
+5. rename the recorded window's document and verify the same app's window is still selected
+6. close the app entirely and verify the picker appears instead.
 
 Current status: Partial automated evidence passed; manual UI validation still pending. A bounded System Events probe on 2026-06-21 returned UI elements enabled = false, so this environment cannot inspect the app UI; validate manually using the listed steps.
 

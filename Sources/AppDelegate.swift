@@ -165,6 +165,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if AppSettings.shared.hasShownWelcome {
             Task { @MainActor in
                 await screenRecorder.requestPermission()
+                screenRecorder.restoreRememberedTarget()
                 rebuildMenu()
             }
         } else {

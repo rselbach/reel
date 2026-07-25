@@ -44,6 +44,59 @@ final class AppSettingsTests: XCTestCase {
     }
 
     @MainActor
+    func testRememberedTargetSurvivesACodingRoundTrip() throws {
+        let targets: [RememberedTarget] = [
+            .display(7),
+            .window(bundleID: "com.greendale.study", title: "Spanish 101"),
+            .window(bundleID: "com.greendale.study", title: nil),
+            .region(displayID: 2, x: 10, y: 20, width: 640, height: 360)
+        ]
+
+        for target in targets {
+            let data = try JSONEncoder().encode(target)
+            let decoded = try JSONDecoder().decode(RememberedTarget.self, from: data)
+            XCTAssertEqual(decoded, target)
+        }
+    }
+
+    @MainActor
+    func testRememberedWindowPrefersSameTitleThenSameApp() {
+        let bundleIDs: [String?] = ["com.greendale.study", "com.greendale.study", "com.greendale.dean"]
+        let titles: [String?] = ["Spanish 101", "Biology 101", "Dean's Office"]
+
+        XCTAssertEqual(
+            RememberedTargetMatching.bestMatchIndex(
+                bundleIDs: bundleIDs,
+                titles: titles,
+                wantedBundleID: "com.greendale.study",
+                wantedTitle: "Biology 101"
+            ),
+            1
+        )
+
+        // Renamed window: fall back to the first window of the same app
+        // rather than losing the target entirely.
+        XCTAssertEqual(
+            RememberedTargetMatching.bestMatchIndex(
+                bundleIDs: bundleIDs,
+                titles: titles,
+                wantedBundleID: "com.greendale.study",
+                wantedTitle: "Anthropology 101"
+            ),
+            0
+        )
+
+        XCTAssertNil(
+            RememberedTargetMatching.bestMatchIndex(
+                bundleIDs: bundleIDs,
+                titles: titles,
+                wantedBundleID: "com.greendale.cafeteria",
+                wantedTitle: nil
+            )
+        )
+    }
+
+    @MainActor
     func testRecordingOptionsSnapshotMatchesSettingsAtStart() {
         let settings = AppSettings.shared
         let options = RecordingOptions(settings: settings)
