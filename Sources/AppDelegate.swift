@@ -601,6 +601,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 availableDisplays: screenRecorder.availableDisplays,
                 availableWindows: screenRecorder.availableWindows,
                 initialSelection: currentRecordingSelection,
+                lastRegionSize: screenRecorder.selectedRegion?.rect.size,
                 onStart: { [weak self] selection in
                     guard let self else { return }
                     self.recordingDialogWindow?.close()
@@ -656,6 +657,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             case .region:
                 guard let region = await RegionSelector().select() else { return }
                 screenRecorder.selectedRegion = region
+                screenRecorder.recordingMode = .region
+            case .lastRegion:
+                guard screenRecorder.selectedRegion != nil else { return }
                 screenRecorder.recordingMode = .region
             }
 

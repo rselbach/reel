@@ -4,13 +4,17 @@ import ScreenCaptureKit
 enum RecordingSelection: Equatable {
     case display(CGDirectDisplayID)
     case window(SCWindow)
+    /// Draw a new area.
     case region
+    /// Record the area drawn last time, without drawing it again.
+    case lastRegion
 
     static func == (lhs: RecordingSelection, rhs: RecordingSelection) -> Bool {
         switch (lhs, rhs) {
         case (.display(let l), .display(let r)): return l == r
         case (.window(let l), .window(let r)): return l.windowID == r.windowID
         case (.region, .region): return true
+        case (.lastRegion, .lastRegion): return true
         default: return false
         }
     }
@@ -27,6 +31,7 @@ enum RecordingDialogText {
     static let nothingRecordableHint = "Check screen recording permission and try again."
     static let openSystemSettings = "Open System Settings..."
     static let openSystemSettingsFailed = "Could not open System Settings."
+    static let selectArea = "Select Area to Record..."
 }
 
 enum RecordingDialogLogic {
@@ -42,6 +47,12 @@ enum RecordingDialogLogic {
         return title
     }
 
+    /// Names the remembered area by its size, so it is obvious which area is
+    /// about to be reused.
+    static func lastAreaLabel(size: CGSize) -> String {
+        "Use Last Area (\(Int(size.width.rounded())) × \(Int(size.height.rounded())))"
+    }
+
     /// Keeps a preselected target only when it is actually listed, so Start
     /// Recording is never enabled for a window or display that has gone away
     /// since it was remembered.
@@ -55,7 +66,7 @@ enum RecordingDialogLogic {
             return displayIDs.contains(displayID) ? selection : nil
         case .window(let window):
             return windowIDs.contains(window.windowID) ? selection : nil
-        case .region, .none:
+        case .region, .lastRegion, .none:
             return selection
         }
     }
@@ -80,6 +91,8 @@ struct RecordingDialog: View {
     let onStart: (RecordingSelection) -> Void
     let onCancel: () -> Void
     let onRefresh: @MainActor () async -> (displays: [SCDisplay], windows: [SCWindow])
+    /// Size of the remembered area, when there is one to offer reusing.
+    let lastRegionSize: CGSize?
 
     @State private var displays: [SCDisplay]
     @State private var windows: [SCWindow]
@@ -94,6 +107,7 @@ struct RecordingDialog: View {
         availableDisplays: [SCDisplay],
         availableWindows: [SCWindow],
         initialSelection: RecordingSelection?,
+        lastRegionSize: CGSize?,
         onStart: @escaping (RecordingSelection) -> Void,
         onCancel: @escaping () -> Void,
         onRefresh: @escaping @MainActor () async -> (displays: [SCDisplay], windows: [SCWindow])
@@ -101,6 +115,7 @@ struct RecordingDialog: View {
         self.onStart = onStart
         self.onCancel = onCancel
         self.onRefresh = onRefresh
+        self.lastRegionSize = lastRegionSize
         _displays = State(initialValue: availableDisplays)
         _windows = State(initialValue: availableWindows)
         _selection = State(initialValue: RecordingDialogLogic.validPreselection(
@@ -165,8 +180,20 @@ struct RecordingDialog: View {
                 Button {
                     onStart(.region)
                 } label: {
-                    Label("Select Area to Record...", systemImage: "rectangle.dashed")
+                    Label(RecordingDialogText.selectArea, systemImage: "rectangle.dashed")
                 }
+
+                if let lastRegionSize {
+                    Button {
+                        onStart(.lastRegion)
+                    } label: {
+                        Label(
+                            RecordingDialogLogic.lastAreaLabel(size: lastRegionSize),
+                            systemImage: "arrow.counterclockwise"
+                        )
+                    }
+                }
+
                 Spacer()
             }
             .padding(.horizontal, 16)

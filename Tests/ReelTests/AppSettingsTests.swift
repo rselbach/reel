@@ -568,6 +568,24 @@ final class AppSettingsTests: XCTestCase {
     }
 
     @MainActor
+    func testLastAreaLabelNamesTheRememberedSize() {
+        XCTAssertEqual(
+            RecordingDialogLogic.lastAreaLabel(size: CGSize(width: 1280, height: 720)),
+            "Use Last Area (1280 × 720)"
+        )
+        XCTAssertEqual(
+            RecordingDialogLogic.lastAreaLabel(size: CGSize(width: 640.4, height: 360.6)),
+            "Use Last Area (640 × 361)"
+        )
+    }
+
+    @MainActor
+    func testDrawingAnAreaIsDistinctFromReusingOne() {
+        XCTAssertNotEqual(RecordingSelection.region, RecordingSelection.lastRegion)
+        XCTAssertEqual(RecordingSelection.lastRegion, RecordingSelection.lastRegion)
+    }
+
+    @MainActor
     func testPickerPreselectionDropsTargetsThatAreGone() {
         XCTAssertEqual(
             RecordingDialogLogic.validPreselection(
