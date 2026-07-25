@@ -236,15 +236,16 @@ final class RegionSelectionView: NSView {
     }
 }
 
-/// Non-interactive border shown around the recorded region while recording.
-/// Excluded from capture via sharingType, so it never appears in the file.
+/// Non-interactive border drawn around whatever is being captured — an area
+/// or a window — while recording. Excluded from capture via sharingType, so it
+/// never appears in the file.
 @MainActor
-final class RegionIndicatorController {
+final class CaptureBoundsIndicator {
     private var window: NSWindow?
 
     func show(globalQuartzFrame: CGRect) {
         guard let cocoaFrame = cocoaRect(fromQuartz: globalQuartzFrame) else {
-            logger.error("Cannot show region indicator: no screens for coordinate conversion")
+            logger.error("Cannot show capture bounds: no screens for coordinate conversion")
             return
         }
 
@@ -262,10 +263,20 @@ final class RegionIndicatorController {
         window.sharingType = .none
         window.isReleasedWhenClosed = false
         window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
-        window.contentView = RegionBorderView(frame: NSRect(origin: .zero, size: cocoaFrame.size))
+        window.contentView = CaptureBoundsView(frame: NSRect(origin: .zero, size: cocoaFrame.size))
         window.orderFrontRegardless()
 
         self.window = window
+    }
+
+    /// Follows the recorded window as it is moved or resized.
+    func update(globalQuartzFrame: CGRect) {
+        guard let window,
+              let cocoaFrame = cocoaRect(fromQuartz: globalQuartzFrame),
+              window.frame != cocoaFrame else {
+            return
+        }
+        window.setFrame(cocoaFrame, display: true)
     }
 
     func hide() {
@@ -274,7 +285,7 @@ final class RegionIndicatorController {
     }
 }
 
-final class RegionBorderView: NSView {
+final class CaptureBoundsView: NSView {
     override func draw(_ dirtyRect: NSRect) {
         NSColor.systemRed.withAlphaComponent(0.8).setStroke()
         let path = NSBezierPath(rect: bounds.insetBy(dx: 1, dy: 1))

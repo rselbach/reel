@@ -6,7 +6,7 @@ Generated from the canonical tracker on 2026-06-21. This checklist is a companio
 
 Environment note: a bounded System Events probe on 2026-06-21 returned `UI elements enabled = false`, so this environment cannot inspect the menu bar, permission prompts, device pickers, or recording UI.
 
-Manual validation required: 33 stories.
+Manual validation required: 34 stories.
 No further manual validation required: 2 stories.
 
 ## Recommended Order
@@ -617,6 +617,27 @@ Manual steps:
 4. repeat with an area selection
 5. rename the recorded window's document and verify the same app's window is still selected
 6. close the app entirely and verify the picker appears instead.
+
+Current status: Partial automated evidence passed; manual UI validation still pending. A bounded System Events probe on 2026-06-21 returned UI elements enabled = false, so this environment cannot inspect the app UI; validate manually using the listed steps.
+
+Result: [ ] Pass  [ ] Fail  [ ] Blocked
+
+Notes:
+
+## US-036 - Capture bounds indicator
+
+User story: As a user recording a window or an area, I want to see exactly what is being captured so I do not discover the wrong bounds after the take.
+
+Expected behavior: While recording an area or a window, a non-interactive red border is drawn around the captured bounds in a window excluded from capture, so it guides the user without appearing in the file. Window recordings keep the border in step with the window as it is moved or resized, through the same poll that moves the camera overlay. Full-display recordings show no border, since outlining the entire screen conveys nothing. The border is torn down whenever recording stops.
+
+Manual steps:
+
+1. Record a window with the camera overlay disabled
+2. verify a red border outlines the window and follows it when the window is moved and resized
+3. verify the border does not appear in the resulting file
+4. record an area and verify the border appears around it
+5. record a full display and verify no border is drawn
+6. stop each recording and verify the border disappears.
 
 Current status: Partial automated evidence passed; manual UI validation still pending. A bounded System Events probe on 2026-06-21 returned UI elements enabled = false, so this environment cannot inspect the app UI; validate manually using the listed steps.
 

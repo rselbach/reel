@@ -112,7 +112,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var activeCountdown: CountdownOverlay?
     private var hotkeyObserver: NSObjectProtocol?
     private var cameraOverlayController: CameraOverlayController?
-    private var regionIndicatorController: RegionIndicatorController?
+    private var captureBoundsIndicator: CaptureBoundsIndicator?
     private var recordingTimer: Timer?
     private var recordingStartedAt: Date?
     private var statusMenu: NSMenu?
@@ -270,10 +270,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
                 guard await self.runCountdown() else { return }
                 await self.screenRecorder.startRecording()
-                self.showCameraOverlayIfNeeded()
-                self.showRegionIndicatorIfNeeded()
-                self.rebuildMenu()
-                self.reportStartOutcome()
+                self.recordingDidStart()
             }
         }
     }
@@ -723,10 +720,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
             guard await runCountdown() else { return }
             await screenRecorder.startRecording()
-            showCameraOverlayIfNeeded()
-            showRegionIndicatorIfNeeded()
-            rebuildMenu()
-            reportStartOutcome()
+            recordingDidStart()
         }
     }
     
@@ -744,6 +738,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         activeCountdown = nil
         isCountdownActive = false
         return shouldStart
+    }
+
+    /// Brings up everything that accompanies a running recording.
+    private func recordingDidStart() {
+        showCameraOverlayIfNeeded()
+        showCaptureBoundsIfNeeded()
+        startWindowTrackingIfNeeded()
+        rebuildMenu()
+        reportStartOutcome()
     }
 
     /// Shows the draggable camera overlay if camera recording is enabled.
@@ -772,8 +775,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 AppSettings.shared.cameraSizeFraction = fraction
             }
         )
-
-        startWindowTrackingIfNeeded()
     }
 
     /// Hides the camera overlay window.
@@ -784,8 +785,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     /// Window recordings follow the window wherever it goes, but the camera
-    /// overlay's drag bounds were captured at start. Poll the recorded
-    /// window's frame and move the overlay along with it.
+    /// overlay's drag bounds and the capture bounds border were both placed at
+    /// start. Poll the recorded window's frame and move them along with it.
     private func startWindowTrackingIfNeeded() {
         guard screenRecorder.recordingMode == .window,
               let windowID = screenRecorder.selectedWindow?.windowID else {
@@ -807,12 +808,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     private func syncOverlayToRecordedWindow(windowID: CGWindowID) {
-        guard let controller = cameraOverlayController,
-              let quartzBounds = Self.windowBounds(windowID: windowID),
-              let cocoaBounds = cocoaRect(fromQuartz: quartzBounds) else {
-            return
+        guard let quartzBounds = Self.windowBounds(windowID: windowID) else { return }
+
+        captureBoundsIndicator?.update(globalQuartzFrame: quartzBounds)
+
+        if let controller = cameraOverlayController,
+           let cocoaBounds = cocoaRect(fromQuartz: quartzBounds) {
+            controller.updateBounds(cocoaBounds)
         }
-        controller.updateBounds(cocoaBounds)
     }
 
     private static func windowBounds(windowID: CGWindowID) -> CGRect? {
@@ -824,22 +827,23 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         return bounds
     }
 
-    /// Shows a border around the recorded region so the user can see exactly
-    /// what area is being captured.
-    private func showRegionIndicatorIfNeeded() {
+    /// Outlines what is being captured so the user can see exactly what lands
+    /// in the file. Full-display recordings are left alone: a border around
+    /// the whole screen is noise rather than information.
+    private func showCaptureBoundsIfNeeded() {
         guard screenRecorder.isRecording,
-              screenRecorder.recordingMode == .region,
+              screenRecorder.recordingMode != .display,
               let frame = screenRecorder.countdownTargetFrame else {
             return
         }
 
-        regionIndicatorController = RegionIndicatorController()
-        regionIndicatorController?.show(globalQuartzFrame: frame)
+        captureBoundsIndicator = CaptureBoundsIndicator()
+        captureBoundsIndicator?.show(globalQuartzFrame: frame)
     }
 
-    private func hideRegionIndicator() {
-        regionIndicatorController?.hide()
-        regionIndicatorController = nil
+    private func hideCaptureBounds() {
+        captureBoundsIndicator?.hide()
+        captureBoundsIndicator = nil
     }
 
     @objc private func openPreferences() {
@@ -857,7 +861,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private func updateIcon(isRecording: Bool) {
         if !isRecording {
             hideCameraOverlay()
-            hideRegionIndicator()
+            hideCaptureBounds()
         }
 
         if let button = statusItem.button {
