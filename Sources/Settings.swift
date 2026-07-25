@@ -147,6 +147,7 @@ class AppSettings: ObservableObject {
         static let frameRate = "frameRate"
         static let videoQuality = "videoQuality"
         static let videoResolution = "videoResolution"
+        static let videoCodec = "videoCodec"
         static let outputDirectory = "outputDirectory"
         static let askWhereToSave = "askWhereToSave"
         static let openFinderAfterRecording = "openFinderAfterRecording"
@@ -239,6 +240,10 @@ class AppSettings: ObservableObject {
 
     @Published var videoResolution: VideoResolution {
         didSet { persist(videoResolution.rawValue, key: DefaultsKey.videoResolution) }
+    }
+
+    @Published var videoCodec: VideoCodec {
+        didSet { persist(videoCodec.rawValue, key: DefaultsKey.videoCodec) }
     }
 
     @Published var outputDirectory: URL {
@@ -582,6 +587,43 @@ class AppSettings: ObservableObject {
             ?? AVCaptureDevice.default(for: .video)
     }
 
+    enum VideoCodec: String, StoredAppSetting {
+        case h264
+        case hevc
+
+        var displayName: String {
+            switch self {
+            case .h264: return "H.264 (most compatible)"
+            case .hevc: return "HEVC (smaller files)"
+            }
+        }
+
+        var avCodec: AVVideoCodecType {
+            switch self {
+            case .h264: return .h264
+            case .hevc: return .hevc
+            }
+        }
+
+        /// Only H.264 gets an explicit profile level; HEVC is left to pick its
+        /// own, since the H.264 constant is not a valid value for it.
+        var profileLevel: String? {
+            switch self {
+            case .h264: return AVVideoProfileLevelH264HighAutoLevel
+            case .hevc: return nil
+            }
+        }
+
+        /// Conservative dimension ceiling for broad AVAssetWriter
+        /// compatibility. HEVC handles considerably larger frames than H.264.
+        var maxDimensions: CGSize {
+            switch self {
+            case .h264: return CGSize(width: 4096, height: 2304)
+            case .hevc: return CGSize(width: 8192, height: 4320)
+            }
+        }
+    }
+
     /// Caps the recorded height. A Retina display captured natively produces
     /// an unusually large, oddly sized file; most demos are shown at 1080p or
     /// less, and the smaller frame is cheaper to encode as well.
@@ -748,6 +790,7 @@ class AppSettings: ObservableObject {
         self.frameRate = Self.sanitizedFrameRate(defaults.object(forKey: DefaultsKey.frameRate) as? Int ?? Self.defaultFrameRate)
         self.videoQuality = VideoQuality.fromStored(defaults.string(forKey: DefaultsKey.videoQuality)) ?? .medium
         self.videoResolution = VideoResolution.fromStored(defaults.string(forKey: DefaultsKey.videoResolution)) ?? .native
+        self.videoCodec = VideoCodec.fromStored(defaults.string(forKey: DefaultsKey.videoCodec)) ?? .h264
         self.openFinderAfterRecording = defaults.object(forKey: DefaultsKey.openFinderAfterRecording) as? Bool ?? true
         self.showPreviewAfterRecording = defaults.object(forKey: DefaultsKey.showPreviewAfterRecording) as? Bool ?? true
         self.playSoundCues = defaults.object(forKey: DefaultsKey.playSoundCues) as? Bool ?? true

@@ -1,3 +1,4 @@
+import AVFoundation
 import Carbon
 import XCTest
 @testable import Reel
@@ -34,6 +35,9 @@ private final class PartialDestinationFailingFileManager: FileManager, @unchecke
 }
 
 final class AppSettingsTests: XCTestCase {
+    @MainActor
+    private var h264Limits: CGSize { AppSettings.VideoCodec.h264.maxDimensions }
+
     @MainActor
     func testCameraOverlayPositionNormalizedCoordinates() {
         XCTAssertEqual(AppSettings.CameraOverlayPosition.bottomLeft.normalizedCoordinates.x, 0.0)
@@ -249,22 +253,26 @@ final class AppSettingsTests: XCTestCase {
     @MainActor
     func testResolutionCapPreservesAspectRatioAndEvenDimensions() {
         // A Retina 16:10 display captured at 2x, capped to 1080p.
-        let capped = ScreenRecorder.outputDimensions(width: 3456, height: 2160, maxHeight: 1080)
+        let capped = ScreenRecorder.outputDimensions(width: 3456, height: 2160, maxHeight: 1080, codec: .h264)
         XCTAssertEqual(capped.height, 1080)
         XCTAssertEqual(capped.width, 1728)
         XCTAssertEqual(capped.width % 2, 0)
         XCTAssertEqual(capped.height % 2, 0)
 
         // Already below the cap: left alone.
-        let small = ScreenRecorder.outputDimensions(width: 1280, height: 720, maxHeight: 1080)
+        let small = ScreenRecorder.outputDimensions(width: 1280, height: 720, maxHeight: 1080, codec: .h264)
         XCTAssertEqual(small.width, 1280)
         XCTAssertEqual(small.height, 720)
 
         // Native: only the encoder's own limits apply.
-        let native = ScreenRecorder.outputDimensions(width: 5120, height: 2880, maxHeight: nil)
+        let native = ScreenRecorder.outputDimensions(width: 5120, height: 2880, maxHeight: nil, codec: .h264)
         XCTAssertEqual(
             native.width,
-            ScreenRecorder.dimensionsFittingH264Limits(width: 5120, height: 2880).width
+            ScreenRecorder.dimensionsFitting(
+                width: 5120,
+                height: 2880,
+                maxSize: AppSettings.VideoCodec.h264.maxDimensions
+            ).width
         )
     }
 
@@ -272,11 +280,34 @@ final class AppSettingsTests: XCTestCase {
     func testResolutionCapStillObeysEncoderLimits() {
         // 1440p on an ultra-wide is still within the H.264 width ceiling only
         // because the cap runs first; verify both limits are applied.
-        let wide = ScreenRecorder.outputDimensions(width: 10240, height: 2880, maxHeight: 1440)
+        let wide = ScreenRecorder.outputDimensions(width: 10240, height: 2880, maxHeight: 1440, codec: .h264)
         XCTAssertLessThanOrEqual(wide.width, 4096)
         XCTAssertLessThanOrEqual(wide.height, 1440)
         XCTAssertEqual(wide.width % 2, 0)
         XCTAssertEqual(wide.height % 2, 0)
+    }
+
+    @MainActor
+    func testHevcAllowsLargerFramesThanH264() {
+        let h264 = AppSettings.VideoCodec.h264.maxDimensions
+        let hevc = AppSettings.VideoCodec.hevc.maxDimensions
+        XCTAssertGreaterThan(hevc.width, h264.width)
+        XCTAssertGreaterThan(hevc.height, h264.height)
+
+        // A 5K display fits natively under HEVC but is scaled down for H.264.
+        let underHevc = ScreenRecorder.outputDimensions(width: 5120, height: 2880, maxHeight: nil, codec: .hevc)
+        let underH264 = ScreenRecorder.outputDimensions(width: 5120, height: 2880, maxHeight: nil, codec: .h264)
+        XCTAssertEqual(underHevc.width, 5120)
+        XCTAssertLessThan(underH264.width, 5120)
+    }
+
+    @MainActor
+    func testOnlyH264CarriesAnExplicitProfileLevel() {
+        // AVVideoProfileLevelH264HighAutoLevel is not a valid value for HEVC,
+        // so HEVC must be left to choose its own.
+        XCTAssertEqual(AppSettings.VideoCodec.h264.profileLevel, AVVideoProfileLevelH264HighAutoLevel)
+        XCTAssertNil(AppSettings.VideoCodec.hevc.profileLevel)
+        XCTAssertEqual(AppSettings.VideoCodec.hevc.avCodec, .hevc)
     }
 
     @MainActor
@@ -1066,28 +1097,28 @@ final class AppSettingsTests: XCTestCase {
 
     @MainActor
     func testRecordingDimensionsStayUnchangedWhenInsideH264Limits() {
-        let dimensions = ScreenRecorder.dimensionsFittingH264Limits(width: 1920, height: 1080)
+        let dimensions = ScreenRecorder.dimensionsFitting(width: 1920, height: 1080, maxSize: h264Limits)
         XCTAssertEqual(dimensions.width, 1920)
         XCTAssertEqual(dimensions.height, 1080)
     }
 
     @MainActor
     func testRecordingDimensionsDownscaleLargeLandscapeCaptureForH264() {
-        let dimensions = ScreenRecorder.dimensionsFittingH264Limits(width: 5120, height: 2880)
+        let dimensions = ScreenRecorder.dimensionsFitting(width: 5120, height: 2880, maxSize: h264Limits)
         XCTAssertEqual(dimensions.width, 4096)
         XCTAssertEqual(dimensions.height, 2304)
     }
 
     @MainActor
     func testRecordingDimensionsDownscaleLargePortraitCaptureForH264() {
-        let dimensions = ScreenRecorder.dimensionsFittingH264Limits(width: 2880, height: 5120)
+        let dimensions = ScreenRecorder.dimensionsFitting(width: 2880, height: 5120, maxSize: h264Limits)
         XCTAssertEqual(dimensions.width, 1296)
         XCTAssertEqual(dimensions.height, 2304)
     }
 
     @MainActor
     func testRecordingDimensionsLeaveInvalidValuesForExistingValidation() {
-        let dimensions = ScreenRecorder.dimensionsFittingH264Limits(width: 0, height: 1080)
+        let dimensions = ScreenRecorder.dimensionsFitting(width: 0, height: 1080, maxSize: h264Limits)
         XCTAssertEqual(dimensions.width, 0)
         XCTAssertEqual(dimensions.height, 1080)
     }

@@ -6,7 +6,7 @@ Generated from the canonical tracker on 2026-06-21. This checklist is a companio
 
 Environment note: a bounded System Events probe on 2026-06-21 returned `UI elements enabled = false`, so this environment cannot inspect the menu bar, permission prompts, device pickers, or recording UI.
 
-Manual validation required: 37 stories.
+Manual validation required: 38 stories.
 No further manual validation required: 2 stories.
 
 ## Recommended Order
@@ -702,6 +702,25 @@ Manual steps:
 5. pause and resume several times in one take and verify sync still holds
 6. pause and then stop without resuming and verify the file is valid
 7. pause and then discard and verify nothing is written.
+
+Current status: Partial automated evidence passed; manual UI validation still pending. A bounded System Events probe on 2026-06-21 returned UI elements enabled = false, so this environment cannot inspect the app UI; validate manually using the listed steps.
+
+Result: [ ] Pass  [ ] Fail  [ ] Blocked
+
+Notes:
+
+## US-040 - HEVC recording codec
+
+User story: As a user sharing demo recordings, I want smaller files at the same quality without giving up compatibility when I need it.
+
+Expected behavior: A Recording setting chooses between H.264 and HEVC. The asset writer's codec, compression properties, and dimension ceiling all follow that choice: H.264 keeps its explicit high-profile auto level and 4096x2304 ceiling, while HEVC omits the profile level, which is not valid for it, and allows up to 8192x4320. The default stays H.264 for compatibility.
+
+Manual steps:
+
+1. Record the same content at the same quality preset with H.264 and with HEVC
+2. verify both files play in QuickTime and Finder preview
+3. verify the HEVC file is noticeably smaller
+4. record a 5K display natively with HEVC and verify the output keeps the full resolution rather than being scaled to 4096 wide.
 
 Current status: Partial automated evidence passed; manual UI validation still pending. A bounded System Events probe on 2026-06-21 returned UI elements enabled = false, so this environment cannot inspect the app UI; validate manually using the listed steps.
 

@@ -22,6 +22,7 @@ enum SettingsText {
     static let frameRate = "Frame rate:"
     static let videoQuality = "Video quality:"
     static let videoResolution = "Resolution:"
+    static let videoCodec = "Codec:"
     static let countdown = "Countdown:"
     static let countdownOff = "Off"
     static let recordAudio = "Record audio"
@@ -210,6 +211,12 @@ struct RecordingTab: View {
             Picker(SettingsText.videoResolution, selection: $settings.videoResolution) {
                 ForEach(AppSettings.VideoResolution.allCases, id: \.self) { resolution in
                     Text(resolution.displayName).tag(resolution)
+                }
+            }
+
+            Picker(SettingsText.videoCodec, selection: $settings.videoCodec) {
+                ForEach(AppSettings.VideoCodec.allCases, id: \.self) { codec in
+                    Text(codec.displayName).tag(codec)
                 }
             }
 

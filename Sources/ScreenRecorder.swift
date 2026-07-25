@@ -15,8 +15,6 @@ enum RecordingMode {
 private enum RecordingConstants {
     /// Minimum dimensions for windows to appear in the picker (filters tiny/hidden windows)
     static let minimumWindowSize: CGFloat = 100
-    /// Conservative H.264 dimensions for broad AVAssetWriter compatibility.
-    static let maxH264Size = CGSize(width: 4096, height: 2304)
 }
 
 enum RecordingFinalizationLogic {
@@ -49,6 +47,7 @@ struct RecordingOptions {
     var videoBitrate: Int
     /// Output height cap in pixels, or nil to keep the captured size.
     var resolutionMaxHeight: CGFloat?
+    var videoCodec: AppSettings.VideoCodec
     var outputDirectory: URL
     var askWhereToSave: Bool
     var openFinderAfterRecording: Bool
@@ -79,6 +78,7 @@ struct RecordingOptions {
         showCursor = settings.showCursor
         videoBitrate = settings.videoQuality.bitrate
         resolutionMaxHeight = settings.videoResolution.maxHeight
+        videoCodec = settings.videoCodec
         outputDirectory = settings.outputDirectory
         askWhereToSave = settings.askWhereToSave
         openFinderAfterRecording = settings.openFinderAfterRecording
@@ -393,16 +393,17 @@ class ScreenRecorder: NSObject, ObservableObject {
         return (content.displays, windows)
     }
 
-    private func captureDimensions(for display: SCDisplay, maxHeight: CGFloat?) -> (width: Int, height: Int) {
+    private func captureDimensions(for display: SCDisplay, maxHeight: CGFloat?, codec: AppSettings.VideoCodec) -> (width: Int, height: Int) {
         let scale = NSScreen.screens.first { $0.displayID == display.displayID }?.backingScaleFactor ?? 2.0
         return Self.outputDimensions(
             width: Int(CGFloat(display.width) * scale),
             height: Int(CGFloat(display.height) * scale),
-            maxHeight: maxHeight
+            maxHeight: maxHeight,
+            codec: codec
         )
     }
 
-    private func captureDimensions(for window: SCWindow, maxHeight: CGFloat?) -> (width: Int, height: Int) {
+    private func captureDimensions(for window: SCWindow, maxHeight: CGFloat?, codec: AppSettings.VideoCodec) -> (width: Int, height: Int) {
         let windowScreen = cocoaRect(fromQuartz: window.frame).flatMap { windowFrame in
             NSScreen.screens
                 .map { screen in (screen, screen.frame.intersection(windowFrame)) }
@@ -416,27 +417,37 @@ class ScreenRecorder: NSObject, ObservableObject {
         return Self.outputDimensions(
             width: Int(window.frame.width * scale),
             height: Int(window.frame.height * scale),
-            maxHeight: maxHeight
+            maxHeight: maxHeight,
+            codec: codec
         )
     }
 
     private func captureDimensions(
         forRegion rect: CGRect,
         on display: SCDisplay,
-        maxHeight: CGFloat?
+        maxHeight: CGFloat?,
+        codec: AppSettings.VideoCodec
     ) -> (width: Int, height: Int) {
         let scale = NSScreen.screens.first { $0.displayID == display.displayID }?.backingScaleFactor ?? 2.0
         return Self.outputDimensions(
             width: Int(rect.width * scale),
             height: Int(rect.height * scale),
-            maxHeight: maxHeight
+            maxHeight: maxHeight,
+            codec: codec
         )
     }
 
     /// Applies the configured height cap, preserving aspect ratio, then the
     /// encoder's own limits.
-    static func outputDimensions(width: Int, height: Int, maxHeight: CGFloat?) -> (width: Int, height: Int) {
-        guard width > 0, height > 0 else { return dimensionsFittingH264Limits(width: width, height: height) }
+    static func outputDimensions(
+        width: Int,
+        height: Int,
+        maxHeight: CGFloat?,
+        codec: AppSettings.VideoCodec
+    ) -> (width: Int, height: Int) {
+        guard width > 0, height > 0 else {
+            return dimensionsFitting(width: width, height: height, maxSize: codec.maxDimensions)
+        }
 
         var scaledWidth = CGFloat(width)
         var scaledHeight = CGFloat(height)
@@ -446,20 +457,23 @@ class ScreenRecorder: NSObject, ObservableObject {
             scaledHeight *= scale
         }
 
-        return dimensionsFittingH264Limits(
+        return dimensionsFitting(
             width: Int(scaledWidth.rounded()),
-            height: Int(scaledHeight.rounded())
+            height: Int(scaledHeight.rounded()),
+            maxSize: codec.maxDimensions
         )
     }
 
-    static func dimensionsFittingH264Limits(width: Int, height: Int) -> (width: Int, height: Int) {
+    /// Shrinks dimensions to fit an encoder's ceiling, keeping aspect ratio
+    /// and even numbers of pixels.
+    static func dimensionsFitting(width: Int, height: Int, maxSize: CGSize) -> (width: Int, height: Int) {
         guard width > 0, height > 0 else { return (width, height) }
 
         let scale = min(
             1,
             min(
-                RecordingConstants.maxH264Size.width / CGFloat(width),
-                RecordingConstants.maxH264Size.height / CGFloat(height)
+                maxSize.width / CGFloat(width),
+                maxSize.height / CGFloat(height)
             )
         )
         let scaledWidth = max(2, Int((CGFloat(width) * scale).rounded(.down)))
@@ -495,7 +509,7 @@ class ScreenRecorder: NSObject, ObservableObject {
                 return
             }
             filter = SCContentFilter(display: display, excludingWindows: [])
-            let dimensions = captureDimensions(for: display, maxHeight: options.resolutionMaxHeight)
+            let dimensions = captureDimensions(for: display, maxHeight: options.resolutionMaxHeight, codec: options.videoCodec)
             captureWidth = dimensions.width
             captureHeight = dimensions.height
 
@@ -505,7 +519,7 @@ class ScreenRecorder: NSObject, ObservableObject {
                 return
             }
             filter = SCContentFilter(desktopIndependentWindow: window)
-            let dimensions = captureDimensions(for: window, maxHeight: options.resolutionMaxHeight)
+            let dimensions = captureDimensions(for: window, maxHeight: options.resolutionMaxHeight, codec: options.videoCodec)
             captureWidth = dimensions.width
             captureHeight = dimensions.height
 
@@ -519,7 +533,8 @@ class ScreenRecorder: NSObject, ObservableObject {
             let dimensions = captureDimensions(
                 forRegion: region.rect,
                 on: display,
-                maxHeight: options.resolutionMaxHeight
+                maxHeight: options.resolutionMaxHeight,
+                codec: options.videoCodec
             )
             captureWidth = dimensions.width
             captureHeight = dimensions.height
@@ -784,7 +799,12 @@ class ScreenRecorder: NSObject, ObservableObject {
     private func setupAssetWriter(width: Int, height: Int, options: RecordingOptions) throws {
         let outputURL = try makeOutputURL(options: options)
         let assetWriter = try AVAssetWriter(outputURL: outputURL, fileType: .mp4)
-        let videoInput = makeVideoInput(width: width, height: height, bitrate: options.videoBitrate)
+        let videoInput = makeVideoInput(
+            width: width,
+            height: height,
+            bitrate: options.videoBitrate,
+            codec: options.videoCodec
+        )
 
         guard assetWriter.canAdd(videoInput) else {
             throw NSError(domain: "ScreenRecorder", code: 3, userInfo: [NSLocalizedDescriptionKey: "Cannot add video input"])
@@ -849,15 +869,22 @@ class ScreenRecorder: NSObject, ObservableObject {
         settings.outputDirectory = url
     }
 
-    private func makeVideoInput(width: Int, height: Int, bitrate: Int) -> AVAssetWriterInput {
+    private func makeVideoInput(
+        width: Int,
+        height: Int,
+        bitrate: Int,
+        codec: AppSettings.VideoCodec
+    ) -> AVAssetWriterInput {
+        var compression: [String: Any] = [AVVideoAverageBitRateKey: bitrate]
+        if let profileLevel = codec.profileLevel {
+            compression[AVVideoProfileLevelKey] = profileLevel
+        }
+
         let videoSettings: [String: Any] = [
-            AVVideoCodecKey: AVVideoCodecType.h264,
+            AVVideoCodecKey: codec.avCodec,
             AVVideoWidthKey: width,
             AVVideoHeightKey: height,
-            AVVideoCompressionPropertiesKey: [
-                AVVideoAverageBitRateKey: bitrate,
-                AVVideoProfileLevelKey: AVVideoProfileLevelH264HighAutoLevel
-            ]
+            AVVideoCompressionPropertiesKey: compression
         ]
 
         let input = AVAssetWriterInput(mediaType: .video, outputSettings: videoSettings)
