@@ -639,20 +639,20 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     /// Shows the draggable camera overlay if camera recording is enabled.
     private func showCameraOverlayIfNeeded() {
-        let settings = AppSettings.shared
-        guard settings.recordCamera,
+        guard let options = screenRecorder.activeRecordingOptions,
+              options.recordCamera,
               let session = screenRecorder.activeCameraCaptureSession,
               let bounds = screenRecorder.recordingBounds else {
             return
         }
-        
+
         cameraOverlayController = CameraOverlayController()
         cameraOverlayController?.show(
             session: session,
             bounds: bounds,
-            initialPosition: settings.cameraPosition,
-            sizeFraction: settings.cameraSizeFraction,
-            shape: settings.cameraShape,
+            initialPosition: options.cameraPosition,
+            sizeFraction: options.cameraSizeFraction,
+            shape: options.cameraShape,
             onPositionChanged: { [weak self] x, y in
                 self?.screenRecorder.updateCameraOverlayPosition(x: x, y: y)
             },

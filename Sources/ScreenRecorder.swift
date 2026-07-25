@@ -130,9 +130,66 @@ private enum RecordingError: LocalizedError {
     }
 }
 
-private struct TextOverlay {
+struct TextOverlay {
     let text: String
     let position: AppSettings.TextOverlayPosition
+}
+
+/// Everything a recording needs from settings, snapshotted the moment it
+/// starts. A take is then immune to settings edited while it runs, and the
+/// recorder reads live settings only where it genuinely has to write back.
+struct RecordingOptions {
+    var frameRate: Int
+    var showCursor: Bool
+    var videoBitrate: Int
+    var outputDirectory: URL
+    var askWhereToSave: Bool
+    var openFinderAfterRecording: Bool
+    var showPreviewAfterRecording: Bool
+
+    var recordAudio: Bool
+    var audioSource: AppSettings.AudioSource
+    var audioDevice: AVCaptureDevice?
+
+    var recordCamera: Bool
+    var cameraDevice: AVCaptureDevice?
+    var cameraShape: AppSettings.CameraOverlayShape
+    var cameraPosition: AppSettings.CameraOverlayPosition
+    var cameraSizeFraction: CGFloat
+
+    var textOverlay: TextOverlay?
+
+    /// Front cameras are mirrored in the on-screen preview, so the composited
+    /// output has to be mirrored too or the recording will not match what the
+    /// user was looking at.
+    var mirrorCamera: Bool {
+        recordCamera && cameraDevice?.position == .front
+    }
+
+    @MainActor
+    init(settings: AppSettings) {
+        frameRate = settings.frameRate
+        showCursor = settings.showCursor
+        videoBitrate = settings.videoQuality.bitrate
+        outputDirectory = settings.outputDirectory
+        askWhereToSave = settings.askWhereToSave
+        openFinderAfterRecording = settings.openFinderAfterRecording
+        showPreviewAfterRecording = settings.showPreviewAfterRecording
+
+        recordAudio = settings.recordAudio
+        audioSource = settings.audioSource
+        audioDevice = settings.recordAudio ? settings.selectedAudioDevice : nil
+
+        recordCamera = settings.recordCamera
+        cameraDevice = settings.recordCamera ? settings.selectedCamera : nil
+        cameraShape = settings.cameraShape
+        cameraPosition = settings.cameraPosition
+        cameraSizeFraction = settings.cameraSizeFraction
+
+        textOverlay = settings.activeTextOverlayText.map {
+            TextOverlay(text: $0, position: settings.textOverlayPosition)
+        }
+    }
 }
 
 enum TextOverlayLayout {
@@ -278,6 +335,8 @@ class ScreenRecorder: NSObject, ObservableObject {
     private var cameraCaptureSession: AVCaptureSession?
     private var cameraOutput: AVCaptureVideoDataOutput?
     private var outputURL: URL?
+    /// Settings snapshot for the recording currently in flight.
+    private var activeOptions: RecordingOptions?
     private var lowSpaceTimer: Timer?
     private let captureSessionQueue = DispatchQueue(label: "com.rselbach.reel.capture")
     // Reused across recordings; CIContext is cheap to hold but unnecessary
@@ -319,6 +378,11 @@ class ScreenRecorder: NSObject, ObservableObject {
     /// The active camera capture session, if camera recording is enabled.
     /// Used by CameraOverlayController to display live preview.
     var activeCameraCaptureSession: AVCaptureSession? { cameraCaptureSession }
+
+    /// The settings snapshot driving the recording in flight. The on-screen
+    /// camera overlay reads this rather than live settings so what the user
+    /// drags matches what is being composited into the file.
+    var activeRecordingOptions: RecordingOptions? { activeOptions }
     
     /// The bounds of the area being recorded, in Cocoa coordinates (origin
     /// bottom-left), for positioning and constraining the camera overlay.
@@ -460,6 +524,11 @@ class ScreenRecorder: NSObject, ObservableObject {
         // Reset stop signal for new recording
         resetCaptureStopSignal()
 
+        // Snapshot settings once so nothing edited mid-take can change the
+        // recording that is already running.
+        let options = RecordingOptions(settings: settings)
+        activeOptions = options
+
         let filter: SCContentFilter
         let captureWidth: Int
         let captureHeight: Int
@@ -504,7 +573,7 @@ class ScreenRecorder: NSObject, ObservableObject {
 
         // A writer that fails mid-recording cannot be finalized, so a full
         // disk destroys the whole take. Refuse up front instead.
-        if let shortfall = diskSpaceShortfall() {
+        if let shortfall = diskSpaceShortfall(options: options) {
             errorMessage = shortfall
             return
         }
@@ -513,9 +582,9 @@ class ScreenRecorder: NSObject, ObservableObject {
             let config = SCStreamConfiguration()
             config.width = captureWidth
             config.height = captureHeight
-            config.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(settings.frameRate))
+            config.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(options.frameRate))
             config.queueDepth = 5
-            config.showsCursor = settings.showCursor
+            config.showsCursor = options.showCursor
             config.pixelFormat = kCVPixelFormatType_32BGRA
 
             // Crop the display capture down to the selected region (points,
@@ -528,14 +597,14 @@ class ScreenRecorder: NSObject, ObservableObject {
             // resources, so a denial surfaces a clear message instead of a
             // generic "Failed to start" and leaves no temp file behind.
             // System audio rides on the screen recording permission instead.
-            if settings.recordAudio, settings.audioSource == .microphone {
+            if options.recordAudio, options.audioSource == .microphone {
                 guard await ensureAVPermission(for: .audio) else {
                     errorMessage = "Microphone access denied. Enable it in System Settings → Privacy & Security → Microphone."
                     return
                 }
             }
 
-            if settings.recordCamera {
+            if options.recordCamera {
                 guard await ensureAVPermission(for: .video) else {
                     errorMessage = "Camera access denied. Enable it in System Settings → Privacy & Security → Camera."
                     return
@@ -544,20 +613,20 @@ class ScreenRecorder: NSObject, ObservableObject {
 
             // Set up capture sessions before the asset writer so the audio
             // input can use the source's recommended settings (makeAudioInput).
-            if settings.recordAudio {
-                switch settings.audioSource {
+            if options.recordAudio {
+                switch options.audioSource {
                 case .microphone:
-                    try setupAudioCapture()
+                    try setupAudioCapture(options: options)
                 case .systemAudio:
                     configureSystemAudioCapture(config)
                 }
             }
 
-            if settings.recordCamera {
-                try setupCameraCapture()
+            if options.recordCamera {
+                try setupCameraCapture(options: options)
             }
 
-            try setupAssetWriter(width: config.width, height: config.height)
+            try setupAssetWriter(width: config.width, height: config.height, options: options)
 
             stream = SCStream(filter: filter, configuration: config, delegate: self)
 
@@ -695,10 +764,10 @@ class ScreenRecorder: NSObject, ObservableObject {
         }
     }
 
-    private func setupAssetWriter(width: Int, height: Int) throws {
-        let outputURL = try makeOutputURL()
+    private func setupAssetWriter(width: Int, height: Int, options: RecordingOptions) throws {
+        let outputURL = try makeOutputURL(options: options)
         let assetWriter = try AVAssetWriter(outputURL: outputURL, fileType: .mp4)
-        let videoInput = makeVideoInput(width: width, height: height)
+        let videoInput = makeVideoInput(width: width, height: height, bitrate: options.videoBitrate)
 
         guard assetWriter.canAdd(videoInput) else {
             throw NSError(domain: "ScreenRecorder", code: 3, userInfo: [NSLocalizedDescriptionKey: "Cannot add video input"])
@@ -708,7 +777,7 @@ class ScreenRecorder: NSObject, ObservableObject {
 
         let adaptor = makePixelBufferAdaptor(videoInput: videoInput, width: width, height: height)
         let bufferPool = makeBufferPool(width: width, height: height)
-        let audioInput = settings.recordAudio ? makeAudioInput(assetWriter: assetWriter) : nil
+        let audioInput = options.recordAudio ? makeAudioInput(assetWriter: assetWriter) : nil
 
         updateFrameWriter(
             adaptor: adaptor,
@@ -716,7 +785,8 @@ class ScreenRecorder: NSObject, ObservableObject {
             audioInput: audioInput,
             assetWriter: assetWriter,
             context: ciContext,
-            bufferPool: bufferPool
+            bufferPool: bufferPool,
+            options: options
         )
 
         self.outputURL = outputURL
@@ -734,12 +804,12 @@ class ScreenRecorder: NSObject, ObservableObject {
         }
     }
 
-    private func diskSpaceShortfall() -> String? {
-        let directory = settings.outputDirectory
+    private func diskSpaceShortfall(options: RecordingOptions) -> String? {
+        let directory = options.outputDirectory
         guard let available = Self.availableCapacity(at: directory) else { return nil }
         return RecordingDiskSpace.shortfallMessage(
             availableBytes: available,
-            bitrate: settings.videoQuality.bitrate,
+            bitrate: options.videoBitrate,
             directory: directory
         )
     }
@@ -757,14 +827,17 @@ class ScreenRecorder: NSObject, ObservableObject {
         }
     }
 
-    private func makeOutputURL() throws -> URL {
-        let outputDir = settings.outputDirectory
+    private func makeOutputURL(options: RecordingOptions) throws -> URL {
+        let outputDir = options.outputDirectory
         do {
             return try makeOutputURL(in: outputDir)
         } catch {
             logger.warning("Configured output directory unavailable (\(outputDir.path()), using fallback: \(error.localizedDescription))")
             let fallback = AppSettings.defaultOutputDirectory()
             persistSettingOutputDirectory(fallback)
+            // Keep the in-flight snapshot pointing at the directory actually
+            // being written to, so the save panel and space checks agree.
+            activeOptions?.outputDirectory = fallback
             return try makeOutputURL(in: fallback)
         }
     }
@@ -819,13 +892,13 @@ class ScreenRecorder: NSObject, ObservableObject {
         settings.outputDirectory = url
     }
 
-    private func makeVideoInput(width: Int, height: Int) -> AVAssetWriterInput {
+    private func makeVideoInput(width: Int, height: Int, bitrate: Int) -> AVAssetWriterInput {
         let videoSettings: [String: Any] = [
             AVVideoCodecKey: AVVideoCodecType.h264,
             AVVideoWidthKey: width,
             AVVideoHeightKey: height,
             AVVideoCompressionPropertiesKey: [
-                AVVideoAverageBitRateKey: settings.videoQuality.bitrate,
+                AVVideoAverageBitRateKey: bitrate,
                 AVVideoProfileLevelKey: AVVideoProfileLevelH264HighAutoLevel
             ]
         ]
@@ -907,17 +980,14 @@ class ScreenRecorder: NSObject, ObservableObject {
         audioInput: AVAssetWriterInput?,
         assetWriter: AVAssetWriter,
         context: CIContext,
-        bufferPool: CVPixelBufferPool?
+        bufferPool: CVPixelBufferPool?,
+        options: RecordingOptions
     ) {
-        let initialPos = settings.cameraPosition.normalizedCoordinates
-        let textOverlay = settings.activeTextOverlayText.map {
-            TextOverlay(text: $0, position: settings.textOverlayPosition)
-        }
-        let mirrorCamera = settings.recordCamera && settings.selectedCamera?.position == .front
+        let initialPos = options.cameraPosition.normalizedCoordinates
         withFrameLock {
             frameState.currentCameraX = initialPos.x
             frameState.currentCameraY = initialPos.y
-            frameState.currentCameraSizeFraction = settings.cameraSizeFraction
+            frameState.currentCameraSizeFraction = options.cameraSizeFraction
             frameState.frameWriter = FrameWriter(
                 adaptor: adaptor,
                 videoInput: videoInput,
@@ -926,10 +996,10 @@ class ScreenRecorder: NSObject, ObservableObject {
                 ciContext: context,
                 bufferPool: bufferPool,
                 startTime: nil,
-                recordCamera: settings.recordCamera,
-                cameraShape: settings.cameraShape,
-                mirrorCamera: mirrorCamera,
-                textOverlay: textOverlay
+                recordCamera: options.recordCamera,
+                cameraShape: options.cameraShape,
+                mirrorCamera: options.mirrorCamera,
+                textOverlay: options.textOverlay
             )
         }
     }
@@ -981,8 +1051,8 @@ class ScreenRecorder: NSObject, ObservableObject {
         }
     }
 
-    private func setupAudioCapture() throws {
-        guard let device = settings.selectedAudioDevice else {
+    private func setupAudioCapture(options: RecordingOptions) throws {
+        guard let device = options.audioDevice else {
             throw NSError(domain: "ScreenRecorder", code: 1, userInfo: [NSLocalizedDescriptionKey: "No audio device available"])
         }
 
@@ -1017,8 +1087,8 @@ class ScreenRecorder: NSObject, ObservableObject {
         ]
     }
 
-    private func setupCameraCapture() throws {
-        guard let device = settings.selectedCamera else {
+    private func setupCameraCapture(options: RecordingOptions) throws {
+        guard let device = options.cameraDevice else {
             throw NSError(domain: "ScreenRecorder", code: 2, userInfo: [NSLocalizedDescriptionKey: "No camera available"])
         }
 
@@ -1042,6 +1112,10 @@ class ScreenRecorder: NSObject, ObservableObject {
     }
 
     private func finalizeRecording() async {
+        // Always the snapshot taken at start: the user may have changed where
+        // recordings go while this one was running.
+        let options = activeOptions ?? RecordingOptions(settings: settings)
+
         videoInput?.markAsFinished()
         audioInput?.markAsFinished()
         await assetWriter?.finishWriting()
@@ -1058,7 +1132,7 @@ class ScreenRecorder: NSObject, ObservableObject {
         var finalURL = tempURL
         var replacementWarning: FileReplacementWarning?
 
-        if settings.askWhereToSave {
+        if options.askWhereToSave {
             // As a menu bar (accessory) app there is usually no key window
             // when a recording stops; without activation the save panel can
             // open behind the frontmost app.
@@ -1066,7 +1140,7 @@ class ScreenRecorder: NSObject, ObservableObject {
             let panel = NSSavePanel()
             panel.allowedContentTypes = [.mpeg4Movie]
             panel.nameFieldStringValue = tempURL.lastPathComponent
-            panel.directoryURL = settings.outputDirectory
+            panel.directoryURL = options.outputDirectory
 
             let response: NSApplication.ModalResponse
             if let keyWindow = NSApp.keyWindow {
@@ -1101,8 +1175,8 @@ class ScreenRecorder: NSObject, ObservableObject {
         }
 
         if RecordingFinalizationLogic.shouldRevealInFinder(
-            openFinderAfterRecording: settings.openFinderAfterRecording,
-            showPreviewAfterRecording: settings.showPreviewAfterRecording
+            openFinderAfterRecording: options.openFinderAfterRecording,
+            showPreviewAfterRecording: options.showPreviewAfterRecording
         ) {
             let revealed = NSWorkspace.shared.selectFile(finalURL.path(), inFileViewerRootedAtPath: "")
             if !revealed {
@@ -1142,6 +1216,7 @@ class ScreenRecorder: NSObject, ObservableObject {
         stopLowSpaceMonitor()
         stream = nil
         outputURL = nil
+        activeOptions = nil
         assetWriter = nil
         videoInput = nil
         audioInput = nil
@@ -1237,11 +1312,12 @@ class ScreenRecorder: NSObject, ObservableObject {
     private func stopIfSpaceCriticallyLow() async {
         guard isRecording, !isStopping else { return }
 
-        let directory = outputURL?.deletingLastPathComponent() ?? settings.outputDirectory
+        let options = activeOptions ?? RecordingOptions(settings: settings)
+        let directory = outputURL?.deletingLastPathComponent() ?? options.outputDirectory
         guard let available = Self.availableCapacity(at: directory),
               RecordingDiskSpace.isCriticallyLow(
                   availableBytes: available,
-                  bitrate: settings.videoQuality.bitrate
+                  bitrate: options.videoBitrate
               ) else {
             return
         }

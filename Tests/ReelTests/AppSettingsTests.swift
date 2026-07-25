@@ -44,6 +44,58 @@ final class AppSettingsTests: XCTestCase {
     }
 
     @MainActor
+    func testRecordingOptionsSnapshotMatchesSettingsAtStart() {
+        let settings = AppSettings.shared
+        let options = RecordingOptions(settings: settings)
+
+        XCTAssertEqual(options.frameRate, settings.frameRate)
+        XCTAssertEqual(options.showCursor, settings.showCursor)
+        XCTAssertEqual(options.videoBitrate, settings.videoQuality.bitrate)
+        XCTAssertEqual(options.outputDirectory, settings.outputDirectory)
+        XCTAssertEqual(options.askWhereToSave, settings.askWhereToSave)
+        XCTAssertEqual(options.recordAudio, settings.recordAudio)
+        XCTAssertEqual(options.recordCamera, settings.recordCamera)
+        XCTAssertEqual(options.cameraShape, settings.cameraShape)
+        XCTAssertEqual(options.cameraSizeFraction, settings.cameraSizeFraction)
+        XCTAssertEqual(options.textOverlay?.text, settings.activeTextOverlayText)
+    }
+
+    @MainActor
+    func testRecordingOptionsDoNotFollowLaterSettingsEdits() {
+        let settings = AppSettings.shared
+        let originalQuality = settings.videoQuality
+        let originalCursor = settings.showCursor
+        defer {
+            settings.videoQuality = originalQuality
+            settings.showCursor = originalCursor
+        }
+
+        settings.videoQuality = .low
+        settings.showCursor = true
+        let options = RecordingOptions(settings: settings)
+
+        settings.videoQuality = .maximum
+        settings.showCursor = false
+
+        XCTAssertEqual(options.videoBitrate, AppSettings.VideoQuality.low.bitrate)
+        XCTAssertTrue(options.showCursor)
+    }
+
+    @MainActor
+    func testRecordingOptionsOnlyMirrorFrontFacingCameras() {
+        var options = RecordingOptions(settings: AppSettings.shared)
+        options.recordCamera = false
+        options.cameraDevice = nil
+        XCTAssertFalse(options.mirrorCamera)
+
+        // Without a device the position is unknown, which must not be treated
+        // as front-facing: external and continuity cameras report
+        // .unspecified and are never mirrored.
+        options.recordCamera = true
+        XCTAssertFalse(options.mirrorCamera)
+    }
+
+    @MainActor
     func testDiskSpaceRequirementScalesWithBitrate() {
         let medium = AppSettings.VideoQuality.medium.bitrate
         let maximum = AppSettings.VideoQuality.maximum.bitrate
