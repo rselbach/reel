@@ -600,6 +600,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             let dialogView = RecordingDialog(
                 availableDisplays: screenRecorder.availableDisplays,
                 availableWindows: screenRecorder.availableWindows,
+                initialSelection: currentRecordingSelection,
                 onStart: { [weak self] selection in
                     guard let self else { return }
                     self.recordingDialogWindow?.close()
@@ -626,6 +627,21 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
     }
     
+    /// The recorder's current target expressed as a picker selection, so
+    /// reopening the picker starts on whatever was recorded last instead of
+    /// forcing a fresh choice every time.
+    private var currentRecordingSelection: RecordingSelection? {
+        switch screenRecorder.recordingMode {
+        case .display:
+            return screenRecorder.selectedDisplayID.map { .display($0) }
+        case .window:
+            return screenRecorder.selectedWindow.map { .window($0) }
+        case .region:
+            // An area has no card to highlight in the picker.
+            return nil
+        }
+    }
+
     private func startRecording(selection: RecordingSelection) {
         Task { @MainActor in
             guard !isCountdownActive else { return }

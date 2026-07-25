@@ -568,6 +568,40 @@ final class AppSettingsTests: XCTestCase {
     }
 
     @MainActor
+    func testPickerPreselectionDropsTargetsThatAreGone() {
+        XCTAssertEqual(
+            RecordingDialogLogic.validPreselection(
+                .display(3),
+                displayIDs: [1, 3],
+                windowIDs: []
+            ),
+            .display(3)
+        )
+        XCTAssertNil(
+            RecordingDialogLogic.validPreselection(
+                .display(9),
+                displayIDs: [1, 3],
+                windowIDs: []
+            )
+        )
+        XCTAssertEqual(
+            RecordingDialogLogic.validPreselection(
+                .region,
+                displayIDs: [],
+                windowIDs: []
+            ),
+            .region
+        )
+        XCTAssertNil(
+            RecordingDialogLogic.validPreselection(
+                nil,
+                displayIDs: [1],
+                windowIDs: [2]
+            )
+        )
+    }
+
+    @MainActor
     func testRecordingDialogTextDistinguishesEmptyStates() {
         XCTAssertEqual(RecordingDialogText.noWindows, "No open windows found.")
         XCTAssertEqual(

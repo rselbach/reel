@@ -42,6 +42,24 @@ enum RecordingDialogLogic {
         return title
     }
 
+    /// Keeps a preselected target only when it is actually listed, so Start
+    /// Recording is never enabled for a window or display that has gone away
+    /// since it was remembered.
+    static func validPreselection(
+        _ selection: RecordingSelection?,
+        displayIDs: [CGDirectDisplayID],
+        windowIDs: [CGWindowID]
+    ) -> RecordingSelection? {
+        switch selection {
+        case .display(let displayID):
+            return displayIDs.contains(displayID) ? selection : nil
+        case .window(let window):
+            return windowIDs.contains(window.windowID) ? selection : nil
+        case .region, .none:
+            return selection
+        }
+    }
+
     static func windowMatchesSearch(appName: String?, windowTitle: String?, query: String) -> Bool {
         guard !query.isEmpty else { return true }
         let normalizedQuery = query.lowercased()
@@ -75,6 +93,7 @@ struct RecordingDialog: View {
     init(
         availableDisplays: [SCDisplay],
         availableWindows: [SCWindow],
+        initialSelection: RecordingSelection?,
         onStart: @escaping (RecordingSelection) -> Void,
         onCancel: @escaping () -> Void,
         onRefresh: @escaping @MainActor () async -> (displays: [SCDisplay], windows: [SCWindow])
@@ -84,6 +103,11 @@ struct RecordingDialog: View {
         self.onRefresh = onRefresh
         _displays = State(initialValue: availableDisplays)
         _windows = State(initialValue: availableWindows)
+        _selection = State(initialValue: RecordingDialogLogic.validPreselection(
+            initialSelection,
+            displayIDs: availableDisplays.map(\.displayID),
+            windowIDs: availableWindows.map(\.windowID)
+        ))
     }
 
     private var filteredWindows: [SCWindow] {
