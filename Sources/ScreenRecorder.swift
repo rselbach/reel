@@ -48,6 +48,7 @@ struct RecordingOptions {
     /// Output height cap in pixels, or nil to keep the captured size.
     var resolutionMaxHeight: CGFloat?
     var videoCodec: AppSettings.VideoCodec
+    var highlightClicks: Bool
     var outputDirectory: URL
     var askWhereToSave: Bool
     var openFinderAfterRecording: Bool
@@ -79,6 +80,7 @@ struct RecordingOptions {
         videoBitrate = settings.videoQuality.bitrate
         resolutionMaxHeight = settings.videoResolution.maxHeight
         videoCodec = settings.videoCodec
+        highlightClicks = settings.highlightClicks
         outputDirectory = settings.outputDirectory
         askWhereToSave = settings.askWhereToSave
         openFinderAfterRecording = settings.openFinderAfterRecording
@@ -113,6 +115,7 @@ private struct FrameWriter {
     // composited output too so the recording matches what the user saw.
     let mirrorCamera: Bool
     let textOverlay: TextOverlay?
+    let highlightClicks: Bool
     var hasWriteFailure = false
     /// Total time spent paused so far. Subtracted from every sample's
     /// timestamp so the output has no gap where the pauses were.
@@ -129,6 +132,10 @@ private final class FrameCaptureState {
     var currentCameraY: CGFloat = 0.0
     var currentCameraSizeFraction: CGFloat = 0.2
     var isPaused = false
+    /// Pointer position in captured-frame pixel coordinates, sampled on the
+    /// main actor; nil when the pointer is outside the captured bounds or no
+    /// button is down.
+    var pressedCursorPoint: CGPoint?
 }
 
 @MainActor
@@ -277,6 +284,7 @@ class ScreenRecorder: NSObject, ObservableObject {
     /// Settings snapshot for the recording currently in flight.
     private var activeOptions: RecordingOptions?
     private var lowSpaceTimer: Timer?
+    private var cursorTimer: Timer?
     private let captureSessionQueue = DispatchQueue(label: "com.rselbach.reel.capture")
     // Reused across recordings; a CIContext is cheap to hold but expensive to
     // recreate per recording.
@@ -615,6 +623,9 @@ class ScreenRecorder: NSObject, ObservableObject {
             isRecording = true
             rememberCurrentTarget()
             startLowSpaceMonitor()
+            if options.highlightClicks {
+                startCursorSampling(frameRate: options.frameRate)
+            }
 
             // Surface capture session failures as warnings (recording continues without them)
             if failures.cameraFailed {
@@ -981,7 +992,8 @@ class ScreenRecorder: NSObject, ObservableObject {
                 recordCamera: options.recordCamera,
                 cameraShape: options.cameraShape,
                 mirrorCamera: options.mirrorCamera,
-                textOverlay: options.textOverlay
+                textOverlay: options.textOverlay,
+                highlightClicks: options.highlightClicks
             )
         }
     }
@@ -1222,6 +1234,7 @@ class ScreenRecorder: NSObject, ObservableObject {
 
     private func cleanup() {
         stopLowSpaceMonitor()
+        stopCursorSampling()
         stream = nil
         outputURL = nil
         activeOptions = nil
@@ -1316,6 +1329,60 @@ class ScreenRecorder: NSObject, ObservableObject {
     private func stopLowSpaceMonitor() {
         lowSpaceTimer?.invalidate()
         lowSpaceTimer = nil
+    }
+
+    /// Samples the pointer on the main actor and hands the compositor a
+    /// frame-space position. NSEvent.mouseLocation and pressedMouseButtons are
+    /// both free of the Accessibility permission a global event tap needs.
+    private func startCursorSampling(frameRate: Int) {
+        stopCursorSampling()
+        let interval = 1.0 / Double(max(1, frameRate))
+        let timer = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                self?.samplePressedCursor()
+            }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        cursorTimer = timer
+    }
+
+    private func stopCursorSampling() {
+        cursorTimer?.invalidate()
+        cursorTimer = nil
+        withFrameLock { frameState.pressedCursorPoint = nil }
+    }
+
+    private func samplePressedCursor() {
+        guard isRecording, !isPaused, NSEvent.pressedMouseButtons != 0 else {
+            withFrameLock { frameState.pressedCursorPoint = nil }
+            return
+        }
+
+        guard let bounds = liveRecordingBounds else {
+            withFrameLock { frameState.pressedCursorPoint = nil }
+            return
+        }
+
+        // Normalized here; the compositor scales to whatever the frame size is.
+        let cursor = NSEvent.mouseLocation
+        let point = CursorHighlightLayout.framePoint(
+            cursor: cursor,
+            bounds: bounds,
+            frameWidth: 1,
+            frameHeight: 1
+        )
+        withFrameLock { frameState.pressedCursorPoint = point }
+    }
+
+    /// Recording bounds that follow a window as it is moved, unlike the
+    /// ScreenCaptureKit snapshot taken when recording started.
+    private var liveRecordingBounds: CGRect? {
+        if recordingMode == .window,
+           let windowID = selectedWindow?.windowID,
+           let quartz = quartzWindowBounds(windowID: windowID) {
+            return cocoaRect(fromQuartz: quartz)
+        }
+        return recordingBounds
     }
 
     private func stopIfSpaceCriticallyLow() async {
@@ -1543,6 +1610,7 @@ extension ScreenRecorder: SCStreamOutput {
             var cameraX: CGFloat = 0
             var cameraY: CGFloat = 0
             var cameraSizeFraction: CGFloat = 0.2
+            var pressedCursorPoint: CGPoint?
 
             var adjustedTime = presentationTime
 
@@ -1586,6 +1654,7 @@ extension ScreenRecorder: SCStreamOutput {
                 cameraX = frameState.currentCameraX
                 cameraY = frameState.currentCameraY
                 cameraSizeFraction = frameState.currentCameraSizeFraction
+                pressedCursorPoint = writer.highlightClicks ? frameState.pressedCursorPoint : nil
                 writerSnapshot = writer
             }
 
@@ -1593,6 +1662,18 @@ extension ScreenRecorder: SCStreamOutput {
 
             var frameToWrite = screenBuffer
             var usedCompositedBuffer = false
+
+            let click = pressedCursorPoint.map { normalized in
+                FrameCompositor.ClickHighlight(
+                    point: CGPoint(
+                        x: normalized.x * CGFloat(CVPixelBufferGetWidth(screenBuffer)),
+                        y: normalized.y * CGFloat(CVPixelBufferGetHeight(screenBuffer))
+                    ),
+                    diameter: CursorHighlightLayout.diameter(
+                        frameHeight: CGFloat(CVPixelBufferGetHeight(screenBuffer))
+                    )
+                )
+            }
 
             let cameraOverlay = (snapshot.recordCamera ? cameraBuffer : nil).map { buffer in
                 FrameCompositor.CameraOverlay(
@@ -1604,11 +1685,12 @@ extension ScreenRecorder: SCStreamOutput {
                     mirrored: snapshot.mirrorCamera
                 )
             }
-            if cameraOverlay != nil || snapshot.textOverlay != nil {
+            if cameraOverlay != nil || snapshot.textOverlay != nil || click != nil {
                 if let composited = compositor.composite(
                     screenBuffer: screenBuffer,
                     camera: cameraOverlay,
                     text: snapshot.textOverlay,
+                    click: click,
                     bufferPool: snapshot.bufferPool
                 ) {
                     frameToWrite = composited

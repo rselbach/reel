@@ -6,7 +6,7 @@ Generated from the canonical tracker on 2026-06-21. This checklist is a companio
 
 Environment note: a bounded System Events probe on 2026-06-21 returned `UI elements enabled = false`, so this environment cannot inspect the menu bar, permission prompts, device pickers, or recording UI.
 
-Manual validation required: 38 stories.
+Manual validation required: 39 stories.
 No further manual validation required: 2 stories.
 
 ## Recommended Order
@@ -721,6 +721,27 @@ Manual steps:
 2. verify both files play in QuickTime and Finder preview
 3. verify the HEVC file is noticeably smaller
 4. record a 5K display natively with HEVC and verify the output keeps the full resolution rather than being scaled to 4096 wide.
+
+Current status: Partial automated evidence passed; manual UI validation still pending. A bounded System Events probe on 2026-06-21 returned UI elements enabled = false, so this environment cannot inspect the app UI; validate manually using the listed steps.
+
+Result: [ ] Pass  [ ] Fail  [ ] Blocked
+
+Notes:
+
+## US-041 - Click highlighting
+
+User story: As a viewer of a demo, I want to see where the presenter clicked, since the cursor alone does not show a click or a drag.
+
+Expected behavior: With Highlight clicks enabled, the pointer is sampled on the main actor at the recording frame rate using NSEvent.mouseLocation and pressedMouseButtons, neither of which needs the Accessibility permission a global event tap would. While a button is down and the pointer is inside the captured bounds, a soft disc is composited at that position, scaled to the frame height with a floor so small area recordings still show it. Window recordings map against the window's live bounds so the mark stays correct after the window moves. Sampling stops while paused and when recording ends.
+
+Manual steps:
+
+1. Enable Highlight clicks and record a display
+2. click and drag in several places
+3. verify the mark appears under the pointer only while a button is held and lands where the click happened
+4. record a window, move the window mid-recording, and verify clicks are still marked in the right place
+5. record an area and verify clicks outside it are not marked
+6. disable the setting and verify no marks appear.
 
 Current status: Partial automated evidence passed; manual UI validation still pending. A bounded System Events probe on 2026-06-21 returned UI elements enabled = false, so this environment cannot inspect the app UI; validate manually using the listed steps.
 

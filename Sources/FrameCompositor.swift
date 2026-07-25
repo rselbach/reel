@@ -72,6 +72,34 @@ enum TextOverlayLayout {
     }
 }
 
+enum CursorHighlightLayout {
+    /// Highlight diameter as a fraction of the frame height, so it reads the
+    /// same whether the recording is 720p or native Retina.
+    static let diameterFraction: CGFloat = 0.055
+    static let minimumDiameter: CGFloat = 24
+
+    static func diameter(frameHeight: CGFloat) -> CGFloat {
+        max(minimumDiameter, (frameHeight * diameterFraction).rounded())
+    }
+
+    /// Maps a global Cocoa cursor location into frame pixel coordinates.
+    /// Returns nil when the pointer is outside the captured bounds, where
+    /// there is nothing to highlight.
+    static func framePoint(
+        cursor: CGPoint,
+        bounds: CGRect,
+        frameWidth: CGFloat,
+        frameHeight: CGFloat
+    ) -> CGPoint? {
+        guard bounds.width > 0, bounds.height > 0, bounds.contains(cursor) else { return nil }
+
+        return CGPoint(
+            x: (cursor.x - bounds.minX) / bounds.width * frameWidth,
+            y: (cursor.y - bounds.minY) / bounds.height * frameHeight
+        )
+    }
+}
+
 /// Draws Reel's overlays onto captured screen frames.
 ///
 /// Frames arrive on the ScreenCaptureKit output queue rather than the main
@@ -91,6 +119,12 @@ final class FrameCompositor: @unchecked Sendable {
         let mirrored: Bool
     }
 
+    /// A pointer position to mark, in frame pixel coordinates.
+    struct ClickHighlight {
+        let point: CGPoint
+        let diameter: CGFloat
+    }
+
     private let ciContext: CIContext
     private let circularMaskCache: NSCache<NSString, CIImage> = {
         let cache = NSCache<NSString, CIImage>()
@@ -100,6 +134,11 @@ final class FrameCompositor: @unchecked Sendable {
     private let textOverlayCache: NSCache<NSString, CIImage> = {
         let cache = NSCache<NSString, CIImage>()
         cache.countLimit = 8
+        return cache
+    }()
+    private let clickHighlightCache: NSCache<NSString, CIImage> = {
+        let cache = NSCache<NSString, CIImage>()
+        cache.countLimit = 4
         return cache
     }()
 
@@ -112,6 +151,7 @@ final class FrameCompositor: @unchecked Sendable {
     func reset() {
         circularMaskCache.removeAllObjects()
         textOverlayCache.removeAllObjects()
+        clickHighlightCache.removeAllObjects()
     }
 
     /// Draws the camera bubble and text overlay over a captured screen frame.
@@ -121,6 +161,7 @@ final class FrameCompositor: @unchecked Sendable {
         screenBuffer: CVPixelBuffer,
         camera: CameraOverlay?,
         text: TextOverlay?,
+        click: ClickHighlight?,
         bufferPool: CVPixelBufferPool?
     ) -> CVPixelBuffer? {
         let screenImage = CIImage(cvPixelBuffer: screenBuffer)
@@ -136,6 +177,11 @@ final class FrameCompositor: @unchecked Sendable {
                 screenHeight: screenHeight
             ) else { return nil }
             composited = cameraOverlay.composited(over: composited)
+            didComposite = true
+        }
+
+        if let click, let clickImage = makeClickHighlight(click) {
+            composited = clickImage.composited(over: composited)
             didComposite = true
         }
 
@@ -232,6 +278,40 @@ final class FrameCompositor: @unchecked Sendable {
         )
 
         return cameraImage.transformed(by: CGAffineTransform(translationX: origin.x, y: origin.y))
+    }
+
+    /// A soft filled disc marking where the pointer was pressed. Drawn only
+    /// while a button is down, so it reads as a click rather than as a second
+    /// cursor following the pointer around.
+    private func makeClickHighlight(_ highlight: ClickHighlight) -> CIImage? {
+        let diameter = highlight.diameter
+        guard diameter > 0 else { return nil }
+
+        let radius = diameter / 2
+        let cacheKey = "click-\(Int(diameter))" as NSString
+        let disc: CIImage
+
+        if let cached = clickHighlightCache.object(forKey: cacheKey) {
+            disc = cached
+        } else {
+            guard let gradient = CIFilter(name: "CIRadialGradient") else { return nil }
+            gradient.setValue(CIVector(x: radius, y: radius), forKey: "inputCenter")
+            gradient.setValue(radius * 0.35, forKey: "inputRadius0")
+            gradient.setValue(radius, forKey: "inputRadius1")
+            gradient.setValue(CIColor(red: 1, green: 0.85, blue: 0.2, alpha: 0.55), forKey: "inputColor0")
+            gradient.setValue(CIColor.clear, forKey: "inputColor1")
+
+            guard let rendered = gradient.outputImage?.cropped(
+                to: CGRect(x: 0, y: 0, width: diameter, height: diameter)
+            ) else { return nil }
+            clickHighlightCache.setObject(rendered, forKey: cacheKey)
+            disc = rendered
+        }
+
+        return disc.transformed(by: CGAffineTransform(
+            translationX: (highlight.point.x - radius).rounded(),
+            y: (highlight.point.y - radius).rounded()
+        ))
     }
 
     private func makeTextOverlayImage(

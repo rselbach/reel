@@ -6,6 +6,18 @@ extension NSScreen {
     }
 }
 
+/// Current on-screen bounds of a window in Quartz coordinates, read live from
+/// the window server rather than from a ScreenCaptureKit snapshot, which goes
+/// stale as soon as the window is moved.
+func quartzWindowBounds(windowID: CGWindowID) -> CGRect? {
+    guard let infoList = CGWindowListCopyWindowInfo(.optionIncludingWindow, windowID) as? [[String: Any]],
+          let boundsDict = infoList.first?[kCGWindowBounds as String] as? NSDictionary,
+          let bounds = CGRect(dictionaryRepresentation: boundsDict) else {
+        return nil
+    }
+    return bounds
+}
+
 enum ScreenCoordinateConversion {
     static func cocoaRect(fromQuartz frame: CGRect, primaryScreenFrame: CGRect) -> NSRect {
         NSRect(

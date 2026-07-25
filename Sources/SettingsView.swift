@@ -19,6 +19,7 @@ enum SettingsText {
     static let showPreviewAfterRecording = "Show preview after recording"
     static let playSoundCues = "Play a sound when recording starts and stops"
     static let showCursor = "Show cursor in recording"
+    static let highlightClicks = "Highlight clicks"
     static let frameRate = "Frame rate:"
     static let videoQuality = "Video quality:"
     static let videoResolution = "Resolution:"
@@ -201,6 +202,7 @@ struct RecordingTab: View {
     var body: some View {
         Form {
             Toggle(SettingsText.showCursor, isOn: $settings.showCursor)
+            Toggle(SettingsText.highlightClicks, isOn: $settings.highlightClicks)
 
             Picker(SettingsText.frameRate, selection: $settings.frameRate) {
                 ForEach(AppSettings.supportedFrameRates, id: \.self) { frameRate in

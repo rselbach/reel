@@ -964,7 +964,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     private func syncOverlayToRecordedWindow(windowID: CGWindowID) {
-        guard let quartzBounds = Self.windowBounds(windowID: windowID) else { return }
+        guard let quartzBounds = quartzWindowBounds(windowID: windowID) else { return }
 
         captureBoundsIndicator?.update(globalQuartzFrame: quartzBounds)
 
@@ -972,15 +972,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
            let cocoaBounds = cocoaRect(fromQuartz: quartzBounds) {
             controller.updateBounds(cocoaBounds)
         }
-    }
-
-    private static func windowBounds(windowID: CGWindowID) -> CGRect? {
-        guard let infoList = CGWindowListCopyWindowInfo(.optionIncludingWindow, windowID) as? [[String: Any]],
-              let boundsDict = infoList.first?[kCGWindowBounds as String] as? NSDictionary,
-              let bounds = CGRect(dictionaryRepresentation: boundsDict) else {
-            return nil
-        }
-        return bounds
     }
 
     /// Outlines what is being captured so the user can see exactly what lands

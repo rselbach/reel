@@ -251,6 +251,65 @@ final class AppSettingsTests: XCTestCase {
     }
 
     @MainActor
+    func testCursorMapsFromGlobalScreenSpaceIntoTheFrame() {
+        // A capture area on a second display, offset from the global origin.
+        let bounds = CGRect(x: 1440, y: 200, width: 1280, height: 720)
+
+        let centre = CursorHighlightLayout.framePoint(
+            cursor: CGPoint(x: 1440 + 640, y: 200 + 360),
+            bounds: bounds,
+            frameWidth: 2560,
+            frameHeight: 1440
+        )
+        XCTAssertEqual(centre?.x ?? 0, 1280, accuracy: 0.001)
+        XCTAssertEqual(centre?.y ?? 0, 720, accuracy: 0.001)
+
+        let origin = CursorHighlightLayout.framePoint(
+            cursor: CGPoint(x: 1440, y: 200),
+            bounds: bounds,
+            frameWidth: 2560,
+            frameHeight: 1440
+        )
+        XCTAssertEqual(origin?.x ?? -1, 0, accuracy: 0.001)
+        XCTAssertEqual(origin?.y ?? -1, 0, accuracy: 0.001)
+    }
+
+    @MainActor
+    func testCursorOutsideTheCaptureAreaIsNotHighlighted() {
+        let bounds = CGRect(x: 0, y: 0, width: 1280, height: 720)
+        XCTAssertNil(
+            CursorHighlightLayout.framePoint(
+                cursor: CGPoint(x: 2000, y: 360),
+                bounds: bounds,
+                frameWidth: 1280,
+                frameHeight: 720
+            )
+        )
+        XCTAssertNil(
+            CursorHighlightLayout.framePoint(
+                cursor: CGPoint(x: 100, y: 100),
+                bounds: .zero,
+                frameWidth: 1280,
+                frameHeight: 720
+            )
+        )
+    }
+
+    @MainActor
+    func testClickHighlightScalesWithFrameHeightButHasAFloor() {
+        XCTAssertEqual(CursorHighlightLayout.diameter(frameHeight: 1080), 59)
+        XCTAssertGreaterThan(
+            CursorHighlightLayout.diameter(frameHeight: 2160),
+            CursorHighlightLayout.diameter(frameHeight: 1080)
+        )
+        // Tiny area recordings still get a visible mark.
+        XCTAssertEqual(
+            CursorHighlightLayout.diameter(frameHeight: 100),
+            CursorHighlightLayout.minimumDiameter
+        )
+    }
+
+    @MainActor
     func testResolutionCapPreservesAspectRatioAndEvenDimensions() {
         // A Retina 16:10 display captured at 2x, capped to 1080p.
         let capped = ScreenRecorder.outputDimensions(width: 3456, height: 2160, maxHeight: 1080, codec: .h264)

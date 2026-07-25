@@ -144,6 +144,7 @@ class AppSettings: ObservableObject {
         static let launchAtLogin = "launchAtLogin"
         static let hasShownWelcome = "hasShownWelcome"
         static let showCursor = "showCursor"
+        static let highlightClicks = "highlightClicks"
         static let frameRate = "frameRate"
         static let videoQuality = "videoQuality"
         static let videoResolution = "videoResolution"
@@ -221,6 +222,12 @@ class AppSettings: ObservableObject {
 
     @Published var showCursor: Bool {
         didSet { persist(showCursor, key: DefaultsKey.showCursor) }
+    }
+
+    /// Marks where the pointer is pressed, so viewers can see clicks and
+    /// drags that the cursor alone does not convey.
+    @Published var highlightClicks: Bool {
+        didSet { persist(highlightClicks, key: DefaultsKey.highlightClicks) }
     }
 
     @Published var frameRate: Int {
@@ -787,6 +794,7 @@ class AppSettings: ObservableObject {
         self.launchAtLogin = defaults.bool(forKey: DefaultsKey.launchAtLogin)
         self.hasShownWelcome = defaults.bool(forKey: DefaultsKey.hasShownWelcome)
         self.showCursor = defaults.object(forKey: DefaultsKey.showCursor) as? Bool ?? true
+        self.highlightClicks = defaults.object(forKey: DefaultsKey.highlightClicks) as? Bool ?? true
         self.frameRate = Self.sanitizedFrameRate(defaults.object(forKey: DefaultsKey.frameRate) as? Int ?? Self.defaultFrameRate)
         self.videoQuality = VideoQuality.fromStored(defaults.string(forKey: DefaultsKey.videoQuality)) ?? .medium
         self.videoResolution = VideoResolution.fromStored(defaults.string(forKey: DefaultsKey.videoResolution)) ?? .native
