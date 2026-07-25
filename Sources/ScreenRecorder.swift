@@ -1,6 +1,5 @@
 @preconcurrency import AVFoundation
 import CoreImage
-import CoreText
 import os.log
 import ScreenCaptureKit
 import SwiftUI
@@ -19,21 +18,6 @@ private enum RecordingConstants {
     static let minimumWindowSize: CGFloat = 100
     /// Conservative H.264 dimensions for broad AVAssetWriter compatibility.
     static let maxH264Size = CGSize(width: 4096, height: 2304)
-}
-
-enum CameraCompositeLayout {
-    /// Centered square crop applied to camera frames so the composited
-    /// overlay matches the preview window, which is a square that aspect-fills
-    /// the camera feed.
-    static func squareCropRect(width: CGFloat, height: CGFloat) -> CGRect {
-        let side = min(width, height)
-        return CGRect(
-            x: ((width - side) / 2).rounded(.down),
-            y: ((height - side) / 2).rounded(.down),
-            width: side,
-            height: side
-        )
-    }
 }
 
 enum RecordingFileNaming {
@@ -192,61 +176,11 @@ struct RecordingOptions {
     }
 }
 
-enum TextOverlayLayout {
-    static let maxHeightFraction: CGFloat = 0.35
-
-    static func imageSize(
-        suggestedTextSize: CGSize,
-        fontSize: CGFloat,
-        maxWidth: CGFloat,
-        maxImageHeight: CGFloat
-    ) -> (imageSize: CGSize, textRect: CGRect) {
-        let horizontalPadding = ceil(fontSize * 0.6)
-        let verticalPadding = ceil(fontSize * 0.35)
-        let availableTextWidth = max(1, maxWidth - horizontalPadding * 2)
-        let availableTextHeight = max(fontSize, maxImageHeight - verticalPadding * 2)
-        let textWidth = ceil(min(availableTextWidth, max(1, suggestedTextSize.width)))
-        let textHeight = ceil(min(availableTextHeight, max(fontSize * 1.25, suggestedTextSize.height)))
-        let imageWidth = ceil(textWidth + horizontalPadding * 2)
-        let imageHeight = ceil(textHeight + verticalPadding * 2)
-
-        return (
-            imageSize: CGSize(width: imageWidth, height: imageHeight),
-            textRect: CGRect(
-                x: horizontalPadding,
-                y: verticalPadding,
-                width: textWidth,
-                height: textHeight
-            )
-        )
-    }
-
-    static func yOffset(
-        screenHeight: CGFloat,
-        overlayHeight: CGFloat,
-        margin: CGFloat,
-        position: AppSettings.TextOverlayPosition
-    ) -> CGFloat {
-        let rawOffset: CGFloat
-        switch position {
-        case .top:
-            rawOffset = screenHeight - overlayHeight - margin
-        case .center:
-            rawOffset = (screenHeight - overlayHeight) / 2
-        case .bottom:
-            rawOffset = margin
-        }
-
-        return min(max(margin, rawOffset), max(margin, screenHeight - overlayHeight - margin))
-    }
-}
-
 private struct FrameWriter {
     let adaptor: AVAssetWriterInputPixelBufferAdaptor
     let videoInput: AVAssetWriterInput
     let audioInput: AVAssetWriterInput?
     let assetWriter: AVAssetWriter
-    let ciContext: CIContext
     let bufferPool: CVPixelBufferPool?
     var startTime: CMTime?
     let recordCamera: Bool
@@ -339,9 +273,9 @@ class ScreenRecorder: NSObject, ObservableObject {
     private var activeOptions: RecordingOptions?
     private var lowSpaceTimer: Timer?
     private let captureSessionQueue = DispatchQueue(label: "com.rselbach.reel.capture")
-    // Reused across recordings; CIContext is cheap to hold but unnecessary
-    // to recreate per recording.
-    private let ciContext = CIContext()
+    // Reused across recordings; a CIContext is cheap to hold but expensive to
+    // recreate per recording.
+    private nonisolated let compositor = FrameCompositor(ciContext: CIContext())
     // Serial queue for SCStream frame output. Apple requires a serial queue;
     // a concurrent queue can deliver frames out of presentation-time order,
     // which corrupts AVAssetWriterInput appends (timestamps must be monotonic).
@@ -353,16 +287,6 @@ class ScreenRecorder: NSObject, ObservableObject {
     // Thread-safe state for frame processing (accessed from ScreenCaptureKit callback queue)
     private nonisolated(unsafe) let frameState = FrameCaptureState()
     private let frameLock = NSLock()
-    private nonisolated(unsafe) let circularMaskCache: NSCache<NSString, CIImage> = {
-        let cache = NSCache<NSString, CIImage>()
-        cache.countLimit = 4
-        return cache
-    }()
-    private nonisolated(unsafe) let textOverlayCache: NSCache<NSString, CIImage> = {
-        let cache = NSCache<NSString, CIImage>()
-        cache.countLimit = 8
-        return cache
-    }()
 
     private nonisolated func withFrameLock<T>(_ action: () -> T) -> T {
         frameLock.lock()
@@ -784,7 +708,6 @@ class ScreenRecorder: NSObject, ObservableObject {
             videoInput: videoInput,
             audioInput: audioInput,
             assetWriter: assetWriter,
-            context: ciContext,
             bufferPool: bufferPool,
             options: options
         )
@@ -979,7 +902,6 @@ class ScreenRecorder: NSObject, ObservableObject {
         videoInput: AVAssetWriterInput,
         audioInput: AVAssetWriterInput?,
         assetWriter: AVAssetWriter,
-        context: CIContext,
         bufferPool: CVPixelBufferPool?,
         options: RecordingOptions
     ) {
@@ -993,7 +915,6 @@ class ScreenRecorder: NSObject, ObservableObject {
                 videoInput: videoInput,
                 audioInput: audioInput,
                 assetWriter: assetWriter,
-                ciContext: context,
                 bufferPool: bufferPool,
                 startTime: nil,
                 recordCamera: options.recordCamera,
@@ -1225,8 +1146,7 @@ class ScreenRecorder: NSObject, ObservableObject {
         audioOutputSettings = nil
         cameraCaptureSession = nil
         cameraOutput = nil
-        circularMaskCache.removeAllObjects()
-        textOverlayCache.removeAllObjects()
+        compositor.reset()
         withFrameLock {
             frameState.latestCameraPixelBuffer = nil
             frameState.frameWriter = nil
@@ -1448,291 +1368,6 @@ class ScreenRecorder: NSObject, ObservableObject {
         return dest
     }
 
-    private nonisolated func compositeFrame(
-        screenBuffer: CVPixelBuffer,
-        cameraBuffer: CVPixelBuffer?,
-        context: CIContext,
-        bufferPool: CVPixelBufferPool?,
-        xNormalized: CGFloat,
-        yNormalized: CGFloat,
-        sizeFraction: CGFloat,
-        shape: AppSettings.CameraOverlayShape,
-        mirrored: Bool,
-        textOverlay: TextOverlay?
-    ) -> CVPixelBuffer? {
-        let screenImage = CIImage(cvPixelBuffer: screenBuffer)
-        let screenWidth = CGFloat(CVPixelBufferGetWidth(screenBuffer))
-        let screenHeight = CGFloat(CVPixelBufferGetHeight(screenBuffer))
-        var composited = screenImage
-        var didComposite = false
-
-        if let cameraBuffer {
-            guard let cameraOverlay = makeCameraOverlay(
-                cameraBuffer: cameraBuffer,
-                screenWidth: screenWidth,
-                screenHeight: screenHeight,
-                xNormalized: xNormalized,
-                yNormalized: yNormalized,
-                sizeFraction: sizeFraction,
-                shape: shape,
-                mirrored: mirrored
-            ) else { return nil }
-            composited = cameraOverlay.composited(over: composited)
-            didComposite = true
-        }
-
-        if let textOverlay,
-           let textImage = makeTextOverlayImage(
-               text: textOverlay.text,
-               screenWidth: screenWidth,
-               screenHeight: screenHeight,
-               position: textOverlay.position
-           ) {
-            composited = textImage.composited(over: composited)
-            didComposite = true
-        }
-
-        guard didComposite else { return nil }
-
-        guard let outputBuffer = makeOutputBuffer(
-            width: Int(screenWidth),
-            height: Int(screenHeight),
-            bufferPool: bufferPool
-        ) else { return nil }
-
-        context.render(composited, to: outputBuffer)
-        return outputBuffer
-    }
-
-    /// Builds the camera bubble exactly as the draggable preview window shows
-    /// it: a square, aspect-fill center crop (mirrored for front cameras)
-    /// whose position maps over the full recording bounds with no extra
-    /// padding, so what the user drags on screen is what lands in the file.
-    private nonisolated func makeCameraOverlay(
-        cameraBuffer: CVPixelBuffer,
-        screenWidth: CGFloat,
-        screenHeight: CGFloat,
-        xNormalized: CGFloat,
-        yNormalized: CGFloat,
-        sizeFraction: CGFloat,
-        shape: AppSettings.CameraOverlayShape,
-        mirrored: Bool
-    ) -> CIImage? {
-        var cameraImage = CIImage(cvPixelBuffer: cameraBuffer)
-        let cameraWidth = CGFloat(CVPixelBufferGetWidth(cameraBuffer))
-        let cameraHeight = CGFloat(CVPixelBufferGetHeight(cameraBuffer))
-        let overlaySize = CameraOverlayLayout.overlaySize(
-            sizeFraction: sizeFraction,
-            bounds: CGRect(x: 0, y: 0, width: screenWidth, height: screenHeight)
-        ).rounded()
-        guard overlaySize > 0, cameraWidth > 0, cameraHeight > 0 else { return nil }
-
-        if mirrored {
-            cameraImage = cameraImage
-                .transformed(by: CGAffineTransform(scaleX: -1, y: 1))
-                .transformed(by: CGAffineTransform(translationX: cameraWidth, y: 0))
-        }
-
-        let cropRect = CameraCompositeLayout.squareCropRect(width: cameraWidth, height: cameraHeight)
-        cameraImage = cameraImage
-            .cropped(to: cropRect)
-            .transformed(by: CGAffineTransform(translationX: -cropRect.origin.x, y: -cropRect.origin.y))
-
-        let scale = overlaySize / cropRect.width
-        cameraImage = cameraImage.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
-
-        if shape == .circle {
-            let radius = overlaySize / 2
-
-            let cacheKey = "\(Int(overlaySize))"
-            let gradientOutput: CIImage
-            if let cached = circularMaskCache.object(forKey: cacheKey as NSString) {
-                gradientOutput = cached
-            } else {
-                guard let radialGradient = CIFilter(name: "CIRadialGradient") else { return nil }
-                radialGradient.setValue(CIVector(x: radius, y: radius), forKey: "inputCenter")
-                radialGradient.setValue(radius - 1, forKey: "inputRadius0")
-                radialGradient.setValue(radius, forKey: "inputRadius1")
-                radialGradient.setValue(CIColor.white, forKey: "inputColor0")
-                radialGradient.setValue(CIColor.clear, forKey: "inputColor1")
-
-                guard let cachedOutput = radialGradient.outputImage?.cropped(
-                    to: CGRect(x: 0, y: 0, width: overlaySize, height: overlaySize)
-                ) else { return nil }
-                circularMaskCache.setObject(cachedOutput, forKey: cacheKey as NSString)
-                gradientOutput = cachedOutput
-            }
-
-            cameraImage = cameraImage.applyingFilter("CIBlendWithMask", parameters: [
-                kCIInputBackgroundImageKey: CIImage.empty(),
-                kCIInputMaskImageKey: gradientOutput
-            ])
-        }
-
-        // Same normalized-position mapping the preview window uses for
-        // dragging, over the full frame with no padding.
-        let origin = CameraOverlayLayout.originFromNormalized(
-            x: xNormalized,
-            y: yNormalized,
-            overlaySize: overlaySize,
-            bounds: CGRect(x: 0, y: 0, width: screenWidth, height: screenHeight)
-        )
-
-        return cameraImage.transformed(by: CGAffineTransform(translationX: origin.x, y: origin.y))
-    }
-
-    private nonisolated func makeTextOverlayImage(
-        text: String,
-        screenWidth: CGFloat,
-        screenHeight: CGFloat,
-        position: AppSettings.TextOverlayPosition
-    ) -> CIImage? {
-        let fontSize = max(18, min(screenWidth, screenHeight) * 0.045)
-        let cacheKey = "\(Int(screenWidth))x\(Int(screenHeight))-\(Int(fontSize.rounded()))-\(text)"
-        let baseImage: CIImage
-
-        if let cached = textOverlayCache.object(forKey: cacheKey as NSString) {
-            baseImage = cached
-        } else {
-            guard let rendered = renderTextOverlay(
-                text: text,
-                fontSize: fontSize,
-                maxWidth: screenWidth * 0.85,
-                maxImageHeight: screenHeight * TextOverlayLayout.maxHeightFraction
-            ) else {
-                return nil
-            }
-            textOverlayCache.setObject(rendered, forKey: cacheKey as NSString)
-            baseImage = rendered
-        }
-
-        let margin = max(24, min(screenWidth, screenHeight) * 0.04)
-        let xOffset = (screenWidth - baseImage.extent.width) / 2
-        let yOffset = TextOverlayLayout.yOffset(
-            screenHeight: screenHeight,
-            overlayHeight: baseImage.extent.height,
-            margin: margin,
-            position: position
-        )
-
-        return baseImage.transformed(by: CGAffineTransform(translationX: xOffset, y: yOffset))
-    }
-
-    private nonisolated func renderTextOverlay(
-        text: String,
-        fontSize: CGFloat,
-        maxWidth: CGFloat,
-        maxImageHeight: CGFloat
-    ) -> CIImage? {
-        var alignment = CTTextAlignment.center
-        let paragraphStyle = withUnsafePointer(to: &alignment) { pointer in
-            var paragraphSetting = CTParagraphStyleSetting(
-                spec: .alignment,
-                valueSize: MemoryLayout<CTTextAlignment>.size,
-                value: pointer
-            )
-            return CTParagraphStyleCreate(&paragraphSetting, 1)
-        }
-        let font = CTFontCreateWithName("HelveticaNeue-Bold" as CFString, fontSize, nil)
-        let attributes: [CFString: Any] = [
-            kCTFontAttributeName: font,
-            kCTForegroundColorAttributeName: CGColor(red: 1, green: 1, blue: 1, alpha: 0.95),
-            kCTParagraphStyleAttributeName: paragraphStyle
-        ]
-
-        guard let attributedText = CFAttributedStringCreate(
-            kCFAllocatorDefault,
-            text as CFString,
-            attributes as CFDictionary
-        ) else { return nil }
-
-        let framesetter = CTFramesetterCreateWithAttributedString(attributedText)
-        let horizontalPadding = ceil(fontSize * 0.6)
-        let verticalPadding = ceil(fontSize * 0.35)
-        let constraint = CGSize(
-            width: max(1, maxWidth - horizontalPadding * 2),
-            height: max(fontSize, maxImageHeight - verticalPadding * 2)
-        )
-        let suggestedSize = CTFramesetterSuggestFrameSizeWithConstraints(
-            framesetter,
-            CFRange(location: 0, length: 0),
-            nil,
-            constraint,
-            nil
-        )
-        let layout = TextOverlayLayout.imageSize(
-            suggestedTextSize: suggestedSize,
-            fontSize: fontSize,
-            maxWidth: maxWidth,
-            maxImageHeight: maxImageHeight
-        )
-
-        let colorSpace = CGColorSpaceCreateDeviceRGB()
-        guard let bitmapContext = CGContext(
-            data: nil,
-            width: Int(layout.imageSize.width),
-            height: Int(layout.imageSize.height),
-            bitsPerComponent: 8,
-            bytesPerRow: 0,
-            space: colorSpace,
-            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-        ) else { return nil }
-
-        let backgroundRect = CGRect(origin: .zero, size: layout.imageSize)
-        let backgroundPath = CGMutablePath()
-        backgroundPath.addRoundedRect(
-            in: backgroundRect,
-            cornerWidth: fontSize * 0.3,
-            cornerHeight: fontSize * 0.3
-        )
-        bitmapContext.setFillColor(CGColor(red: 0, green: 0, blue: 0, alpha: 0.55))
-        bitmapContext.addPath(backgroundPath)
-        bitmapContext.fillPath()
-
-        let textPath = CGMutablePath()
-        textPath.addRect(layout.textRect)
-        let textFrame = CTFramesetterCreateFrame(
-            framesetter,
-            CFRange(location: 0, length: 0),
-            textPath,
-            nil
-        )
-        bitmapContext.textMatrix = .identity
-        CTFrameDraw(textFrame, bitmapContext)
-
-        guard let cgImage = bitmapContext.makeImage() else { return nil }
-        return CIImage(cgImage: cgImage)
-    }
-
-    private nonisolated func makeOutputBuffer(
-        width: Int,
-        height: Int,
-        bufferPool: CVPixelBufferPool?
-    ) -> CVPixelBuffer? {
-        var outputBuffer: CVPixelBuffer?
-        let status: CVReturn
-        if let bufferPool {
-            status = CVPixelBufferPoolCreatePixelBuffer(kCFAllocatorDefault, bufferPool, &outputBuffer)
-        } else {
-            let attrs: [CFString: Any] = [
-                kCVPixelBufferCGImageCompatibilityKey: true,
-                kCVPixelBufferCGBitmapContextCompatibilityKey: true
-            ]
-            status = CVPixelBufferCreate(
-                kCFAllocatorDefault,
-                width,
-                height,
-                kCVPixelFormatType_32BGRA,
-                attrs as CFDictionary,
-                &outputBuffer
-            )
-        }
-
-        if status != kCVReturnSuccess {
-            logger.warning("Failed to create output pixel buffer (status: \(status))")
-        }
-        return outputBuffer
-    }
 
     private nonisolated func handleAppendFailure(_ writer: inout FrameWriter, context: String) {
         writer.hasWriteFailure = true
@@ -1846,19 +1481,22 @@ extension ScreenRecorder: SCStreamOutput {
             var frameToWrite = screenBuffer
             var usedCompositedBuffer = false
 
-            let activeCameraBuffer = snapshot.recordCamera ? cameraBuffer : nil
-            if activeCameraBuffer != nil || snapshot.textOverlay != nil {
-                if let composited = compositeFrame(
-                    screenBuffer: screenBuffer,
-                    cameraBuffer: activeCameraBuffer,
-                    context: snapshot.ciContext,
-                    bufferPool: snapshot.bufferPool,
-                    xNormalized: cameraX,
-                    yNormalized: cameraY,
+            let cameraOverlay = (snapshot.recordCamera ? cameraBuffer : nil).map { buffer in
+                FrameCompositor.CameraOverlay(
+                    buffer: buffer,
+                    x: cameraX,
+                    y: cameraY,
                     sizeFraction: cameraSizeFraction,
                     shape: snapshot.cameraShape,
-                    mirrored: snapshot.mirrorCamera,
-                    textOverlay: snapshot.textOverlay
+                    mirrored: snapshot.mirrorCamera
+                )
+            }
+            if cameraOverlay != nil || snapshot.textOverlay != nil {
+                if let composited = compositor.composite(
+                    screenBuffer: screenBuffer,
+                    camera: cameraOverlay,
+                    text: snapshot.textOverlay,
+                    bufferPool: snapshot.bufferPool
                 ) {
                     frameToWrite = composited
                     usedCompositedBuffer = true
