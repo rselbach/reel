@@ -33,7 +33,6 @@ enum SettingsText {
     static let shape = "Shape:"
     static let addTextOverlay = "Add text overlay"
     static let text = "Text:"
-    static let toggleRecording = "Toggle recording:"
     static let pressShortcut = "Press shortcut..."
     static let shortcutHelp = "Press the button and type your desired shortcut."
     static let defaultDevice = "Default"
@@ -295,21 +294,29 @@ struct RecordingTab: View {
 
 struct ShortcutsTab: View {
     @ObservedObject var settings: AppSettings
-    @State private var isRecordingHotkey = false
+    @State private var recordingAction: HotkeyAction?
 
     var body: some View {
         Form {
-            HStack {
-                Text(SettingsText.toggleRecording)
-                Spacer()
-                Button(action: { isRecordingHotkey = true }) {
-                    Text(isRecordingHotkey ? SettingsText.pressShortcut : settings.recordingHotkey.displayString)
-                        .frame(minWidth: 100)
-                }
-                .background(HotkeyRecorder(
-                    isRecording: $isRecordingHotkey,
-                    hotkey: $settings.recordingHotkey
-                ))
+            ForEach(HotkeyAction.allCases, id: \.rawValue) { action in
+                ShortcutRow(
+                    action: action,
+                    combo: settings.hotkey(for: action),
+                    isRecording: recordingAction == action,
+                    onBeginRecording: { recordingAction = action },
+                    onRecorded: { combo in
+                        settings.setHotkey(combo, for: action)
+                        recordingAction = nil
+                    },
+                    onCancel: { recordingAction = nil }
+                )
+            }
+
+            if let conflict = settings.hotkeyConflictError {
+                Text(conflict)
+                    .font(.caption)
+                    .foregroundColor(.red)
+                    .lineLimit(2)
             }
 
             Text(SettingsText.shortcutHelp)
@@ -319,23 +326,46 @@ struct ShortcutsTab: View {
     }
 }
 
+private struct ShortcutRow: View {
+    let action: HotkeyAction
+    let combo: AppSettings.HotkeyCombo
+    let isRecording: Bool
+    let onBeginRecording: () -> Void
+    let onRecorded: (AppSettings.HotkeyCombo) -> Void
+    let onCancel: () -> Void
+
+    var body: some View {
+        HStack {
+            Text(action.displayName)
+            Spacer()
+            Button(action: onBeginRecording) {
+                Text(isRecording ? SettingsText.pressShortcut : combo.displayString)
+                    .frame(minWidth: 100)
+            }
+            .background(HotkeyRecorder(
+                isRecording: isRecording,
+                onRecorded: onRecorded,
+                onCancel: onCancel
+            ))
+        }
+    }
+}
+
 struct HotkeyRecorder: NSViewRepresentable {
-    @Binding var isRecording: Bool
-    @Binding var hotkey: AppSettings.HotkeyCombo
+    let isRecording: Bool
+    let onRecorded: (AppSettings.HotkeyCombo) -> Void
+    let onCancel: () -> Void
 
     func makeNSView(context: Context) -> HotkeyRecorderView {
-        let view = HotkeyRecorderView()
-        view.onHotkeyRecorded = { keyCode, modifiers in
-            hotkey = AppSettings.HotkeyCombo(keyCode: keyCode, modifiers: modifiers)
-            isRecording = false
-        }
-        view.onCancel = {
-            isRecording = false
-        }
-        return view
+        HotkeyRecorderView()
     }
 
     func updateNSView(_ nsView: HotkeyRecorderView, context: Context) {
+        nsView.onHotkeyRecorded = { keyCode, modifiers in
+            onRecorded(AppSettings.HotkeyCombo(keyCode: keyCode, modifiers: modifiers))
+        }
+        nsView.onCancel = onCancel
+
         if isRecording {
             nsView.startRecording()
         } else {

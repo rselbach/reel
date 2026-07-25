@@ -606,6 +606,43 @@ class ScreenRecorder: NSObject, ObservableObject {
         return true
     }
 
+    /// Ends the recording and throws the file away, for a take the user does
+    /// not want kept. Unlike stopRecording, nothing is finalized, nothing is
+    /// added to recent recordings, and no preview is offered.
+    @discardableResult
+    func discardRecording() async -> Bool {
+        if isStarting {
+            await waitForActiveStart()
+        }
+        guard isRecording else { return false }
+        if isStopping {
+            await waitForActiveStop()
+            return false
+        }
+        isStopping = true
+        defer { finishStopping() }
+
+        signalCaptureStop()
+        stopCaptureSessions()
+
+        do {
+            try await stream?.stopCapture()
+        } catch {
+            logger.warning("Failed to stop capture while discarding: \(error.localizedDescription)")
+        }
+
+        assetWriter?.cancelWriting()
+        if let outputURL {
+            discardTempRecording(outputURL)
+        }
+
+        cleanup()
+        isRecording = false
+        errorMessage = nil
+        logger.info("Recording discarded at the user's request")
+        return true
+    }
+
     private func waitForActiveStart() async {
         await withCheckedContinuation { continuation in
             startWaiters.append(continuation)

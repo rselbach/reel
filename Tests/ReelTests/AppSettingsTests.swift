@@ -285,6 +285,42 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(Set(ids).count, ids.count, "Carbon needs a distinct id per hot key")
         XCTAssertFalse(ids.contains(0), "0 is reserved as an unset EventHotKeyID")
         XCTAssertEqual(HotkeyAction.toggleRecording.rawValue, 1)
+        XCTAssertEqual(HotkeyAction.discardRecording.rawValue, 2)
+    }
+
+    @MainActor
+    func testDefaultShortcutsDoNotCollide() {
+        let defaults = HotkeyAction.allCases.map { action -> AppSettings.HotkeyCombo in
+            switch action {
+            case .toggleRecording: return .default
+            case .discardRecording: return .discardDefault
+            }
+        }
+        XCTAssertEqual(Set(defaults.map(\.displayString)).count, defaults.count)
+        XCTAssertTrue(defaults.allSatisfy(\.isUsableGlobalShortcut))
+    }
+
+    @MainActor
+    func testAssigningATakenShortcutIsRefused() {
+        let settings = AppSettings.shared
+        let originalToggle = settings.recordingHotkey
+        let originalDiscard = settings.discardHotkey
+        defer {
+            settings.recordingHotkey = originalToggle
+            settings.discardHotkey = originalDiscard
+            settings.hotkeyConflictError = nil
+        }
+
+        settings.setHotkey(.default, for: .toggleRecording)
+        settings.setHotkey(.discardDefault, for: .discardRecording)
+        XCTAssertNil(settings.hotkeyConflictError)
+
+        // Carbon would refuse the second registration and leave one shortcut
+        // silently dead, so the assignment is rejected up front instead.
+        settings.setHotkey(.default, for: .discardRecording)
+        XCTAssertEqual(settings.discardHotkey, .discardDefault)
+        XCTAssertNotNil(settings.hotkeyConflictError)
+        XCTAssertTrue(settings.hotkeyConflictError?.contains("toggle recording") ?? false)
     }
 
     @MainActor

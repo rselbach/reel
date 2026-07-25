@@ -10,6 +10,12 @@ enum SettingsErrorText {
     static let launchAtLoginUpdateFailed = "Failed to update launch at login"
 }
 
+enum HotkeyConflictText {
+    static func message(shortcut: String, otherAction: String) -> String {
+        "\(shortcut) is already used by \(otherAction.replacingOccurrences(of: ":", with: "").lowercased())."
+    }
+}
+
 enum RecentRecordingsLogic {
     /// Most-recent-first, deduplicated, capped at limit.
     static func updatedPaths(current: [String], adding path: String, limit: Int) -> [String] {
@@ -145,6 +151,7 @@ class AppSettings: ObservableObject {
         static let openFinderAfterRecording = "openFinderAfterRecording"
         static let showPreviewAfterRecording = "showPreviewAfterRecording"
         static let recordingHotkey = "recordingHotkey"
+        static let discardHotkey = "discardHotkey"
         static let countdownDuration = "countdownDuration"
         static let recordAudio = "recordAudio"
         static let audioSource = "audioSource"
@@ -256,15 +263,56 @@ class AppSettings: ObservableObject {
 
     @Published var recordingHotkey: HotkeyCombo {
         didSet {
-            do {
-                let data = try JSONEncoder().encode(recordingHotkey)
-                UserDefaults.standard.set(data, forKey: DefaultsKey.recordingHotkey)
-            } catch {
-                logger.warning("Failed to persist recording hotkey: \(error.localizedDescription)")
-            }
-            HotkeyManager.shared.updateHotkey(recordingHotkey, for: .toggleRecording)
-            NotificationCenter.default.post(name: Self.hotkeyChangedNotification, object: nil)
+            persistHotkey(recordingHotkey, key: DefaultsKey.recordingHotkey, action: .toggleRecording)
         }
+    }
+
+    /// Ends a take and throws the file away, for a flubbed demo.
+    @Published var discardHotkey: HotkeyCombo {
+        didSet {
+            persistHotkey(discardHotkey, key: DefaultsKey.discardHotkey, action: .discardRecording)
+        }
+    }
+
+    /// Non-nil when the user tried to assign a shortcut another action already
+    /// owns. Carbon would simply refuse the second registration, leaving one
+    /// shortcut silently dead.
+    @Published var hotkeyConflictError: String?
+
+    func hotkey(for action: HotkeyAction) -> HotkeyCombo {
+        switch action {
+        case .toggleRecording: return recordingHotkey
+        case .discardRecording: return discardHotkey
+        }
+    }
+
+    /// Assigns a shortcut, refusing combinations already taken by another
+    /// action rather than letting the second registration fail silently.
+    func setHotkey(_ combo: HotkeyCombo, for action: HotkeyAction) {
+        if let conflict = HotkeyAction.allCases.first(where: { $0 != action && hotkey(for: $0) == combo }) {
+            hotkeyConflictError = HotkeyConflictText.message(
+                shortcut: combo.displayString,
+                otherAction: conflict.displayName
+            )
+            return
+        }
+
+        hotkeyConflictError = nil
+        switch action {
+        case .toggleRecording: recordingHotkey = combo
+        case .discardRecording: discardHotkey = combo
+        }
+    }
+
+    private func persistHotkey(_ combo: HotkeyCombo, key: String, action: HotkeyAction) {
+        do {
+            let data = try JSONEncoder().encode(combo)
+            UserDefaults.standard.set(data, forKey: key)
+        } catch {
+            logger.warning("Failed to persist \(key): \(error.localizedDescription)")
+        }
+        HotkeyManager.shared.updateHotkey(combo, for: action)
+        NotificationCenter.default.post(name: Self.hotkeyChangedNotification, object: nil)
     }
 
     @Published var countdownDuration: Int {
@@ -572,6 +620,7 @@ class AppSettings: ObservableObject {
         private static let nonShiftModifierMask: UInt32 = 0x1C0000  // Cmd|Opt|Ctrl
 
         static let `default` = HotkeyCombo(keyCode: 15, modifiers: 0x120000) // Cmd+Shift+R
+        static let discardDefault = HotkeyCombo(keyCode: 15, modifiers: 0x1A0000) // Cmd+Opt+Shift+R
 
         var isUsableGlobalShortcut: Bool {
             modifiers & Self.nonShiftModifierMask != 0
@@ -618,30 +667,31 @@ class AppSettings: ObservableObject {
         }
     }
 
-    private static func loadRecordingHotkey(from defaults: UserDefaults) -> HotkeyCombo {
-        if let data = defaults.data(forKey: DefaultsKey.recordingHotkey) {
+    private static func loadHotkey(
+        from defaults: UserDefaults,
+        key: String,
+        fallback: HotkeyCombo
+    ) -> HotkeyCombo {
+        if let data = defaults.data(forKey: key) {
             do {
                 let combo = try JSONDecoder().decode(HotkeyCombo.self, from: data)
                 // Migrate old broken default modifier value (0x180500) to new correct value (0x120000)
                 // Old value masked to 0x100000 (Cmd only), new value masks to 0x120000 (Cmd+Shift)
                 if combo.keyCode == HotkeyCombo.default.keyCode && combo.modifiers == 0x180500 {
                     logger.info("Migrating hotkey from old modifier format")
-                    return .default
+                    return fallback
                 }
                 guard combo.isUsableGlobalShortcut else {
-                    logger.warning("Stored recording hotkey is not suitable for a global shortcut; falling back to default")
-                    return .default
+                    logger.warning("Stored hotkey \(key) is not suitable for a global shortcut; falling back to default")
+                    return fallback
                 }
                 return combo
             } catch {
-                logger.warning("Failed to decode stored recording hotkey: \(error.localizedDescription)")
+                logger.warning("Failed to decode stored hotkey \(key): \(error.localizedDescription)")
             }
         }
-        if defaults.data(forKey: DefaultsKey.recordingHotkey) != nil {
-            logger.warning("Falling back to default hotkey after decode failure")
-        }
 
-        return .default
+        return fallback
     }
 
     private init() {
@@ -672,7 +722,16 @@ class AppSettings: ObservableObject {
 
         self.askWhereToSave = defaults.bool(forKey: DefaultsKey.askWhereToSave)
 
-        self.recordingHotkey = Self.loadRecordingHotkey(from: defaults)
+        self.recordingHotkey = Self.loadHotkey(
+            from: defaults,
+            key: DefaultsKey.recordingHotkey,
+            fallback: .default
+        )
+        self.discardHotkey = Self.loadHotkey(
+            from: defaults,
+            key: DefaultsKey.discardHotkey,
+            fallback: .discardDefault
+        )
 
         self.countdownDuration = Self.sanitizedCountdownDuration(
             defaults.object(forKey: DefaultsKey.countdownDuration) as? Int ?? 3

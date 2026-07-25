@@ -18,6 +18,11 @@ enum AppMenuText {
     static let startRecording = "Start Recording..."
     static let recordingInProgress = "● Recording..."
     static let stopRecording = "Stop Recording"
+    static let discardRecording = "Discard Recording"
+    static let discardConfirmationTitle = "Discard this recording?"
+    static let discardConfirmationMessage = "The take will be deleted. This cannot be undone."
+    static let discard = "Discard"
+    static let cancel = "Cancel"
     static let aboutReel = "About Reel"
     static let checkForUpdates = "Check for Updates..."
     static let settings = "Settings..."
@@ -265,6 +270,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             switch action {
             case .toggleRecording:
                 self?.handleToggleRecording()
+            case .discardRecording:
+                // No confirmation on the shortcut: it is a deliberate chord,
+                // and a modal here would land in the middle of a demo. The
+                // menu item, which sits next to Stop Recording and is easy to
+                // mis-click, does confirm.
+                self?.discardRecording(confirmed: true)
             }
         }
 
@@ -410,6 +421,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         recordingItem.isEnabled = false
         menu.addItem(recordingItem)
         menu.addItem(NSMenuItem(title: AppMenuText.stopRecording, action: #selector(stopRecording), keyEquivalent: "s"))
+        menu.addItem(NSMenuItem(title: AppMenuText.discardRecording, action: #selector(discardRecordingFromMenu), keyEquivalent: ""))
     }
 
     private func addRecordingsAccessItems(to menu: NSMenu) {
@@ -574,6 +586,35 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         Task { @MainActor in
             await stopRecordingFlow()
         }
+    }
+
+    @objc private func discardRecordingFromMenu() {
+        discardRecording(confirmed: false)
+    }
+
+    /// Ends the take and deletes it. Callers that already represent an
+    /// unambiguous request — the global shortcut — pass confirmed.
+    private func discardRecording(confirmed: Bool) {
+        guard screenRecorder.isRecording else { return }
+        guard confirmed || confirmDiscard() else { return }
+
+        Task { @MainActor in
+            hideCameraOverlay()
+            guard await screenRecorder.discardRecording() else { return }
+            RecordingCue.stop.play()
+            rebuildMenu()
+        }
+    }
+
+    private func confirmDiscard() -> Bool {
+        NSApp.activate(ignoringOtherApps: true)
+        let alert = NSAlert()
+        alert.messageText = AppMenuText.discardConfirmationTitle
+        alert.informativeText = AppMenuText.discardConfirmationMessage
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: AppMenuText.discard)
+        alert.addButton(withTitle: AppMenuText.cancel)
+        return alert.runModal() == .alertFirstButtonReturn
     }
 
     private func stopRecordingFlow() async {

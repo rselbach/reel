@@ -6,7 +6,7 @@ Generated from the canonical tracker on 2026-06-21. This checklist is a companio
 
 Environment note: a bounded System Events probe on 2026-06-21 returned `UI elements enabled = false`, so this environment cannot inspect the menu bar, permission prompts, device pickers, or recording UI.
 
-Manual validation required: 35 stories.
+Manual validation required: 36 stories.
 No further manual validation required: 2 stories.
 
 ## Recommended Order
@@ -433,14 +433,15 @@ Notes:
 
 User story: As a user, I want to change the recording hotkey from Settings.
 
-Expected behavior: Shortcuts tab button enters recording mode, local keyDown with Command, Control, or Option records keyCode and masked modifiers, Shift may be an additional modifier but cannot be the only modifier, Escape cancels, display string updates, UserDefaults persists usable combos, invalid stored combos fall back to default, and menu rebuilds on notification.
+Expected behavior: The Shortcuts tab lists every global action — toggle recording and discard recording — each with a recorder button that captures a new combination, rejects modifier-less and shift-only combinations, and cancels on Escape. Assigning a combination another action already owns is refused with a message naming that action, since Carbon would otherwise leave the second registration silently dead.
 
 Manual steps:
 
-1. Open Shortcuts
-2. record valid shortcuts with Command/Control/Option, verify display/persistence
-3. try Shift-only and verify rejection/beep
-4. Escape cancels capture.
+1. Open Settings, Shortcuts
+2. verify both toggle and discard rows appear with their current combinations
+3. record a new combination for each and verify it takes effect globally
+4. try to assign one row the other's combination and verify it is refused with an explanation
+5. press Escape while recording a shortcut and verify the previous combination is kept.
 
 Current status: Partial automated evidence passed; manual UI validation still pending. A bounded System Events probe on 2026-06-21 returned UI elements enabled = false, so this environment cannot inspect the app UI; validate manually using the listed steps.
 
@@ -660,6 +661,25 @@ Manual steps:
 2. record with microphone audio and speakers audible, then play back and verify neither cue is in the recording
 3. record system audio and verify the same
 4. turn the setting off in General and verify no cues play.
+
+Current status: Partial automated evidence passed; manual UI validation still pending. A bounded System Events probe on 2026-06-21 returned UI elements enabled = false, so this environment cannot inspect the app UI; validate manually using the listed steps.
+
+Result: [ ] Pass  [ ] Fail  [ ] Blocked
+
+Notes:
+
+## US-038 - Discard a recording in progress
+
+User story: As a user who flubbed a take, I want to throw the recording away in one step instead of stopping it and then deleting the file.
+
+Expected behavior: While recording, the status item menu offers Discard Recording alongside Stop Recording, and a second global shortcut does the same. Discarding stops the stream, cancels the asset writer, removes the temporary file, and adds nothing to recent recordings or the preview. The menu item confirms first because it sits next to Stop Recording; the shortcut does not, being a deliberate chord where a modal would interrupt a demo. The stop cue plays either way.
+
+Manual steps:
+
+1. Start a recording, choose Discard Recording from the menu, confirm, and verify no file appears in the output folder or recent recordings
+2. repeat and cancel the confirmation, verifying the recording continues
+3. press the discard shortcut during a recording and verify it ends immediately with no confirmation and no file
+4. open Settings, Shortcuts and verify both shortcuts are listed and that assigning one the other's combination is refused with an explanation.
 
 Current status: Partial automated evidence passed; manual UI validation still pending. A bounded System Events probe on 2026-06-21 returned UI elements enabled = false, so this environment cannot inspect the app UI; validate manually using the listed steps.
 

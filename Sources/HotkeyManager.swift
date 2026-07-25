@@ -22,6 +22,14 @@ enum CarbonModifierTranslation {
 /// stable and distinct.
 enum HotkeyAction: UInt32, CaseIterable {
     case toggleRecording = 1
+    case discardRecording = 2
+
+    var displayName: String {
+        switch self {
+        case .toggleRecording: return "Toggle recording:"
+        case .discardRecording: return "Discard recording:"
+        }
+    }
 }
 
 /// Carbon event handler; must be a C function, so it trampolines back into
@@ -77,8 +85,8 @@ class HotkeyManager {
         isStarted = true
         installEventHandlerIfNeeded()
 
-        combos[.toggleRecording] = AppSettings.shared.recordingHotkey
         for action in HotkeyAction.allCases {
+            combos[action] = AppSettings.shared.hotkey(for: action)
             register(action)
         }
     }
