@@ -146,6 +146,7 @@ class AppSettings: ObservableObject {
         static let showCursor = "showCursor"
         static let frameRate = "frameRate"
         static let videoQuality = "videoQuality"
+        static let videoResolution = "videoResolution"
         static let outputDirectory = "outputDirectory"
         static let askWhereToSave = "askWhereToSave"
         static let openFinderAfterRecording = "openFinderAfterRecording"
@@ -234,6 +235,10 @@ class AppSettings: ObservableObject {
 
     @Published var videoQuality: VideoQuality {
         didSet { persist(videoQuality.rawValue, key: DefaultsKey.videoQuality) }
+    }
+
+    @Published var videoResolution: VideoResolution {
+        didSet { persist(videoResolution.rawValue, key: DefaultsKey.videoResolution) }
     }
 
     @Published var outputDirectory: URL {
@@ -577,6 +582,35 @@ class AppSettings: ObservableObject {
             ?? AVCaptureDevice.default(for: .video)
     }
 
+    /// Caps the recorded height. A Retina display captured natively produces
+    /// an unusually large, oddly sized file; most demos are shown at 1080p or
+    /// less, and the smaller frame is cheaper to encode as well.
+    enum VideoResolution: String, StoredAppSetting {
+        case native
+        case p720
+        case p1080
+        case p1440
+
+        var displayName: String {
+            switch self {
+            case .native: return "Native (full detail)"
+            case .p720: return "720p"
+            case .p1080: return "1080p"
+            case .p1440: return "1440p"
+            }
+        }
+
+        /// Maximum output height in pixels, or nil to keep the source size.
+        var maxHeight: CGFloat? {
+            switch self {
+            case .native: return nil
+            case .p720: return 720
+            case .p1080: return 1080
+            case .p1440: return 1440
+            }
+        }
+    }
+
     enum VideoQuality: String, StoredAppSetting {
         case low
         case medium
@@ -713,6 +747,7 @@ class AppSettings: ObservableObject {
         self.showCursor = defaults.object(forKey: DefaultsKey.showCursor) as? Bool ?? true
         self.frameRate = Self.sanitizedFrameRate(defaults.object(forKey: DefaultsKey.frameRate) as? Int ?? Self.defaultFrameRate)
         self.videoQuality = VideoQuality.fromStored(defaults.string(forKey: DefaultsKey.videoQuality)) ?? .medium
+        self.videoResolution = VideoResolution.fromStored(defaults.string(forKey: DefaultsKey.videoResolution)) ?? .native
         self.openFinderAfterRecording = defaults.object(forKey: DefaultsKey.openFinderAfterRecording) as? Bool ?? true
         self.showPreviewAfterRecording = defaults.object(forKey: DefaultsKey.showPreviewAfterRecording) as? Bool ?? true
         self.playSoundCues = defaults.object(forKey: DefaultsKey.playSoundCues) as? Bool ?? true

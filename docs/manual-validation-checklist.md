@@ -715,7 +715,7 @@ Notes:
 
 User story: As a user, I want to configure cursor, frame rate, and video quality so recordings match my needs.
 
-Automated evidence: swift test: testSettingsTextMatchesGeneralRecordingAndShortcutControls, testFrameRateSanitizationUsesSafeFallback, and testVideoQualityBitrates.
+Automated evidence: swift test: testResolutionCapPreservesAspectRatioAndEvenDimensions verifies a 2x Retina capture capped to 1080p keeps its aspect ratio and even dimensions and that sources already below the cap are untouched; testResolutionCapStillObeysEncoderLimits verifies both the cap and the H.264 ceiling apply; testVideoResolutionHeights covers the presets.
 
 Current status: Not required beyond recorded automated evidence
 

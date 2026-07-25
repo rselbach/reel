@@ -21,6 +21,7 @@ enum SettingsText {
     static let showCursor = "Show cursor in recording"
     static let frameRate = "Frame rate:"
     static let videoQuality = "Video quality:"
+    static let videoResolution = "Resolution:"
     static let countdown = "Countdown:"
     static let countdownOff = "Off"
     static let recordAudio = "Record audio"
@@ -203,6 +204,12 @@ struct RecordingTab: View {
             Picker(SettingsText.frameRate, selection: $settings.frameRate) {
                 ForEach(AppSettings.supportedFrameRates, id: \.self) { frameRate in
                     Text("\(frameRate) fps").tag(frameRate)
+                }
+            }
+
+            Picker(SettingsText.videoResolution, selection: $settings.videoResolution) {
+                ForEach(AppSettings.VideoResolution.allCases, id: \.self) { resolution in
+                    Text(resolution.displayName).tag(resolution)
                 }
             }
 

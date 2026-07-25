@@ -247,6 +247,47 @@ final class AppSettingsTests: XCTestCase {
     }
 
     @MainActor
+    func testResolutionCapPreservesAspectRatioAndEvenDimensions() {
+        // A Retina 16:10 display captured at 2x, capped to 1080p.
+        let capped = ScreenRecorder.outputDimensions(width: 3456, height: 2160, maxHeight: 1080)
+        XCTAssertEqual(capped.height, 1080)
+        XCTAssertEqual(capped.width, 1728)
+        XCTAssertEqual(capped.width % 2, 0)
+        XCTAssertEqual(capped.height % 2, 0)
+
+        // Already below the cap: left alone.
+        let small = ScreenRecorder.outputDimensions(width: 1280, height: 720, maxHeight: 1080)
+        XCTAssertEqual(small.width, 1280)
+        XCTAssertEqual(small.height, 720)
+
+        // Native: only the encoder's own limits apply.
+        let native = ScreenRecorder.outputDimensions(width: 5120, height: 2880, maxHeight: nil)
+        XCTAssertEqual(
+            native.width,
+            ScreenRecorder.dimensionsFittingH264Limits(width: 5120, height: 2880).width
+        )
+    }
+
+    @MainActor
+    func testResolutionCapStillObeysEncoderLimits() {
+        // 1440p on an ultra-wide is still within the H.264 width ceiling only
+        // because the cap runs first; verify both limits are applied.
+        let wide = ScreenRecorder.outputDimensions(width: 10240, height: 2880, maxHeight: 1440)
+        XCTAssertLessThanOrEqual(wide.width, 4096)
+        XCTAssertLessThanOrEqual(wide.height, 1440)
+        XCTAssertEqual(wide.width % 2, 0)
+        XCTAssertEqual(wide.height % 2, 0)
+    }
+
+    @MainActor
+    func testVideoResolutionHeights() {
+        XCTAssertNil(AppSettings.VideoResolution.native.maxHeight)
+        XCTAssertEqual(AppSettings.VideoResolution.p720.maxHeight, 720)
+        XCTAssertEqual(AppSettings.VideoResolution.p1080.maxHeight, 1080)
+        XCTAssertEqual(AppSettings.VideoResolution.p1440.maxHeight, 1440)
+    }
+
+    @MainActor
     func testVideoQualityBitrates() {
         XCTAssertEqual(AppSettings.VideoQuality.low.bitrate, 5_000_000)
         XCTAssertEqual(AppSettings.VideoQuality.medium.bitrate, 10_000_000)

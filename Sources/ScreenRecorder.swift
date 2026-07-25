@@ -47,6 +47,8 @@ struct RecordingOptions {
     var frameRate: Int
     var showCursor: Bool
     var videoBitrate: Int
+    /// Output height cap in pixels, or nil to keep the captured size.
+    var resolutionMaxHeight: CGFloat?
     var outputDirectory: URL
     var askWhereToSave: Bool
     var openFinderAfterRecording: Bool
@@ -76,6 +78,7 @@ struct RecordingOptions {
         frameRate = settings.frameRate
         showCursor = settings.showCursor
         videoBitrate = settings.videoQuality.bitrate
+        resolutionMaxHeight = settings.videoResolution.maxHeight
         outputDirectory = settings.outputDirectory
         askWhereToSave = settings.askWhereToSave
         openFinderAfterRecording = settings.openFinderAfterRecording
@@ -390,15 +393,16 @@ class ScreenRecorder: NSObject, ObservableObject {
         return (content.displays, windows)
     }
 
-    private func captureDimensions(for display: SCDisplay) -> (width: Int, height: Int) {
+    private func captureDimensions(for display: SCDisplay, maxHeight: CGFloat?) -> (width: Int, height: Int) {
         let scale = NSScreen.screens.first { $0.displayID == display.displayID }?.backingScaleFactor ?? 2.0
-        return Self.dimensionsFittingH264Limits(
+        return Self.outputDimensions(
             width: Int(CGFloat(display.width) * scale),
-            height: Int(CGFloat(display.height) * scale)
+            height: Int(CGFloat(display.height) * scale),
+            maxHeight: maxHeight
         )
     }
 
-    private func captureDimensions(for window: SCWindow) -> (width: Int, height: Int) {
+    private func captureDimensions(for window: SCWindow, maxHeight: CGFloat?) -> (width: Int, height: Int) {
         let windowScreen = cocoaRect(fromQuartz: window.frame).flatMap { windowFrame in
             NSScreen.screens
                 .map { screen in (screen, screen.frame.intersection(windowFrame)) }
@@ -409,17 +413,42 @@ class ScreenRecorder: NSObject, ObservableObject {
                 .0
         }
         let scale = windowScreen?.backingScaleFactor ?? 2.0
-        return Self.dimensionsFittingH264Limits(
+        return Self.outputDimensions(
             width: Int(window.frame.width * scale),
-            height: Int(window.frame.height * scale)
+            height: Int(window.frame.height * scale),
+            maxHeight: maxHeight
         )
     }
 
-    private func captureDimensions(forRegion rect: CGRect, on display: SCDisplay) -> (width: Int, height: Int) {
+    private func captureDimensions(
+        forRegion rect: CGRect,
+        on display: SCDisplay,
+        maxHeight: CGFloat?
+    ) -> (width: Int, height: Int) {
         let scale = NSScreen.screens.first { $0.displayID == display.displayID }?.backingScaleFactor ?? 2.0
-        return Self.dimensionsFittingH264Limits(
+        return Self.outputDimensions(
             width: Int(rect.width * scale),
-            height: Int(rect.height * scale)
+            height: Int(rect.height * scale),
+            maxHeight: maxHeight
+        )
+    }
+
+    /// Applies the configured height cap, preserving aspect ratio, then the
+    /// encoder's own limits.
+    static func outputDimensions(width: Int, height: Int, maxHeight: CGFloat?) -> (width: Int, height: Int) {
+        guard width > 0, height > 0 else { return dimensionsFittingH264Limits(width: width, height: height) }
+
+        var scaledWidth = CGFloat(width)
+        var scaledHeight = CGFloat(height)
+        if let maxHeight, scaledHeight > maxHeight {
+            let scale = maxHeight / scaledHeight
+            scaledWidth *= scale
+            scaledHeight *= scale
+        }
+
+        return dimensionsFittingH264Limits(
+            width: Int(scaledWidth.rounded()),
+            height: Int(scaledHeight.rounded())
         )
     }
 
@@ -466,7 +495,7 @@ class ScreenRecorder: NSObject, ObservableObject {
                 return
             }
             filter = SCContentFilter(display: display, excludingWindows: [])
-            let dimensions = captureDimensions(for: display)
+            let dimensions = captureDimensions(for: display, maxHeight: options.resolutionMaxHeight)
             captureWidth = dimensions.width
             captureHeight = dimensions.height
 
@@ -476,7 +505,7 @@ class ScreenRecorder: NSObject, ObservableObject {
                 return
             }
             filter = SCContentFilter(desktopIndependentWindow: window)
-            let dimensions = captureDimensions(for: window)
+            let dimensions = captureDimensions(for: window, maxHeight: options.resolutionMaxHeight)
             captureWidth = dimensions.width
             captureHeight = dimensions.height
 
@@ -487,7 +516,11 @@ class ScreenRecorder: NSObject, ObservableObject {
                 return
             }
             filter = SCContentFilter(display: display, excludingWindows: [])
-            let dimensions = captureDimensions(forRegion: region.rect, on: display)
+            let dimensions = captureDimensions(
+                forRegion: region.rect,
+                on: display,
+                maxHeight: options.resolutionMaxHeight
+            )
             captureWidth = dimensions.width
             captureHeight = dimensions.height
         }
