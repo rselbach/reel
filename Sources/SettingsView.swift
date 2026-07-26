@@ -17,6 +17,7 @@ enum SettingsText {
     static let outputDirectoryNotWritable = "Cannot write to selected folder. Pick another location."
     static let openFinderAfterRecording = "Open Finder after recording"
     static let showPreviewAfterRecording = "Show preview after recording"
+    static let finderSuppressedByPreview = "Finder opens automatically only when the preview is off."
     static let playSoundCues = "Play a sound when recording starts and stops"
     static let showCursor = "Show cursor in recording"
     static let highlightClicks = "Highlight clicks"
@@ -124,8 +125,14 @@ struct GeneralTab: View {
                 }
             }
 
-            Toggle(SettingsText.openFinderAfterRecording, isOn: $settings.openFinderAfterRecording)
             Toggle(SettingsText.showPreviewAfterRecording, isOn: $settings.showPreviewAfterRecording)
+            Toggle(SettingsText.openFinderAfterRecording, isOn: $settings.openFinderAfterRecording)
+                .disabled(settings.showPreviewAfterRecording)
+            if settings.showPreviewAfterRecording {
+                Text(SettingsText.finderSuppressedByPreview)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
             Toggle(SettingsText.playSoundCues, isOn: $settings.playSoundCues)
             if let launchError = settings.launchAtLoginError {
                 Text(launchError)

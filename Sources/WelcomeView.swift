@@ -4,7 +4,7 @@ import SwiftUI
 enum WelcomeText {
     static let windowTitle = "Welcome to Reel"
     static let title = "Welcome to Reel"
-    static let menuBarExplainer = "Reel lives in your menu bar — look for the record icon near your clock. Click it to start a recording, click it again to stop."
+    static let menuBarExplainer = "Reel lives in your menu bar — look for the record icon near your clock. Click it to choose what to record; while recording, click it to stop."
     static let hotkeyPrefix = "Or toggle recording from anywhere with"
     static let permissionGranted = "Screen recording access granted"
     static let permissionExplainer = "Reel needs macOS screen recording permission to capture your screen."
@@ -13,6 +13,16 @@ enum WelcomeText {
     static let relaunchNow = "Relaunch Reel"
     static let relaunchFailedTitle = "Could not relaunch Reel"
     static let getStarted = "Get Started"
+}
+
+enum WelcomeLogic {
+    static func canOfferRelaunch(
+        isBundledApp: Bool,
+        hasRequestedPermission: Bool,
+        hasPermission: Bool
+    ) -> Bool {
+        isBundledApp && hasRequestedPermission && !hasPermission
+    }
 }
 
 /// One-time window shown on first launch. Menu bar apps otherwise appear to
@@ -24,11 +34,16 @@ struct WelcomeView: View {
     let onRequestPermission: () -> Void
     let onDismiss: () -> Void
     @State private var relaunchError: String?
+    @State private var hasRequestedPermission = false
 
     /// Relaunching only makes sense for a real app bundle; under `swift run`
     /// there is nothing for the workspace to open.
     private var canRelaunch: Bool {
-        Bundle.main.bundleIdentifier != nil
+        WelcomeLogic.canOfferRelaunch(
+            isBundledApp: Bundle.main.bundleIdentifier != nil,
+            hasRequestedPermission: hasRequestedPermission,
+            hasPermission: recorder.hasPermission
+        )
     }
 
     var body: some View {
@@ -44,6 +59,7 @@ struct WelcomeView: View {
             Text(WelcomeText.menuBarExplainer)
                 .multilineTextAlignment(.center)
                 .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
 
             HStack(spacing: 6) {
                 Text(WelcomeText.hotkeyPrefix)
@@ -67,19 +83,24 @@ struct WelcomeView: View {
                 VStack(spacing: 8) {
                     Text(WelcomeText.permissionExplainer)
                         .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
 
                     Button(WelcomeText.grantPermission) {
+                        hasRequestedPermission = true
                         onRequestPermission()
                     }
 
-                    Text(WelcomeText.relaunchNote)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .multilineTextAlignment(.center)
+                    if hasRequestedPermission {
+                        Text(WelcomeText.relaunchNote)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
 
-                    if canRelaunch {
-                        Button(WelcomeText.relaunchNow) {
-                            relaunch()
+                        if canRelaunch {
+                            Button(WelcomeText.relaunchNow) {
+                                relaunch()
+                            }
                         }
                     }
                 }

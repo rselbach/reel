@@ -1118,6 +1118,10 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(SettingsText.askEachTime, "Ask each time")
         XCTAssertEqual(SettingsText.fixedFolder, "Fixed folder")
         XCTAssertEqual(SettingsText.outputDirectoryNotWritable, "Cannot write to selected folder. Pick another location.")
+        XCTAssertEqual(
+            SettingsText.finderSuppressedByPreview,
+            "Finder opens automatically only when the preview is off."
+        )
         XCTAssertEqual(SettingsText.recordAudio, "Record audio")
         XCTAssertEqual(SettingsText.recordCamera, "Record camera overlay")
         XCTAssertEqual(SettingsText.addTextOverlay, "Add text overlay")
@@ -1131,6 +1135,22 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertTrue(WelcomeText.relaunchNote.contains("relaunching Reel"))
         XCTAssertEqual(WelcomeText.relaunchNow, "Relaunch Reel")
         XCTAssertEqual(WelcomeText.relaunchFailedTitle, "Could not relaunch Reel")
+        XCTAssertTrue(WelcomeText.menuBarExplainer.contains("choose what to record"))
+        XCTAssertFalse(WelcomeLogic.canOfferRelaunch(
+            isBundledApp: true,
+            hasRequestedPermission: false,
+            hasPermission: false
+        ))
+        XCTAssertTrue(WelcomeLogic.canOfferRelaunch(
+            isBundledApp: true,
+            hasRequestedPermission: true,
+            hasPermission: false
+        ))
+        XCTAssertFalse(WelcomeLogic.canOfferRelaunch(
+            isBundledApp: true,
+            hasRequestedPermission: true,
+            hasPermission: true
+        ))
     }
 
     @MainActor
