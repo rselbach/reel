@@ -305,6 +305,20 @@ final class AppSettingsTests: XCTestCase {
     }
 
     @MainActor
+    func testRatioLockedDragPreservesItsShapeAtScreenEdges() {
+        let bounds = CGRect(x: 0, y: 0, width: 800, height: 600)
+        let rect = RegionAspectConstraint.rect(
+            anchor: CGPoint(x: 700, y: 500),
+            current: CGPoint(x: 1200, y: 900),
+            in: bounds
+        )
+
+        XCTAssertTrue(bounds.contains(rect))
+        XCTAssertEqual(rect.width / rect.height, RegionAspectConstraint.ratio, accuracy: 0.001)
+        XCTAssertEqual(rect.maxX, bounds.maxX, accuracy: 0.001)
+    }
+
+    @MainActor
     func testRatioLockedResizeKeepsTheRatio() {
         let screen = CGRect(x: 0, y: 0, width: 1920, height: 1080)
         let rect = CGRect(x: 100, y: 100, width: 960, height: 540)
@@ -329,6 +343,24 @@ final class AppSettingsTests: XCTestCase {
         )
         XCTAssertEqual(unlocked.height, 540)
         XCTAssertEqual(unlocked.width, 1280)
+    }
+
+    @MainActor
+    func testRatioLockedResizePreservesItsShapeAtScreenEdges() {
+        let bounds = CGRect(x: 0, y: 0, width: 800, height: 600)
+        let rect = CGRect(x: 500, y: 300, width: 160, height: 90)
+        let resized = RegionAdjustment.adjusted(
+            rect: rect,
+            handle: .topRight,
+            delta: CGPoint(x: 500, y: 500),
+            bounds: bounds,
+            minimumSize: RegionMath.minimumSelectionSize,
+            lockedRatio: RegionAspectConstraint.ratio
+        )
+
+        XCTAssertTrue(bounds.contains(resized))
+        XCTAssertEqual(resized.width / resized.height, RegionAspectConstraint.ratio, accuracy: 0.001)
+        XCTAssertEqual(resized.maxX, bounds.maxX, accuracy: 0.001)
     }
 
     @MainActor

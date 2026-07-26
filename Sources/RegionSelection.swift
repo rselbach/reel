@@ -81,34 +81,40 @@ enum RegionAspectConstraint {
         )
     }
 
-    /// Re-locks a resized rect to the ratio, holding the corner opposite the
-    /// one being dragged.
-    static func locked(
-        rect: CGRect,
-        handle: RegionAdjustment.Handle,
-        ratio: CGFloat = ratio
+    /// Builds a ratio-locked rect without crossing the screen edge. Scaling
+    /// both dimensions together preserves the ratio when the pointer leaves
+    /// the display.
+    static func rect(
+        anchor: CGPoint,
+        current: CGPoint,
+        in bounds: CGRect,
+        ratio: CGFloat = ratio,
+        minimumSize: CGFloat = 0
     ) -> CGRect {
-        guard handle != .move else { return rect }
+        let raw = rect(anchor: anchor, current: current, ratio: ratio)
+        let minimumHeight = max(minimumSize, minimumSize / ratio)
+        var height = max(raw.height, minimumHeight)
+        var width = height * ratio
 
-        var width = rect.width
-        var height = rect.height
-        if width / ratio >= height {
-            height = width / ratio
-        } else {
-            width = height * ratio
-        }
-
-        let anchor: CGPoint
-        switch handle {
-        case .bottomLeft: anchor = CGPoint(x: rect.maxX, y: rect.maxY)
-        case .bottomRight: anchor = CGPoint(x: rect.minX, y: rect.maxY)
-        case .topLeft: anchor = CGPoint(x: rect.maxX, y: rect.minY)
-        case .topRight, .move: anchor = CGPoint(x: rect.minX, y: rect.minY)
-        }
+        let availableWidth = current.x < anchor.x
+            ? anchor.x - bounds.minX
+            : bounds.maxX - anchor.x
+        let availableHeight = current.y < anchor.y
+            ? anchor.y - bounds.minY
+            : bounds.maxY - anchor.y
+        let scale = min(
+            1,
+            min(
+                max(0, availableWidth) / max(width, 1),
+                max(0, availableHeight) / max(height, 1)
+            )
+        )
+        width *= scale
+        height *= scale
 
         return CGRect(
-            x: min(anchor.x, anchor.x == rect.minX ? anchor.x : anchor.x - width),
-            y: min(anchor.y, anchor.y == rect.minY ? anchor.y : anchor.y - height),
+            x: current.x < anchor.x ? anchor.x - width : anchor.x,
+            y: current.y < anchor.y ? anchor.y - height : anchor.y,
             width: width,
             height: height
         )
@@ -154,6 +160,17 @@ enum RegionAdjustment {
         minimumSize: CGFloat,
         lockedRatio: CGFloat? = nil
     ) -> CGRect {
+        if let lockedRatio, handle != .move {
+            return ratioLockedAdjustment(
+                rect: rect,
+                handle: handle,
+                delta: delta,
+                bounds: bounds,
+                minimumSize: minimumSize,
+                ratio: lockedRatio
+            )
+        }
+
         var result: CGRect
         switch handle {
         case .move:
@@ -191,14 +208,58 @@ enum RegionAdjustment {
         // A drag past the opposite edge flips the rect; standardizing keeps
         // the result well formed instead of negative.
         result = result.standardized
-        if let lockedRatio {
-            result = RegionAspectConstraint.locked(rect: result, handle: handle, ratio: lockedRatio)
-        }
         result.size.width = min(max(minimumSize, result.width), bounds.width)
         result.size.height = min(max(minimumSize, result.height), bounds.height)
         result.origin.x = min(max(bounds.minX, result.minX), bounds.maxX - result.width)
         result.origin.y = min(max(bounds.minY, result.minY), bounds.maxY - result.height)
         return result
+    }
+
+    private static func ratioLockedAdjustment(
+        rect: CGRect,
+        handle: Handle,
+        delta: CGPoint,
+        bounds: CGRect,
+        minimumSize: CGFloat,
+        ratio: CGFloat
+    ) -> CGRect {
+        let anchor: CGPoint
+        let originalCorner: CGPoint
+        switch handle {
+        case .bottomLeft:
+            anchor = CGPoint(x: rect.maxX, y: rect.maxY)
+            originalCorner = CGPoint(x: rect.minX, y: rect.minY)
+        case .bottomRight:
+            anchor = CGPoint(x: rect.minX, y: rect.maxY)
+            originalCorner = CGPoint(x: rect.maxX, y: rect.minY)
+        case .topLeft:
+            anchor = CGPoint(x: rect.maxX, y: rect.minY)
+            originalCorner = CGPoint(x: rect.minX, y: rect.maxY)
+        case .topRight:
+            anchor = CGPoint(x: rect.minX, y: rect.minY)
+            originalCorner = CGPoint(x: rect.maxX, y: rect.maxY)
+        case .move:
+            return rect
+        }
+
+        var current = CGPoint(
+            x: originalCorner.x + delta.x,
+            y: originalCorner.y + delta.y
+        )
+        if current.x == anchor.x {
+            current.x += originalCorner.x < anchor.x ? -1 : 1
+        }
+        if current.y == anchor.y {
+            current.y += originalCorner.y < anchor.y ? -1 : 1
+        }
+
+        return RegionAspectConstraint.rect(
+            anchor: anchor,
+            current: current,
+            in: bounds,
+            ratio: ratio,
+            minimumSize: minimumSize
+        )
     }
 }
 
@@ -435,15 +496,18 @@ final class RegionSelectionView: NSView {
 
         guard let startPoint else { return }
         if lockedRatio != nil {
-            currentRect = RegionAspectConstraint.rect(anchor: startPoint, current: point)
-                .intersection(bounds)
+            currentRect = RegionAspectConstraint.rect(
+                anchor: startPoint,
+                current: point,
+                in: bounds
+            )
         } else {
             currentRect = CGRect(
                 x: min(startPoint.x, point.x),
                 y: min(startPoint.y, point.y),
                 width: abs(point.x - startPoint.x),
                 height: abs(point.y - startPoint.y)
-            )
+            ).intersection(bounds)
         }
         needsDisplay = true
     }
