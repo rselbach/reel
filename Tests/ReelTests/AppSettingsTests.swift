@@ -523,6 +523,25 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(recorder.errorMessage, "No display selected")
     }
 
+    func testRecordingSourceFailuresDescribeTheMissingTrack() {
+        XCTAssertEqual(
+            RecordingSourceError.cannotConnectInput("microphone").errorDescription,
+            "Could not connect the selected microphone."
+        )
+        XCTAssertEqual(
+            RecordingSourceError.cannotConnectOutput("camera").errorDescription,
+            "Could not connect the camera output."
+        )
+        XCTAssertEqual(
+            RecordingSourceError.cannotAddAudioTrack.errorDescription,
+            "Could not add an audio track to the recording."
+        )
+        XCTAssertEqual(
+            RecordingSourceError.failedToStart(["microphone", "camera"]).errorDescription,
+            "Microphone and camera failed to start."
+        )
+    }
+
     @MainActor
     func testAudioLevelScaleMapsDecibelsOntoTheMeter() {
         XCTAssertEqual(AudioLevelScale.normalized(decibels: 0), 1, accuracy: 0.0001)

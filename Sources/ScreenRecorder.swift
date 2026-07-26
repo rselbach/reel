@@ -35,6 +35,27 @@ enum RecordingFinalizationLogic {
     }
 }
 
+enum RecordingSourceError: LocalizedError, Equatable {
+    case cannotConnectInput(String)
+    case cannotConnectOutput(String)
+    case cannotAddAudioTrack
+    case failedToStart([String])
+
+    var errorDescription: String? {
+        switch self {
+        case .cannotConnectInput(let source):
+            return "Could not connect the selected \(source)."
+        case .cannotConnectOutput(let source):
+            return "Could not connect the \(source) output."
+        case .cannotAddAudioTrack:
+            return "Could not add an audio track to the recording."
+        case .failedToStart(let sources):
+            let names = sources.joined(separator: " and ")
+            return "\(names.prefix(1).uppercased())\(names.dropFirst()) failed to start."
+        }
+    }
+}
+
 /// Per-recording changes to the persisted settings, chosen in the picker and
 /// applied to one take only.
 struct RecordingOverrides: Equatable {
@@ -659,7 +680,7 @@ class ScreenRecorder: NSObject, ObservableObject {
             }
 
             try await stream?.startCapture()
-            let failures = startCaptureSessions()
+            try startCaptureSessions()
             lastRecordedURL = nil
             isRecording = true
             rememberCurrentTarget()
@@ -668,19 +689,7 @@ class ScreenRecorder: NSObject, ObservableObject {
                 startCursorSampling(frameRate: options.frameRate)
             }
 
-            // Surface capture session failures as warnings (recording continues without them)
-            if failures.cameraFailed {
-                disableCameraCaptureAfterStartFailure()
-            }
-            if failures.audioFailed && failures.cameraFailed {
-                errorMessage = "Audio and camera failed to start"
-            } else if failures.audioFailed {
-                errorMessage = "Audio failed to start"
-            } else if failures.cameraFailed {
-                errorMessage = "Camera failed to start"
-            } else {
-                errorMessage = nil
-            }
+            errorMessage = nil
             return true
         } catch {
             if let stream {
@@ -909,7 +918,9 @@ class ScreenRecorder: NSObject, ObservableObject {
 
         let adaptor = makePixelBufferAdaptor(videoInput: videoInput, width: width, height: height)
         let bufferPool = makeBufferPool(width: width, height: height)
-        let audioInput = options.recordAudio ? makeAudioInput(assetWriter: assetWriter) : nil
+        let audioInput = options.recordAudio
+            ? try makeAudioInput(assetWriter: assetWriter)
+            : nil
 
         updateFrameWriter(
             adaptor: adaptor,
@@ -1029,7 +1040,7 @@ class ScreenRecorder: NSObject, ObservableObject {
         return bufferPool
     }
 
-    private func makeAudioInput(assetWriter: AVAssetWriter) -> AVAssetWriterInput? {
+    private func makeAudioInput(assetWriter: AVAssetWriter) throws -> AVAssetWriterInput {
         let audioSettings: [String: Any]
         if let recommended = audioOutputSettings, !recommended.isEmpty {
             audioSettings = recommended
@@ -1045,13 +1056,11 @@ class ScreenRecorder: NSObject, ObservableObject {
         let input = AVAssetWriterInput(mediaType: .audio, outputSettings: audioSettings)
         input.expectsMediaDataInRealTime = true
 
-        if assetWriter.canAdd(input) {
-            assetWriter.add(input)
-            return input
+        guard assetWriter.canAdd(input) else {
+            throw RecordingSourceError.cannotAddAudioTrack
         }
-
-        logger.warning("Unable to add audio input to asset writer")
-        return nil
+        assetWriter.add(input)
+        return input
     }
 
     private func updateFrameWriter(
@@ -1089,17 +1098,20 @@ class ScreenRecorder: NSObject, ObservableObject {
         device: AVCaptureDevice,
         output: AVCaptureOutput,
         outputQueue: DispatchQueue,
+        sourceName: String,
         configureSession: (AVCaptureSession) -> Void = { _ in },
         configureOutput: (AVCaptureOutput) -> Void = { _ in }
     ) throws -> AVCaptureSession {
         let session = AVCaptureSession()
         session.beginConfiguration()
+        defer { session.commitConfiguration() }
         configureSession(session)
 
         let input = try AVCaptureDeviceInput(device: device)
-        if session.canAddInput(input) {
-            session.addInput(input)
+        guard session.canAddInput(input) else {
+            throw RecordingSourceError.cannotConnectInput(sourceName)
         }
+        session.addInput(input)
 
         configureOutput(output)
 
@@ -1111,11 +1123,10 @@ class ScreenRecorder: NSObject, ObservableObject {
             videoOutput.setSampleBufferDelegate(self, queue: outputQueue)
         }
 
-        if session.canAddOutput(output) {
-            session.addOutput(output)
+        guard session.canAddOutput(output) else {
+            throw RecordingSourceError.cannotConnectOutput(sourceName)
         }
-
-        session.commitConfiguration()
+        session.addOutput(output)
         return session
     }
 
@@ -1141,7 +1152,8 @@ class ScreenRecorder: NSObject, ObservableObject {
         let session = try buildCaptureSession(
             device: device,
             output: output,
-            outputQueue: DispatchQueue(label: "audio.capture.queue")
+            outputQueue: DispatchQueue(label: "audio.capture.queue"),
+            sourceName: "microphone"
         )
 
         audioCaptureSession = session
@@ -1217,6 +1229,7 @@ class ScreenRecorder: NSObject, ObservableObject {
             device: device,
             output: output,
             outputQueue: DispatchQueue(label: "camera.capture.queue"),
+            sourceName: "camera",
             configureSession: { session in
                 session.sessionPreset = .high
             },
@@ -1501,30 +1514,35 @@ class ScreenRecorder: NSObject, ObservableObject {
         )
     }
 
-    private func startCaptureSessions() -> (audioFailed: Bool, cameraFailed: Bool) {
+    private func startCaptureSessions() throws {
         let audioSession = audioCaptureSession
         let cameraSession = cameraCaptureSession
-        var audioFailed = false
-        var cameraFailed = false
+        var failedSources: [String] = []
 
         captureSessionQueue.sync {
             if let audio = audioSession {
-                audio.startRunning()
+                if !audio.isRunning {
+                    audio.startRunning()
+                }
                 if !audio.isRunning {
                     logger.error("Audio capture session failed to start")
-                    audioFailed = true
+                    failedSources.append("microphone")
                 }
             }
             if let camera = cameraSession {
-                camera.startRunning()
+                if !camera.isRunning {
+                    camera.startRunning()
+                }
                 if !camera.isRunning {
                     logger.error("Camera capture session failed to start")
-                    cameraFailed = true
+                    failedSources.append("camera")
                 }
             }
         }
 
-        return (audioFailed, cameraFailed)
+        if !failedSources.isEmpty {
+            throw RecordingSourceError.failedToStart(failedSources)
+        }
     }
 
     private func stopCaptureSessions() {
