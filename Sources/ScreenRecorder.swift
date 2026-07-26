@@ -520,8 +520,9 @@ class ScreenRecorder: NSObject, ObservableObject {
         )
     }
 
-    func startRecording(overrides: RecordingOverrides = .none) async {
-        guard !isRecording, !isStarting else { return }
+    @discardableResult
+    func startRecording(overrides: RecordingOverrides = .none) async -> Bool {
+        guard !isRecording, !isStarting else { return false }
         isStarting = true
         defer { finishStarting() }
 
@@ -540,8 +541,7 @@ class ScreenRecorder: NSObject, ObservableObject {
         switch recordingMode {
         case .display:
             guard let display = selectedDisplay else {
-                errorMessage = "No display selected"
-                return
+                return failStart("No display selected")
             }
             filter = SCContentFilter(display: display, excludingWindows: [])
             let dimensions = captureDimensions(for: display, maxHeight: options.resolutionMaxHeight, codec: options.videoCodec)
@@ -550,8 +550,7 @@ class ScreenRecorder: NSObject, ObservableObject {
 
         case .window:
             guard let window = selectedWindow else {
-                errorMessage = "No window selected"
-                return
+                return failStart("No window selected")
             }
             filter = SCContentFilter(desktopIndependentWindow: window)
             let dimensions = captureDimensions(for: window, maxHeight: options.resolutionMaxHeight, codec: options.videoCodec)
@@ -561,8 +560,7 @@ class ScreenRecorder: NSObject, ObservableObject {
         case .region:
             guard let region = selectedRegion,
                   let display = regionDisplay(for: region) else {
-                errorMessage = "No region selected"
-                return
+                return failStart("No region selected")
             }
             filter = SCContentFilter(display: display, excludingWindows: [])
             let dimensions = captureDimensions(
@@ -576,15 +574,13 @@ class ScreenRecorder: NSObject, ObservableObject {
         }
 
         guard captureWidth > 0, captureHeight > 0 else {
-            errorMessage = "Invalid recording dimensions"
-            return
+            return failStart("Invalid recording dimensions")
         }
 
         // A writer that fails mid-recording cannot be finalized, so a full
         // disk destroys the whole take. Refuse up front instead.
         if let shortfall = diskSpaceShortfall(options: options) {
-            errorMessage = shortfall
-            return
+            return failStart(shortfall)
         }
 
         // Framing draws the window inset on a larger canvas, so the file is
@@ -619,15 +615,17 @@ class ScreenRecorder: NSObject, ObservableObject {
             // System audio rides on the screen recording permission instead.
             if options.recordAudio, options.audioSource == .microphone {
                 guard await ensureAVPermission(for: .audio) else {
-                    errorMessage = "Microphone access denied. Enable it in System Settings → Privacy & Security → Microphone."
-                    return
+                    return failStart(
+                        "Microphone access denied. Enable it in System Settings → Privacy & Security → Microphone."
+                    )
                 }
             }
 
             if options.recordCamera {
                 guard await ensureAVPermission(for: .video) else {
-                    errorMessage = "Camera access denied. Enable it in System Settings → Privacy & Security → Camera."
-                    return
+                    return failStart(
+                        "Camera access denied. Enable it in System Settings → Privacy & Security → Camera."
+                    )
                 }
             }
 
@@ -683,16 +681,32 @@ class ScreenRecorder: NSObject, ObservableObject {
             } else {
                 errorMessage = nil
             }
+            return true
         } catch {
-            errorMessage = "Failed to start: \(error.localizedDescription)"
-            if let assetWriter, assetWriter.status == .writing {
-                assetWriter.cancelWriting()
+            if let stream {
+                do {
+                    try await stream.stopCapture()
+                } catch {
+                    logger.warning("Failed to stop capture after start failure: \(error.localizedDescription)")
+                }
             }
-            if let outputURL {
-                discardTempRecording(outputURL)
-            }
-            cleanup()
+            return failStart("Failed to start: \(error.localizedDescription)")
         }
+    }
+
+    private func failStart(_ message: String) -> Bool {
+        errorMessage = message
+        stopCaptureSessions()
+        if let assetWriter, assetWriter.status == .writing {
+            assetWriter.cancelWriting()
+        }
+        if let outputURL {
+            discardTempRecording(outputURL)
+        }
+        cleanup()
+        isRecording = false
+        isPaused = false
+        return false
     }
 
     @discardableResult

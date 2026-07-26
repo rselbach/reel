@@ -324,7 +324,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 }
 
                 guard await self.runCountdown(overrides: .none) else { return }
-                await self.screenRecorder.startRecording()
+                guard await self.screenRecorder.startRecording() else {
+                    self.hideCameraOverlay()
+                    self.reportStartOutcome()
+                    self.rebuildMenu()
+                    return
+                }
+                RecordingCue.start.play()
                 self.recordingDidStart()
             }
         }
@@ -850,7 +856,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             }
 
             guard await runCountdown(overrides: overrides) else { return }
-            await screenRecorder.startRecording(overrides: overrides)
+            guard await screenRecorder.startRecording(overrides: overrides) else {
+                hideCameraOverlay()
+                reportStartOutcome()
+                rebuildMenu()
+                return
+            }
+            RecordingCue.start.play()
             recordingDidStart()
         }
     }
@@ -880,14 +892,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             return false
         }
 
-        // Deliberately before capture begins: a cue played once the microphone
-        // is live would land in the recording.
-        RecordingCue.start.play()
         return true
     }
 
     /// Brings up everything that accompanies a running recording.
     private func recordingDidStart() {
+        guard screenRecorder.isRecording else { return }
         showCameraOverlayIfNeeded()
         showCaptureBoundsIfNeeded()
         startWindowTrackingIfNeeded()
@@ -960,7 +970,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// overlay's drag bounds and the capture bounds border were both placed at
     /// start. Poll the recorded window's frame and move them along with it.
     private func startWindowTrackingIfNeeded() {
-        guard screenRecorder.recordingMode == .window,
+        guard screenRecorder.isRecording,
+              screenRecorder.recordingMode == .window,
               let windowID = screenRecorder.selectedWindow?.windowID else {
             return
         }

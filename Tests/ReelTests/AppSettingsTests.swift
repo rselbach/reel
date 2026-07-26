@@ -509,6 +509,21 @@ final class AppSettingsTests: XCTestCase {
     }
 
     @MainActor
+    func testFailedRecordingStartReturnsFalseAndReleasesItsOptions() async {
+        let recorder = ScreenRecorder()
+        recorder.recordingMode = .display
+        recorder.selectedDisplayID = nil
+
+        let started = await recorder.startRecording()
+
+        XCTAssertFalse(started)
+        XCTAssertFalse(recorder.isRecording)
+        XCTAssertFalse(recorder.isStarting)
+        XCTAssertNil(recorder.activeRecordingOptions)
+        XCTAssertEqual(recorder.errorMessage, "No display selected")
+    }
+
+    @MainActor
     func testAudioLevelScaleMapsDecibelsOntoTheMeter() {
         XCTAssertEqual(AudioLevelScale.normalized(decibels: 0), 1, accuracy: 0.0001)
         XCTAssertEqual(AudioLevelScale.normalized(decibels: -30), 0.5, accuracy: 0.0001)
