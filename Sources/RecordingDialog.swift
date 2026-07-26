@@ -27,14 +27,18 @@ enum RecordingDialogText {
     static let refresh = "Refresh"
     static let noWindows = "No open windows found."
     static let noWindowsHint = "Open a window, then refresh."
+    static let noSearchResults = "No windows match your search."
     static let nothingRecordable = "No recordable displays or windows found"
     static let nothingRecordableHint = "Check screen recording permission and try again."
     static let openSystemSettings = "Open System Settings..."
     static let openSystemSettingsFailed = "Could not open System Settings."
     static let selectArea = "Select Area to Record..."
     static let forThisRecording = "For this recording"
-    static let recordAudio = "Microphone"
     static let recordCamera = "Camera"
+
+    static func recordAudio(source: AppSettings.AudioSource) -> String {
+        source.displayName
+    }
 }
 
 enum RecordingDialogLogic {
@@ -47,7 +51,7 @@ enum RecordingDialogLogic {
         guard let title = windowTitle, !title.isEmpty, title != fallbackName else {
             return fallbackName
         }
-        return title
+        return "\(title) — \(fallbackName)"
     }
 
     /// Names the remembered area by its size, so it is obvious which area is
@@ -93,12 +97,13 @@ enum PickerNavigation {
     /// Next selected index for an arrow key. Movement is clamped rather than
     /// wrapped, so holding an arrow settles at an end instead of cycling.
     static func nextIndex(
-        from index: Int,
+        from index: Int?,
         direction: MoveCommandDirection,
         count: Int,
         columns: Int
     ) -> Int {
         guard count > 0 else { return 0 }
+        guard let index else { return 0 }
         let step: Int
         switch direction {
         case .left: step = -1
@@ -117,6 +122,25 @@ enum PickerNavigation {
 /// are only read.
 private struct UncheckedSendable<T>: @unchecked Sendable {
     let value: T
+}
+
+@MainActor
+private enum AppIconCache {
+    static let images = NSCache<NSString, NSImage>()
+
+    static func icon(bundleID: String) -> NSImage? {
+        if let image = images.object(forKey: bundleID as NSString) {
+            return image
+        }
+        guard let appURL = NSWorkspace.shared.urlForApplication(
+            withBundleIdentifier: bundleID
+        ) else {
+            return nil
+        }
+        let image = NSWorkspace.shared.icon(forFile: appURL.path())
+        images.setObject(image, forKey: bundleID as NSString)
+        return image
+    }
 }
 
 struct RecordingDialog: View {
@@ -202,7 +226,7 @@ struct RecordingDialog: View {
         let targets = orderedSelections
         guard !targets.isEmpty else { return }
 
-        let current = selection.flatMap { targets.firstIndex(of: $0) } ?? 0
+        let current = selection.flatMap { targets.firstIndex(of: $0) }
         let columns = PickerNavigation.columnCount(
             availableWidth: Self.gridWidth,
             minimum: Self.gridMinimum,
@@ -302,7 +326,16 @@ struct RecordingDialog: View {
             .padding(.horizontal, 16)
             .padding(.top, 8)
 
-            if !windows.isEmpty {
+            if windows.isEmpty {
+                emptyState
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            } else if filteredWindows.isEmpty {
+                Text(RecordingDialogText.noSearchResults)
+                    .font(.subheadline)
+                    .foregroundColor(.secondary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    .padding(16)
+            } else {
                 ScrollView {
                     LazyVGrid(columns: columns, spacing: 12) {
                         ForEach(filteredWindows, id: \.windowID) { window in
@@ -320,9 +353,6 @@ struct RecordingDialog: View {
                     .padding(.horizontal, 16)
                     .padding(.bottom, 16)
                 }
-            } else {
-                emptyState
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             }
 
             Divider()
@@ -333,7 +363,10 @@ struct RecordingDialog: View {
                 Text(RecordingDialogText.forThisRecording)
                     .font(.caption)
                     .foregroundColor(.secondary)
-                Toggle(RecordingDialogText.recordAudio, isOn: $recordAudio)
+                Toggle(
+                    RecordingDialogText.recordAudio(source: AppSettings.shared.audioSource),
+                    isOn: $recordAudio
+                )
                 Toggle(RecordingDialogText.recordCamera, isOn: $recordCamera)
 
                 if recordAudio, AppSettings.shared.audioSource == .microphone {
@@ -515,11 +548,10 @@ struct RecordingDialog: View {
     }
     
     private func appIcon(for window: SCWindow) -> NSImage? {
-        guard let bundleID = window.owningApplication?.bundleIdentifier,
-              let appURL = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID) else {
+        guard let bundleID = window.owningApplication?.bundleIdentifier else {
             return nil
         }
-        return NSWorkspace.shared.icon(forFile: appURL.path())
+        return AppIconCache.icon(bundleID: bundleID)
     }
 }
 

@@ -1234,7 +1234,7 @@ final class AppSettingsTests: XCTestCase {
     func testRecordingDialogWindowTitleFallbacks() {
         XCTAssertEqual(
             RecordingDialogLogic.windowTitle(appName: "Safari", windowTitle: "Apple"),
-            "Apple"
+            "Apple — Safari"
         )
         XCTAssertEqual(
             RecordingDialogLogic.windowTitle(appName: "Safari", windowTitle: "Safari"),
@@ -1243,6 +1243,14 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(
             RecordingDialogLogic.windowTitle(appName: nil, windowTitle: nil),
             "Unknown"
+        )
+        XCTAssertEqual(
+            RecordingDialogText.recordAudio(source: .microphone),
+            "Microphone"
+        )
+        XCTAssertEqual(
+            RecordingDialogText.recordAudio(source: .systemAudio),
+            "System Audio"
         )
     }
 
@@ -1359,6 +1367,11 @@ final class AppSettingsTests: XCTestCase {
     @MainActor
     func testArrowKeysStepByOneAndByRowWithoutWrapping() {
         XCTAssertEqual(
+            PickerNavigation.nextIndex(from: nil, direction: .right, count: 9, columns: 3),
+            0,
+            "the first arrow press selects the first visible card"
+        )
+        XCTAssertEqual(
             PickerNavigation.nextIndex(from: 0, direction: .right, count: 9, columns: 3),
             1
         )
@@ -1423,6 +1436,7 @@ final class AppSettingsTests: XCTestCase {
     @MainActor
     func testRecordingDialogTextDistinguishesEmptyStates() {
         XCTAssertEqual(RecordingDialogText.noWindows, "No open windows found.")
+        XCTAssertEqual(RecordingDialogText.noSearchResults, "No windows match your search.")
         XCTAssertEqual(
             RecordingDialogText.nothingRecordable,
             "No recordable displays or windows found"
