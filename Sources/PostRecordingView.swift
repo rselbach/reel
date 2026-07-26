@@ -123,6 +123,7 @@ enum PostRecordingText {
     static let keyframeNote = "Trimming is lossless; the start point snaps to the nearest keyframe."
     static let done = "Done"
     static let recordAgain = "Record Again"
+    static let changeTarget = "Change Target..."
     static let deleteConfirmationTitle = "Move recording to Trash?"
     static let deleteConfirmationMessage = "You can recover it from the Trash."
 }
@@ -188,6 +189,7 @@ struct PostRecordingView: View {
     let onDismiss: () -> Void
     let onRevealInFinder: () -> Void
     let onRecordAgain: () -> Void
+    let onChangeTarget: () -> Void
     let onDelete: () -> Void
 
     @State private var player: AVPlayer?
@@ -288,6 +290,11 @@ struct PostRecordingView: View {
                 // another take of the same thing.
                 Button(PostRecordingText.recordAgain) {
                     onRecordAgain()
+                }
+                .disabled(isExporting)
+
+                Button(PostRecordingText.changeTarget) {
+                    onChangeTarget()
                 }
                 .disabled(isExporting)
 

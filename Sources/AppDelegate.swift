@@ -745,6 +745,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 guard let self else { return }
                 self.previewWindow?.close()
                 self.previewWindow = nil
+                self.handleToggleRecording()
+            },
+            onChangeTarget: { [weak self] in
+                guard let self else { return }
+                self.previewWindow?.close()
+                self.previewWindow = nil
                 self.showRecordingDialog()
             },
             onDelete: { [weak self] in

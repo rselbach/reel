@@ -1087,6 +1087,7 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(PostRecordingText.saveTrimmed, "Save Trimmed...")
         XCTAssertEqual(PostRecordingText.done, "Done")
         XCTAssertEqual(PostRecordingText.recordAgain, "Record Again")
+        XCTAssertEqual(PostRecordingText.changeTarget, "Change Target...")
         XCTAssertEqual(PostRecordingText.deleteConfirmationTitle, "Move recording to Trash?")
         XCTAssertEqual(PostRecordingText.deleteConfirmationMessage, "You can recover it from the Trash.")
     }
