@@ -116,6 +116,20 @@ enum PickerNavigation {
     }
 }
 
+enum ThumbnailLoading {
+    static let maxConcurrentCaptures = 6
+
+    static func batches(
+        count: Int,
+        limit: Int = maxConcurrentCaptures
+    ) -> [Range<Int>] {
+        guard count > 0, limit > 0 else { return [] }
+        return stride(from: 0, to: count, by: limit).map {
+            $0..<min(count, $0 + limit)
+        }
+    }
+}
+
 /// Read-only snapshot wrapper for fanning ScreenCaptureKit objects (and the
 /// NSImages made from them) out to concurrent thumbnail tasks. SCDisplay/
 /// SCWindow/NSImage are not Sendable, but these are immutable snapshots that
@@ -518,20 +532,25 @@ struct RecordingDialog: View {
             }
         }
 
-        await withTaskGroup(of: UncheckedSendable<(CGWindowID, NSImage)>?.self) { group in
-            for window in windows {
-                let boxed = UncheckedSendable(value: window)
-                group.addTask {
-                    guard let image = await ThumbnailCapture.captureWindow(boxed.value, maxSize: size) else {
-                        return nil
+        for batch in ThumbnailLoading.batches(count: windows.count) {
+            await withTaskGroup(of: UncheckedSendable<(CGWindowID, NSImage)>?.self) { group in
+                for index in batch {
+                    let boxed = UncheckedSendable(value: windows[index])
+                    group.addTask {
+                        guard let image = await ThumbnailCapture.captureWindow(
+                            boxed.value,
+                            maxSize: size
+                        ) else {
+                            return nil
+                        }
+                        return UncheckedSendable(value: (boxed.value.windowID, image))
                     }
-                    return UncheckedSendable(value: (boxed.value.windowID, image))
                 }
-            }
-            for await result in group {
-                guard !Task.isCancelled else { return }
-                if let result {
-                    windowThumbnails[result.value.0] = result.value.1
+                for await result in group {
+                    guard !Task.isCancelled else { return }
+                    if let result {
+                        windowThumbnails[result.value.0] = result.value.1
+                    }
                 }
             }
         }

@@ -1472,6 +1472,41 @@ final class AppSettingsTests: XCTestCase {
         ))
     }
 
+    func testWindowOrderingGroupsAppsThenSortsTitles() {
+        XCTAssertTrue(WindowOrdering.precedes(
+            appName: "Finder",
+            title: "Downloads",
+            windowID: 2,
+            appName: "Safari",
+            title: "Greendale",
+            windowID: 1
+        ))
+        XCTAssertTrue(WindowOrdering.precedes(
+            appName: "Safari",
+            title: "Greendale",
+            windowID: 2,
+            appName: "Safari",
+            title: "Spanish 101",
+            windowID: 1
+        ))
+        XCTAssertTrue(WindowOrdering.precedes(
+            appName: "Safari",
+            title: "Greendale",
+            windowID: 1,
+            appName: "Safari",
+            title: "Greendale",
+            windowID: 2
+        ))
+    }
+
+    func testThumbnailLoadingUsesBoundedBatches() {
+        XCTAssertEqual(
+            ThumbnailLoading.batches(count: 14),
+            [0..<6, 6..<12, 12..<14]
+        )
+        XCTAssertTrue(ThumbnailLoading.batches(count: 0).isEmpty)
+    }
+
     func testCountdownLayoutBuildsSequenceAndCentersHUD() {
         XCTAssertEqual(CountdownLayout.sequence(duration: 3), [3, 2, 1])
         XCTAssertEqual(CountdownLayout.sequence(duration: 5), [5, 4, 3, 2, 1])

@@ -77,6 +77,27 @@ enum CaptureExclusionLogic {
     }
 }
 
+enum WindowOrdering {
+    static func precedes(
+        appName lhsAppName: String?,
+        title lhsTitle: String?,
+        windowID lhsWindowID: CGWindowID,
+        appName rhsAppName: String?,
+        title rhsTitle: String?,
+        windowID rhsWindowID: CGWindowID
+    ) -> Bool {
+        let lhs = [lhsAppName ?? "", lhsTitle ?? ""]
+        let rhs = [rhsAppName ?? "", rhsTitle ?? ""]
+        for (lhsValue, rhsValue) in zip(lhs, rhs) {
+            let order = lhsValue.localizedCaseInsensitiveCompare(rhsValue)
+            if order != .orderedSame {
+                return order == .orderedAscending
+            }
+        }
+        return lhsWindowID < rhsWindowID
+    }
+}
+
 /// Per-recording changes to the persisted settings, chosen in the picker and
 /// applied to one take only.
 struct RecordingOverrides: Equatable {
@@ -485,12 +506,23 @@ class ScreenRecorder: NSObject, ObservableObject {
             false,
             onScreenWindowsOnly: true
         )
-        let windows = content.windows.filter { window in
-            window.isOnScreen &&
-            window.frame.width > RecordingConstants.minimumWindowSize &&
-            window.frame.height > RecordingConstants.minimumWindowSize &&
-            window.owningApplication?.bundleIdentifier != Bundle.main.bundleIdentifier
-        }
+        let windows = content.windows
+            .filter { window in
+                window.isOnScreen &&
+                window.frame.width > RecordingConstants.minimumWindowSize &&
+                window.frame.height > RecordingConstants.minimumWindowSize &&
+                window.owningApplication?.bundleIdentifier != Bundle.main.bundleIdentifier
+            }
+            .sorted { lhs, rhs in
+                WindowOrdering.precedes(
+                    appName: lhs.owningApplication?.applicationName,
+                    title: lhs.title,
+                    windowID: lhs.windowID,
+                    appName: rhs.owningApplication?.applicationName,
+                    title: rhs.title,
+                    windowID: rhs.windowID
+                )
+            }
         let excludedApplications = content.applications.filter {
             CaptureExclusionLogic.isCurrentApplication(
                 bundleID: $0.bundleIdentifier,
