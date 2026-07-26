@@ -24,8 +24,11 @@ jobs:
       - name: Setup just
         uses: extractions/setup-just@v2
 
-      - name: Build
-        run: just build
+      - name: Validate repository
+        run: just validate
 
-      - name: Test
-        run: swift test
+      - name: Test with coverage
+        run: just test-coverage
+
+      - name: Assemble app bundle
+        run: just build-app

@@ -15,6 +15,23 @@ default: build-app
 build:
     swift build -c release
 
+# Run the test suite
+test:
+    swift test
+
+# Run tests with coverage and enforce the source-line floor
+test-coverage:
+    swift test --enable-code-coverage
+    python3 scripts/check-code-coverage.py
+
+# Format Swift sources and tests
+format:
+    swift format format --configuration .swift-format --in-place --recursive --parallel Sources Tests
+
+# Check Swift formatting without changing files
+format-check:
+    swift format lint --strict --configuration .swift-format --recursive --parallel Sources Tests
+
 # Build aliases with explicit intent for common workflows
 build-release: build
     # no-op: kept as a clear command alias
@@ -141,6 +158,12 @@ clean:
 validate-docs:
     python3 scripts/validate-feature-docs.py
 
+# Validate source formatting, docs, scripts, and bundle metadata
+validate: format-check validate-docs
+    python3 -m compileall -q scripts
+    find scripts -type f -name '*.sh' -exec bash -n {} +
+    plutil -lint Sources/Info.plist Reel.entitlements
+
 # Regenerate manual validation checklist from canonical tracker
 generate-checklist:
     python3 scripts/generate-manual-validation-checklist.py
@@ -171,6 +194,11 @@ help:
     @echo "Recipes:"
     @echo "  build          Build swift package (release)"
     @echo "  build-app      Build the .app bundle (default)"
+    @echo "  test           Run the test suite"
+    @echo "  test-coverage  Run tests and enforce source line coverage"
+    @echo "  format         Format Swift sources and tests"
+    @echo "  format-check   Check Swift formatting"
+    @echo "  validate       Validate formatting, docs, scripts, and metadata"
     @echo "  sign           Code sign the app"
     @echo "  notarize       Sign and notarize the app"
     @echo "  dmg            Create unsigned .dmg"
