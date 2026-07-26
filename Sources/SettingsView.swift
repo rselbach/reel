@@ -425,11 +425,12 @@ private struct ShortcutRow: View {
                 Text(isRecording ? SettingsText.pressShortcut : combo.displayString)
                     .frame(minWidth: 100)
             }
-            .background(HotkeyRecorder(
-                isRecording: isRecording,
-                onRecorded: onRecorded,
-                onCancel: onCancel
-            ))
+            .background(
+                HotkeyRecorder(
+                    isRecording: isRecording,
+                    onRecorded: onRecorded,
+                    onCancel: onCancel
+                ))
         }
     }
 }
@@ -470,10 +471,10 @@ enum HotkeyRecorderLogic {
             return .cancel
         }
 
-        guard modifierFlags.contains(.command) ||
-              modifierFlags.contains(.control) ||
-              modifierFlags.contains(.option) ||
-              modifierFlags.contains(.shift) else {
+        guard
+            modifierFlags.contains(.command) || modifierFlags.contains(.control) || modifierFlags.contains(.option)
+                || modifierFlags.contains(.shift)
+        else {
             return .passThrough
         }
 

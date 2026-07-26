@@ -68,8 +68,9 @@ final class AudioLevelMonitor: ObservableObject {
                 }
             }
             guard await self.ensureMicrophoneAccess(),
-                  !Task.isCancelled,
-                  self.generation == generation else {
+                !Task.isCancelled,
+                self.generation == generation
+            else {
                 if !Task.isCancelled, self.generation == generation {
                     self.errorMessage = AudioLevelText.accessDenied
                 }
@@ -185,7 +186,8 @@ final class AudioLevelMonitor: ObservableObject {
 enum AudioLevelText {
     static let label = "Input level:"
     static let noInput = "No microphone available."
-    static let accessDenied = "Microphone access denied. Enable it in System Settings → Privacy & Security → Microphone."
+    static let accessDenied =
+        "Microphone access denied. Enable it in System Settings → Privacy & Security → Microphone."
     static let unavailable = "Could not read the level for this input."
     static let silent = "No sound detected — check the input is not muted."
 }

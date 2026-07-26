@@ -108,10 +108,12 @@ enum RegionAspectConstraint {
         var height = max(raw.height, minimumHeight)
         var width = height * ratio
 
-        let availableWidth = current.x < anchor.x
+        let availableWidth =
+            current.x < anchor.x
             ? anchor.x - bounds.minX
             : bounds.maxX - anchor.x
-        let availableHeight = current.y < anchor.y
+        let availableHeight =
+            current.y < anchor.y
             ? anchor.y - bounds.minY
             : bounds.maxY - anchor.y
         let scale = min(
@@ -473,8 +475,9 @@ final class RegionSelectionView: NSView {
         // Grabbing the selection or one of its corners adjusts it; anywhere
         // else starts a fresh selection.
         if phase == .adjusting,
-           let rect = currentRect,
-           let handle = RegionAdjustment.handle(at: point, in: rect) {
+            let rect = currentRect,
+            let handle = RegionAdjustment.handle(at: point, in: rect)
+        {
             activeHandle = handle
             handleDragOrigin = point
             rectAtHandleDragStart = rect
@@ -492,14 +495,16 @@ final class RegionSelectionView: NSView {
     override func mouseDragged(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
 
-        let lockedRatio = event.modifierFlags.contains(.shift)
+        let lockedRatio =
+            event.modifierFlags.contains(.shift)
             ? RegionAspectConstraint.ratio
             : nil
         isRatioLocked = lockedRatio != nil
 
         if let handle = activeHandle,
-           let origin = handleDragOrigin,
-           let rect = rectAtHandleDragStart {
+            let origin = handleDragOrigin,
+            let rect = rectAtHandleDragStart
+        {
             currentRect = RegionAdjustment.adjusted(
                 rect: rect,
                 handle: handle,
@@ -541,8 +546,9 @@ final class RegionSelectionView: NSView {
         startPoint = nil
 
         guard let rect = currentRect,
-              rect.width >= RegionMath.minimumSelectionSize,
-              rect.height >= RegionMath.minimumSelectionSize else {
+            rect.width >= RegionMath.minimumSelectionSize,
+            rect.height >= RegionMath.minimumSelectionSize
+        else {
             // Stray click or tiny drag: keep waiting for a real selection.
             currentRect = nil
             phase = .idle
@@ -606,7 +612,7 @@ final class RegionSelectionView: NSView {
             CGPoint(x: rect.minX, y: rect.minY),
             CGPoint(x: rect.maxX, y: rect.minY),
             CGPoint(x: rect.minX, y: rect.maxY),
-            CGPoint(x: rect.maxX, y: rect.maxY)
+            CGPoint(x: rect.maxX, y: rect.maxY),
         ]
 
         for corner in corners {
@@ -630,7 +636,7 @@ final class RegionSelectionView: NSView {
     private func drawSizeReadout(for rect: CGRect) {
         let attributes: [NSAttributedString.Key: Any] = [
             .font: NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .medium),
-            .foregroundColor: NSColor.white
+            .foregroundColor: NSColor.white,
         ]
         let settings = AppSettings.shared
         let dimensions = RegionSelectionLabel.text(
@@ -639,9 +645,7 @@ final class RegionSelectionView: NSView {
             maxHeight: settings.videoResolution.maxHeight,
             codec: settings.videoCodec
         )
-        let text = (
-            isRatioLocked ? "\(dimensions)  \(RegionAspectConstraint.label)" : dimensions
-        ) as NSString
+        let text = (isRatioLocked ? "\(dimensions)  \(RegionAspectConstraint.label)" : dimensions) as NSString
         let textSize = text.size(withAttributes: attributes)
         let labelSize = CGSize(
             width: textSize.width + RegionSelectionLabel.padding.width * 2,
@@ -699,8 +703,9 @@ final class CaptureBoundsIndicator {
     /// Follows the recorded window as it is moved or resized.
     func update(globalQuartzFrame: CGRect) {
         guard let window,
-              let cocoaFrame = cocoaRect(fromQuartz: globalQuartzFrame),
-              window.frame != cocoaFrame else {
+            let cocoaFrame = cocoaRect(fromQuartz: globalQuartzFrame),
+            window.frame != cocoaFrame
+        else {
             return
         }
         window.setFrame(cocoaFrame, display: true)

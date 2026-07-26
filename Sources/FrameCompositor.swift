@@ -287,28 +287,34 @@ final class FrameCompositor: @unchecked Sendable {
         }
 
         if let text,
-           let textImage = makeTextOverlayImage(
-               text: text.text,
-               screenWidth: contentRect.width,
-               screenHeight: contentRect.height,
-               position: text.position
-           ) {
-            composited = textImage
-                .transformed(by: CGAffineTransform(
-                    translationX: contentRect.minX,
-                    y: contentRect.minY
-                ))
+            let textImage = makeTextOverlayImage(
+                text: text.text,
+                screenWidth: contentRect.width,
+                screenHeight: contentRect.height,
+                position: text.position
+            )
+        {
+            composited =
+                textImage
+                .transformed(
+                    by: CGAffineTransform(
+                        translationX: contentRect.minX,
+                        y: contentRect.minY
+                    )
+                )
                 .composited(over: composited)
             didComposite = true
         }
 
         guard didComposite else { return nil }
 
-        guard let outputBuffer = makeOutputBuffer(
-            width: Int(outputSize.width),
-            height: Int(outputSize.height),
-            bufferPool: bufferPool
-        ) else { return nil }
+        guard
+            let outputBuffer = makeOutputBuffer(
+                width: Int(outputSize.width),
+                height: Int(outputSize.height),
+                bufferPool: bufferPool
+            )
+        else { return nil }
 
         ciContext.render(composited, to: outputBuffer)
         return outputBuffer
@@ -326,40 +332,53 @@ final class FrameCompositor: @unchecked Sendable {
             return nil
         }
 
-        guard let roundedMask = roundedRectangle(
-            size: contentSize,
-            cornerRadius: frame.cornerRadius,
-            color: .white
-        ) else { return nil }
+        guard
+            let roundedMask = roundedRectangle(
+                size: contentSize,
+                cornerRadius: frame.cornerRadius,
+                color: .white
+            )
+        else { return nil }
 
-        let rounded = screenImage
-            .transformed(by: CGAffineTransform(
-                translationX: -screenImage.extent.origin.x,
-                y: -screenImage.extent.origin.y
-            ))
-            .applyingFilter("CIBlendWithMask", parameters: [
-                kCIInputBackgroundImageKey: CIImage.empty(),
-                kCIInputMaskImageKey: roundedMask
-            ])
-            .transformed(by: CGAffineTransform(
-                translationX: frame.contentOrigin.x,
-                y: frame.contentOrigin.y
-            ))
+        let rounded =
+            screenImage
+            .transformed(
+                by: CGAffineTransform(
+                    translationX: -screenImage.extent.origin.x,
+                    y: -screenImage.extent.origin.y
+                )
+            )
+            .applyingFilter(
+                "CIBlendWithMask",
+                parameters: [
+                    kCIInputBackgroundImageKey: CIImage.empty(),
+                    kCIInputMaskImageKey: roundedMask,
+                ]
+            )
+            .transformed(
+                by: CGAffineTransform(
+                    translationX: frame.contentOrigin.x,
+                    y: frame.contentOrigin.y
+                ))
 
         var canvas = background
 
         if frame.shadowBlur > 0,
-           let shadowShape = roundedRectangle(
-               size: contentSize,
-               cornerRadius: frame.cornerRadius,
-               color: CIColor(red: 0, green: 0, blue: 0, alpha: 0.45)
-           ) {
+            let shadowShape = roundedRectangle(
+                size: contentSize,
+                cornerRadius: frame.cornerRadius,
+                color: CIColor(red: 0, green: 0, blue: 0, alpha: 0.45)
+            )
+        {
             // Offset downwards so the shadow reads as cast, not as a halo.
-            let shadow = shadowShape
-                .transformed(by: CGAffineTransform(
-                    translationX: frame.contentOrigin.x,
-                    y: frame.contentOrigin.y - frame.shadowBlur * 0.4
-                ))
+            let shadow =
+                shadowShape
+                .transformed(
+                    by: CGAffineTransform(
+                        translationX: frame.contentOrigin.x,
+                        y: frame.contentOrigin.y - frame.shadowBlur * 0.4
+                    )
+                )
                 .applyingFilter("CIGaussianBlur", parameters: [kCIInputRadiusKey: frame.shadowBlur])
                 .cropped(to: canvasRect)
             canvas = shadow.composited(over: canvas)
@@ -418,13 +437,15 @@ final class FrameCompositor: @unchecked Sendable {
         guard overlaySize > 0, cameraWidth > 0, cameraHeight > 0 else { return nil }
 
         if camera.mirrored {
-            cameraImage = cameraImage
+            cameraImage =
+                cameraImage
                 .transformed(by: CGAffineTransform(scaleX: -1, y: 1))
                 .transformed(by: CGAffineTransform(translationX: cameraWidth, y: 0))
         }
 
         let cropRect = CameraCompositeLayout.squareCropRect(width: cameraWidth, height: cameraHeight)
-        cameraImage = cameraImage
+        cameraImage =
+            cameraImage
             .cropped(to: cropRect)
             .transformed(by: CGAffineTransform(translationX: -cropRect.origin.x, y: -cropRect.origin.y))
 
@@ -446,17 +467,21 @@ final class FrameCompositor: @unchecked Sendable {
                 radialGradient.setValue(CIColor.white, forKey: "inputColor0")
                 radialGradient.setValue(CIColor.clear, forKey: "inputColor1")
 
-                guard let cachedOutput = radialGradient.outputImage?.cropped(
-                    to: CGRect(x: 0, y: 0, width: overlaySize, height: overlaySize)
-                ) else { return nil }
+                guard
+                    let cachedOutput = radialGradient.outputImage?.cropped(
+                        to: CGRect(x: 0, y: 0, width: overlaySize, height: overlaySize)
+                    )
+                else { return nil }
                 circularMaskCache.setObject(cachedOutput, forKey: cacheKey as NSString)
                 gradientOutput = cachedOutput
             }
 
-            cameraImage = cameraImage.applyingFilter("CIBlendWithMask", parameters: [
-                kCIInputBackgroundImageKey: CIImage.empty(),
-                kCIInputMaskImageKey: gradientOutput
-            ])
+            cameraImage = cameraImage.applyingFilter(
+                "CIBlendWithMask",
+                parameters: [
+                    kCIInputBackgroundImageKey: CIImage.empty(),
+                    kCIInputMaskImageKey: gradientOutput,
+                ])
         }
 
         // Same normalized-position mapping the preview window uses for
@@ -496,17 +521,20 @@ final class FrameCompositor: @unchecked Sendable {
             gradient.setValue(CIColor(red: 1, green: 0.85, blue: 0.2, alpha: 0.55), forKey: "inputColor0")
             gradient.setValue(CIColor.clear, forKey: "inputColor1")
 
-            guard let rendered = gradient.outputImage?.cropped(
-                to: CGRect(x: 0, y: 0, width: diameter, height: diameter)
-            ) else { return nil }
+            guard
+                let rendered = gradient.outputImage?.cropped(
+                    to: CGRect(x: 0, y: 0, width: diameter, height: diameter)
+                )
+            else { return nil }
             clickHighlightCache.setObject(rendered, forKey: cacheKey)
             disc = rendered
         }
 
-        return disc.transformed(by: CGAffineTransform(
-            translationX: (point.x - radius).rounded(),
-            y: (point.y - radius).rounded()
-        ))
+        return disc.transformed(
+            by: CGAffineTransform(
+                translationX: (point.x - radius).rounded(),
+                y: (point.y - radius).rounded()
+            ))
     }
 
     private func makeTextOverlayImage(
@@ -522,12 +550,14 @@ final class FrameCompositor: @unchecked Sendable {
         if let cached = textOverlayCache.object(forKey: cacheKey as NSString) {
             baseImage = cached
         } else {
-            guard let rendered = renderTextOverlay(
-                text: text,
-                fontSize: fontSize,
-                maxWidth: screenWidth * 0.85,
-                maxImageHeight: screenHeight * TextOverlayLayout.maxHeightFraction
-            ) else {
+            guard
+                let rendered = renderTextOverlay(
+                    text: text,
+                    fontSize: fontSize,
+                    maxWidth: screenWidth * 0.85,
+                    maxImageHeight: screenHeight * TextOverlayLayout.maxHeightFraction
+                )
+            else {
                 return nil
             }
             textOverlayCache.setObject(rendered, forKey: cacheKey as NSString)
@@ -565,14 +595,16 @@ final class FrameCompositor: @unchecked Sendable {
         let attributes: [CFString: Any] = [
             kCTFontAttributeName: font,
             kCTForegroundColorAttributeName: CGColor(red: 1, green: 1, blue: 1, alpha: 0.95),
-            kCTParagraphStyleAttributeName: paragraphStyle
+            kCTParagraphStyleAttributeName: paragraphStyle,
         ]
 
-        guard let attributedText = CFAttributedStringCreate(
-            kCFAllocatorDefault,
-            text as CFString,
-            attributes as CFDictionary
-        ) else { return nil }
+        guard
+            let attributedText = CFAttributedStringCreate(
+                kCFAllocatorDefault,
+                text as CFString,
+                attributes as CFDictionary
+            )
+        else { return nil }
 
         let framesetter = CTFramesetterCreateWithAttributedString(attributedText)
         let horizontalPadding = ceil(fontSize * 0.6)
@@ -596,15 +628,17 @@ final class FrameCompositor: @unchecked Sendable {
         )
 
         let colorSpace = CGColorSpaceCreateDeviceRGB()
-        guard let bitmapContext = CGContext(
-            data: nil,
-            width: Int(layout.imageSize.width),
-            height: Int(layout.imageSize.height),
-            bitsPerComponent: 8,
-            bytesPerRow: 0,
-            space: colorSpace,
-            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-        ) else { return nil }
+        guard
+            let bitmapContext = CGContext(
+                data: nil,
+                width: Int(layout.imageSize.width),
+                height: Int(layout.imageSize.height),
+                bitsPerComponent: 8,
+                bytesPerRow: 0,
+                space: colorSpace,
+                bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+            )
+        else { return nil }
 
         let backgroundRect = CGRect(origin: .zero, size: layout.imageSize)
         let backgroundPath = CGMutablePath()
@@ -644,7 +678,7 @@ final class FrameCompositor: @unchecked Sendable {
         } else {
             let attrs: [CFString: Any] = [
                 kCVPixelBufferCGImageCompatibilityKey: true,
-                kCVPixelBufferCGBitmapContextCompatibilityKey: true
+                kCVPixelBufferCGBitmapContextCompatibilityKey: true,
             ]
             status = CVPixelBufferCreate(
                 kCFAllocatorDefault,

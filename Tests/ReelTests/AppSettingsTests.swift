@@ -2,6 +2,7 @@ import AVFoundation
 import Carbon
 import SwiftUI
 import XCTest
+
 @testable import Reel
 
 private final class RestoreFailingFileManager: FileManager, @unchecked Sendable {
@@ -54,7 +55,7 @@ final class AppSettingsTests: XCTestCase {
             .display(7),
             .window(bundleID: "com.greendale.study", title: "Spanish 101"),
             .window(bundleID: "com.greendale.study", title: nil),
-            .region(displayID: 2, x: 10, y: 20, width: 640, height: 360)
+            .region(displayID: 2, x: 10, y: 20, width: 640, height: 360),
         ]
 
         for target in targets {
@@ -70,7 +71,7 @@ final class AppSettingsTests: XCTestCase {
             "com.greendale.study",
             "com.greendale.study",
             "com.greendale.dean",
-            "com.greendale.study"
+            "com.greendale.study",
         ]
         let titles: [String?] = ["Spanish 101", "Biology 101", "Dean's Office", nil]
 
@@ -116,7 +117,7 @@ final class AppSettingsTests: XCTestCase {
             RememberedTargetMatching.bestMatchIndex(
                 bundleIDs: [
                     "com.greendale.study",
-                    "com.greendale.study"
+                    "com.greendale.study",
                 ],
                 titles: ["Spanish 101", "Spanish 101"],
                 wantedBundleID: "com.greendale.study",
@@ -621,30 +622,34 @@ final class AppSettingsTests: XCTestCase {
     }
 
     func testAudioWaitsForVideoToCommitTheResumeOffset() {
-        XCTAssertTrue(RecordingTimeline.canAppendAudio(
-            captureStopped: false,
-            paused: false,
-            sessionStarted: true,
-            awaitingResumeFrame: false
-        ))
-        XCTAssertFalse(RecordingTimeline.canAppendAudio(
-            captureStopped: false,
-            paused: true,
-            sessionStarted: true,
-            awaitingResumeFrame: false
-        ))
-        XCTAssertFalse(RecordingTimeline.canAppendAudio(
-            captureStopped: false,
-            paused: false,
-            sessionStarted: true,
-            awaitingResumeFrame: true
-        ))
-        XCTAssertFalse(RecordingTimeline.canAppendAudio(
-            captureStopped: true,
-            paused: false,
-            sessionStarted: true,
-            awaitingResumeFrame: false
-        ))
+        XCTAssertTrue(
+            RecordingTimeline.canAppendAudio(
+                captureStopped: false,
+                paused: false,
+                sessionStarted: true,
+                awaitingResumeFrame: false
+            ))
+        XCTAssertFalse(
+            RecordingTimeline.canAppendAudio(
+                captureStopped: false,
+                paused: true,
+                sessionStarted: true,
+                awaitingResumeFrame: false
+            ))
+        XCTAssertFalse(
+            RecordingTimeline.canAppendAudio(
+                captureStopped: false,
+                paused: false,
+                sessionStarted: true,
+                awaitingResumeFrame: true
+            ))
+        XCTAssertFalse(
+            RecordingTimeline.canAppendAudio(
+                captureStopped: true,
+                paused: false,
+                sessionStarted: true,
+                awaitingResumeFrame: false
+            ))
     }
 
     @MainActor
@@ -1192,7 +1197,8 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(SettingsText.saveRecordingsTo, "Save recordings to:")
         XCTAssertEqual(SettingsText.askEachTime, "Ask each time")
         XCTAssertEqual(SettingsText.fixedFolder, "Fixed folder")
-        XCTAssertEqual(SettingsText.outputDirectoryNotWritable, "Cannot write to selected folder. Pick another location.")
+        XCTAssertEqual(
+            SettingsText.outputDirectoryNotWritable, "Cannot write to selected folder. Pick another location.")
         XCTAssertEqual(
             SettingsText.finderSuppressedByPreview,
             "Finder opens automatically only when the preview is off."
@@ -1212,21 +1218,24 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(WelcomeText.relaunchNow, "Relaunch Reel")
         XCTAssertEqual(WelcomeText.relaunchFailedTitle, "Could not relaunch Reel")
         XCTAssertTrue(WelcomeText.menuBarExplainer.contains("choose what to record"))
-        XCTAssertFalse(WelcomeLogic.canOfferRelaunch(
-            isBundledApp: true,
-            hasRequestedPermission: false,
-            hasPermission: false
-        ))
-        XCTAssertTrue(WelcomeLogic.canOfferRelaunch(
-            isBundledApp: true,
-            hasRequestedPermission: true,
-            hasPermission: false
-        ))
-        XCTAssertFalse(WelcomeLogic.canOfferRelaunch(
-            isBundledApp: true,
-            hasRequestedPermission: true,
-            hasPermission: true
-        ))
+        XCTAssertFalse(
+            WelcomeLogic.canOfferRelaunch(
+                isBundledApp: true,
+                hasRequestedPermission: false,
+                hasPermission: false
+            ))
+        XCTAssertTrue(
+            WelcomeLogic.canOfferRelaunch(
+                isBundledApp: true,
+                hasRequestedPermission: true,
+                hasPermission: false
+            ))
+        XCTAssertFalse(
+            WelcomeLogic.canOfferRelaunch(
+                isBundledApp: true,
+                hasRequestedPermission: true,
+                hasPermission: true
+            ))
     }
 
     @MainActor
@@ -1563,53 +1572,60 @@ final class AppSettingsTests: XCTestCase {
 
     @MainActor
     func testRecordingDialogWindowSearchMatchesAppOrTitleCaseInsensitively() {
-        XCTAssertTrue(RecordingDialogLogic.windowMatchesSearch(
-            appName: "Safari",
-            windowTitle: "Apple Developer",
-            query: "saf"
-        ))
-        XCTAssertTrue(RecordingDialogLogic.windowMatchesSearch(
-            appName: "Safari",
-            windowTitle: "Apple Developer",
-            query: "developer"
-        ))
-        XCTAssertFalse(RecordingDialogLogic.windowMatchesSearch(
-            appName: "Safari",
-            windowTitle: "Apple Developer",
-            query: "notes"
-        ))
-        XCTAssertTrue(RecordingDialogLogic.windowMatchesSearch(
-            appName: nil,
-            windowTitle: nil,
-            query: ""
-        ))
+        XCTAssertTrue(
+            RecordingDialogLogic.windowMatchesSearch(
+                appName: "Safari",
+                windowTitle: "Apple Developer",
+                query: "saf"
+            ))
+        XCTAssertTrue(
+            RecordingDialogLogic.windowMatchesSearch(
+                appName: "Safari",
+                windowTitle: "Apple Developer",
+                query: "developer"
+            ))
+        XCTAssertFalse(
+            RecordingDialogLogic.windowMatchesSearch(
+                appName: "Safari",
+                windowTitle: "Apple Developer",
+                query: "notes"
+            ))
+        XCTAssertTrue(
+            RecordingDialogLogic.windowMatchesSearch(
+                appName: nil,
+                windowTitle: nil,
+                query: ""
+            ))
     }
 
     func testWindowOrderingGroupsAppsThenSortsTitles() {
-        XCTAssertTrue(WindowOrdering.precedes(
-            appName: "Finder",
-            title: "Downloads",
-            windowID: 2,
-            appName: "Safari",
-            title: "Greendale",
-            windowID: 1
-        ))
-        XCTAssertTrue(WindowOrdering.precedes(
-            appName: "Safari",
-            title: "Greendale",
-            windowID: 2,
-            appName: "Safari",
-            title: "Spanish 101",
-            windowID: 1
-        ))
-        XCTAssertTrue(WindowOrdering.precedes(
-            appName: "Safari",
-            title: "Greendale",
-            windowID: 1,
-            appName: "Safari",
-            title: "Greendale",
-            windowID: 2
-        ))
+        XCTAssertTrue(
+            WindowOrdering.precedes(
+                appName: "Finder",
+                title: "Downloads",
+                windowID: 2,
+                appName: "Safari",
+                title: "Greendale",
+                windowID: 1
+            ))
+        XCTAssertTrue(
+            WindowOrdering.precedes(
+                appName: "Safari",
+                title: "Greendale",
+                windowID: 2,
+                appName: "Safari",
+                title: "Spanish 101",
+                windowID: 1
+            ))
+        XCTAssertTrue(
+            WindowOrdering.precedes(
+                appName: "Safari",
+                title: "Greendale",
+                windowID: 1,
+                appName: "Safari",
+                title: "Greendale",
+                windowID: 2
+            ))
     }
 
     func testThumbnailLoadingUsesBoundedBatches() {
@@ -1751,11 +1767,12 @@ final class AppSettingsTests: XCTestCase {
     func testCameraOverlayLayoutRoundTripsDraggedPosition() throws {
         let bounds = CGRect(x: 100, y: 200, width: 1000, height: 500)
         let origin = CGPoint(x: 500, y: 350)
-        let position = try XCTUnwrap(CameraOverlayLayout.normalizedPosition(
-            origin: origin,
-            overlaySize: 200,
-            bounds: bounds
-        ))
+        let position = try XCTUnwrap(
+            CameraOverlayLayout.normalizedPosition(
+                origin: origin,
+                overlaySize: 200,
+                bounds: bounds
+            ))
 
         let roundTripOrigin = CameraOverlayLayout.originFromNormalized(
             x: position.x,
@@ -1771,11 +1788,12 @@ final class AppSettingsTests: XCTestCase {
     @MainActor
     func testCameraOverlayLayoutRejectsOversizedOverlayForNormalization() {
         let bounds = CGRect(x: 0, y: 0, width: 100, height: 100)
-        XCTAssertNil(CameraOverlayLayout.normalizedPosition(
-            origin: .zero,
-            overlaySize: 100,
-            bounds: bounds
-        ))
+        XCTAssertNil(
+            CameraOverlayLayout.normalizedPosition(
+                origin: .zero,
+                overlaySize: 100,
+                bounds: bounds
+            ))
     }
 
     @MainActor
@@ -1804,7 +1822,9 @@ final class AppSettingsTests: XCTestCase {
     func testGitInfoNormalizesUppercaseCommits() {
         let uppercase = "ABCDEF1234567890"
         XCTAssertEqual(GitInfo.normalizedCommit(uppercase), uppercase.lowercased())
-        XCTAssertEqual(GitInfo.commitURL(for: uppercase)?.absoluteString, "https://github.com/rselbach/reel/commit/abcdef1234567890")
+        XCTAssertEqual(
+            GitInfo.commitURL(for: uppercase)?.absoluteString,
+            "https://github.com/rselbach/reel/commit/abcdef1234567890")
     }
 
     @MainActor
@@ -1931,18 +1951,21 @@ final class AppSettingsTests: XCTestCase {
     }
 
     func testRecordingFinalizationRevealsFinderOnlyWhenPreviewIsDisabled() {
-        XCTAssertTrue(RecordingFinalizationLogic.shouldRevealInFinder(
-            openFinderAfterRecording: true,
-            showPreviewAfterRecording: false
-        ))
-        XCTAssertFalse(RecordingFinalizationLogic.shouldRevealInFinder(
-            openFinderAfterRecording: true,
-            showPreviewAfterRecording: true
-        ))
-        XCTAssertFalse(RecordingFinalizationLogic.shouldRevealInFinder(
-            openFinderAfterRecording: false,
-            showPreviewAfterRecording: false
-        ))
+        XCTAssertTrue(
+            RecordingFinalizationLogic.shouldRevealInFinder(
+                openFinderAfterRecording: true,
+                showPreviewAfterRecording: false
+            ))
+        XCTAssertFalse(
+            RecordingFinalizationLogic.shouldRevealInFinder(
+                openFinderAfterRecording: true,
+                showPreviewAfterRecording: true
+            ))
+        XCTAssertFalse(
+            RecordingFinalizationLogic.shouldRevealInFinder(
+                openFinderAfterRecording: false,
+                showPreviewAfterRecording: false
+            ))
     }
 
     func testCancelledSaveKeepsTheCompletedRecordingAtItsDefaultDestination() {
@@ -1988,39 +2011,45 @@ final class AppSettingsTests: XCTestCase {
     }
 
     func testThumbnailSizingPreservesAspectRatioWithinMaximumSize() throws {
-        let landscape = try XCTUnwrap(ThumbnailSizing.targetSize(
-            sourceSize: CGSize(width: 1920, height: 1080),
-            maxSize: CGSize(width: 320, height: 180)
-        ))
+        let landscape = try XCTUnwrap(
+            ThumbnailSizing.targetSize(
+                sourceSize: CGSize(width: 1920, height: 1080),
+                maxSize: CGSize(width: 320, height: 180)
+            ))
         XCTAssertEqual(landscape.width, 320)
         XCTAssertEqual(landscape.height, 180)
 
-        let portrait = try XCTUnwrap(ThumbnailSizing.targetSize(
-            sourceSize: CGSize(width: 1080, height: 1920),
-            maxSize: CGSize(width: 320, height: 180)
-        ))
+        let portrait = try XCTUnwrap(
+            ThumbnailSizing.targetSize(
+                sourceSize: CGSize(width: 1080, height: 1920),
+                maxSize: CGSize(width: 320, height: 180)
+            ))
         XCTAssertEqual(portrait.width, 101)
         XCTAssertEqual(portrait.height, 180)
 
-        XCTAssertNil(ThumbnailSizing.targetSize(
-            sourceSize: CGSize(width: 0, height: 1080),
-            maxSize: CGSize(width: 320, height: 180)
-        ))
+        XCTAssertNil(
+            ThumbnailSizing.targetSize(
+                sourceSize: CGSize(width: 0, height: 1080),
+                maxSize: CGSize(width: 320, height: 180)
+            ))
     }
 
     func testCaptureExcludesOnlyReelsOwnApplication() {
-        XCTAssertTrue(CaptureExclusionLogic.isCurrentApplication(
-            bundleID: "com.rselbach.reel",
-            currentBundleID: "com.rselbach.reel"
-        ))
-        XCTAssertFalse(CaptureExclusionLogic.isCurrentApplication(
-            bundleID: "com.greendale.study",
-            currentBundleID: "com.rselbach.reel"
-        ))
-        XCTAssertFalse(CaptureExclusionLogic.isCurrentApplication(
-            bundleID: "com.rselbach.reel",
-            currentBundleID: nil
-        ))
+        XCTAssertTrue(
+            CaptureExclusionLogic.isCurrentApplication(
+                bundleID: "com.rselbach.reel",
+                currentBundleID: "com.rselbach.reel"
+            ))
+        XCTAssertFalse(
+            CaptureExclusionLogic.isCurrentApplication(
+                bundleID: "com.greendale.study",
+                currentBundleID: "com.rselbach.reel"
+            ))
+        XCTAssertFalse(
+            CaptureExclusionLogic.isCurrentApplication(
+                bundleID: "com.rselbach.reel",
+                currentBundleID: nil
+            ))
     }
 
     func testFileReplacementMovesNewFileIntoEmptyDestination() throws {
@@ -2079,11 +2108,12 @@ final class AppSettingsTests: XCTestCase {
         try Data("new".utf8).write(to: tempURL)
         try Data("old".utf8).write(to: outputURL)
 
-        XCTAssertThrowsError(try FileReplacement.commit(
-            tempURL: tempURL,
-            to: outputURL,
-            fileManager: PartialDestinationFailingFileManager()
-        ))
+        XCTAssertThrowsError(
+            try FileReplacement.commit(
+                tempURL: tempURL,
+                to: outputURL,
+                fileManager: PartialDestinationFailingFileManager()
+            ))
         XCTAssertEqual(try String(contentsOf: outputURL, encoding: .utf8), "old")
         XCTAssertEqual(try String(contentsOf: tempURL, encoding: .utf8), "new")
     }
@@ -2102,11 +2132,13 @@ final class AppSettingsTests: XCTestCase {
         let outputURL = directory.appendingPathComponent("trimmed.mp4")
         try Data("old".utf8).write(to: outputURL)
 
-        XCTAssertThrowsError(try FileReplacement.commit(
-            tempURL: missingTempURL,
-            to: outputURL,
-            fileManager: RestoreFailingFileManager()
-        )) { error in
+        XCTAssertThrowsError(
+            try FileReplacement.commit(
+                tempURL: missingTempURL,
+                to: outputURL,
+                fileManager: RestoreFailingFileManager()
+            )
+        ) { error in
             guard case FileReplacementError.rollbackFailed(_, _, let backupURL) = error else {
                 return XCTFail("Unexpected error: \(error)")
             }
@@ -2335,30 +2367,34 @@ final class AppSettingsTests: XCTestCase {
     }
 
     func testPostRecordingLogicExportsOnlyAValidLoadedRange() {
-        XCTAssertTrue(PostRecordingLogic.canExport(
-            duration: 10,
-            trimStart: 0,
-            trimEnd: 10,
-            isExporting: false
-        ))
-        XCTAssertFalse(PostRecordingLogic.canExport(
-            duration: 0,
-            trimStart: 0,
-            trimEnd: 0,
-            isExporting: false
-        ))
-        XCTAssertFalse(PostRecordingLogic.canExport(
-            duration: 10,
-            trimStart: 5,
-            trimEnd: 5,
-            isExporting: false
-        ))
-        XCTAssertFalse(PostRecordingLogic.canExport(
-            duration: 10,
-            trimStart: 0,
-            trimEnd: 10,
-            isExporting: true
-        ))
+        XCTAssertTrue(
+            PostRecordingLogic.canExport(
+                duration: 10,
+                trimStart: 0,
+                trimEnd: 10,
+                isExporting: false
+            ))
+        XCTAssertFalse(
+            PostRecordingLogic.canExport(
+                duration: 0,
+                trimStart: 0,
+                trimEnd: 0,
+                isExporting: false
+            ))
+        XCTAssertFalse(
+            PostRecordingLogic.canExport(
+                duration: 10,
+                trimStart: 5,
+                trimEnd: 5,
+                isExporting: false
+            ))
+        XCTAssertFalse(
+            PostRecordingLogic.canExport(
+                duration: 10,
+                trimStart: 0,
+                trimEnd: 10,
+                isExporting: true
+            ))
     }
 
     @MainActor

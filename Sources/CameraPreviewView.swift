@@ -7,7 +7,7 @@ import SwiftUI
 /// Re-enables mouse events for this view even when the parent window ignores them.
 final class CameraPreviewNSView: NSView {
     private var previewLayer: AVCaptureVideoPreviewLayer?
-    
+
     var session: AVCaptureSession? {
         get { previewLayer?.session }
         set {
@@ -38,19 +38,20 @@ final class CameraPreviewNSView: NSView {
     /// (e.g. the built-in FaceTime camera). External/continuity cameras report
     /// `.unspecified` and should not be mirrored.
     private func updateMirroring(for session: AVCaptureSession?) {
-        let isFrontFacing = session?.inputs
+        let isFrontFacing =
+            session?.inputs
             .compactMap { $0 as? AVCaptureDeviceInput }
             .contains { $0.device.position == .front } ?? false
         previewLayer?.setAffineTransform(
             isFrontFacing ? CGAffineTransform(scaleX: -1, y: 1) : .identity
         )
     }
-    
+
     override func layout() {
         super.layout()
         previewLayer?.frame = bounds
     }
-    
+
     /// Completely disconnects and removes the preview layer.
     /// Must be called before the capture session is stopped/deallocated.
     func tearDown() {
@@ -59,14 +60,14 @@ final class CameraPreviewNSView: NSView {
         previewLayer = nil
         layer = CALayer()  // Replace with empty layer
     }
-    
+
     override func viewWillMove(toWindow newWindow: NSWindow?) {
         super.viewWillMove(toWindow: newWindow)
         if newWindow == nil {
             tearDown()
         }
     }
-    
+
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool {
         true
     }
@@ -102,14 +103,14 @@ final class SessionHolder {
 /// SwiftUI wrapper for the camera preview NSView.
 struct CameraPreviewLayerView: NSViewRepresentable {
     let sessionHolder: SessionHolder
-    
+
     func makeNSView(context: Context) -> CameraPreviewNSView {
         let view = CameraPreviewNSView()
         view.session = sessionHolder.session
         sessionHolder.registerView(view)
         return view
     }
-    
+
     func updateNSView(_ nsView: CameraPreviewNSView, context: Context) {
         // Disconnect if invalidated
         if sessionHolder.isInvalidated {
@@ -121,7 +122,7 @@ struct CameraPreviewLayerView: NSViewRepresentable {
             nsView.session = session
         }
     }
-    
+
     static func dismantleNSView(_ nsView: CameraPreviewNSView, coordinator: ()) {
         nsView.tearDown()
     }
@@ -142,7 +143,7 @@ struct CameraPreviewView: View {
 /// Applies the appropriate clip shape based on overlay shape setting.
 private struct ShapeClipModifier: ViewModifier {
     let shape: AppSettings.CameraOverlayShape
-    
+
     func body(content: Content) -> some View {
         switch shape {
         case .circle:

@@ -1,7 +1,8 @@
 import AppKit
 import os.log
 
-private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "com.rselbach.reel", category: "CountdownOverlay")
+private let logger = Logger(
+    subsystem: Bundle.main.bundleIdentifier ?? "com.rselbach.reel", category: "CountdownOverlay")
 
 enum CountdownLayout {
     static let hudSize: CGFloat = 160

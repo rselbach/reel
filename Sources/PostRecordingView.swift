@@ -1,8 +1,8 @@
-import AppKit
 import AVKit
+import AppKit
+import SwiftUI
 import UniformTypeIdentifiers
 import os.log
-import SwiftUI
 
 private let logger = Logger(
     subsystem: Bundle.main.bundleIdentifier ?? "com.rselbach.reel",
@@ -22,7 +22,7 @@ struct VideoPlayerView: NSViewRepresentable {
     func updateNSView(_ nsView: AVPlayerView, context: Context) {
         nsView.player = player
     }
-    
+
     static func dismantleNSView(_ nsView: AVPlayerView, coordinator: ()) {
         // Disconnect player during teardown to prevent use-after-free
         nsView.player = nil
@@ -154,7 +154,8 @@ enum GIFExport {
 enum ExportFileNaming {
     static func temporaryURL(for outputURL: URL, identifier: String = UUID().uuidString) -> URL {
         let fileExtension = outputURL.pathExtension
-        return outputURL
+        return
+            outputURL
             .deletingLastPathComponent()
             .appendingPathComponent(
                 ".\(outputURL.deletingPathExtension().lastPathComponent)-\(identifier).\(fileExtension)"
@@ -173,14 +174,8 @@ enum PostRecordingLogic {
         trimEnd: Double,
         isExporting: Bool
     ) -> Bool {
-        duration.isFinite &&
-            trimStart.isFinite &&
-            trimEnd.isFinite &&
-            duration > 0 &&
-            trimStart >= 0 &&
-            trimEnd > trimStart &&
-            trimEnd <= duration &&
-            !isExporting
+        duration.isFinite && trimStart.isFinite && trimEnd.isFinite && duration > 0 && trimStart >= 0
+            && trimEnd > trimStart && trimEnd <= duration && !isExporting
     }
 }
 
@@ -397,10 +392,10 @@ struct PostRecordingView: View {
     private func cleanupPlayer() {
         // Mark as cleaned up first to prevent time observer callback from updating state
         isCleanedUp = true
-        
+
         // Pause first to stop generating new callbacks
         player?.pause()
-        
+
         // Remove time observer while player is still valid
         if let player, let timeObserver {
             player.removeTimeObserver(timeObserver)
@@ -536,22 +531,27 @@ struct PostRecordingView: View {
 
         let sampling = GIFExport.frames(start: trimStart, end: trimEnd)
 
-        guard let destination = CGImageDestinationCreateWithURL(
-            outputURL as CFURL,
-            UTType.gif.identifier as CFString,
-            sampling.times.count,
-            nil
-        ) else {
+        guard
+            let destination = CGImageDestinationCreateWithURL(
+                outputURL as CFURL,
+                UTType.gif.identifier as CFString,
+                sampling.times.count,
+                nil
+            )
+        else {
             throw ExportError.gifDestinationUnavailable
         }
 
-        CGImageDestinationSetProperties(destination, [
-            kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFLoopCount: 0]
-        ] as CFDictionary)
+        CGImageDestinationSetProperties(
+            destination,
+            [
+                kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFLoopCount: 0]
+            ] as CFDictionary)
 
-        let frameProperties = [
-            kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFDelayTime: sampling.delay]
-        ] as CFDictionary
+        let frameProperties =
+            [
+                kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFDelayTime: sampling.delay]
+            ] as CFDictionary
 
         for seconds in sampling.times {
             try Task.checkCancellation()
@@ -664,12 +664,13 @@ struct TrimSlider: View {
                         .gesture(
                             DragGesture(minimumDistance: 0)
                                 .onChanged { value in
-                                    onSeek(TrimSliderMath.seekTime(
-                                        locationX: value.location.x,
-                                        handleWidth: handleWidth,
-                                        usableWidth: usableWidth,
-                                        duration: duration
-                                    ))
+                                    onSeek(
+                                        TrimSliderMath.seekTime(
+                                            locationX: value.location.x,
+                                            handleWidth: handleWidth,
+                                            usableWidth: usableWidth,
+                                            duration: duration
+                                        ))
                                 }
                         )
 

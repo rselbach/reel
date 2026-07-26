@@ -62,7 +62,8 @@ enum CameraOverlayResizeLogic {
         }
 
         let initialSide = initialFrame.width
-        let candidate = abs(outwardDx) >= abs(outwardDy)
+        let candidate =
+            abs(outwardDx) >= abs(outwardDy)
             ? initialSide + outwardDx
             : initialSide + outwardDy
         let side = min(max(candidate, minSide), maxSide)
@@ -131,18 +132,18 @@ final class CameraOverlayWindow: NSWindow {
     var onSizeChanged: ((CGFloat) -> Void)?
     /// Fired once when a corner-drag resize ends, for persisting the size.
     var onSizeChangeEnded: ((CGFloat) -> Void)?
-    
+
     init(contentRect: NSRect, dragBounds: CGRect, overlaySize: CGFloat) {
         self.dragBounds = dragBounds
         self.overlaySize = overlaySize
-        
+
         super.init(
             contentRect: contentRect,
             styleMask: .borderless,
             backing: .buffered,
             defer: false
         )
-        
+
         level = .floating
         isOpaque = false
         backgroundColor = .clear
@@ -156,10 +157,10 @@ final class CameraOverlayWindow: NSWindow {
         // also move the window without clamping, fighting the manual override.
         isMovableByWindowBackground = false
     }
-    
+
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
-    
+
     override func mouseDown(with event: NSEvent) {
         initialMouseLocation = NSEvent.mouseLocation
         initialWindowOrigin = frame.origin
@@ -224,13 +225,15 @@ final class CameraOverlayWindow: NSWindow {
         notifySizeChanged()
         notifyPositionChanged()
     }
-    
+
     func notifyPositionChanged() {
-        guard let position = CameraOverlayLayout.normalizedPosition(
-            origin: frame.origin,
-            overlaySize: overlaySize,
-            bounds: dragBounds
-        ) else { return }
+        guard
+            let position = CameraOverlayLayout.normalizedPosition(
+                origin: frame.origin,
+                overlaySize: overlaySize,
+                bounds: dragBounds
+            )
+        else { return }
 
         onPositionChanged?(position.x, position.y)
     }
@@ -362,7 +365,7 @@ private struct ResizeChrome: View {
 final class CameraOverlayController {
     private var window: CameraOverlayWindow?
     private var sessionHolder: SessionHolder?
-    
+
     /// Shows the camera overlay window.
     func show(
         session: AVCaptureSession,
@@ -378,7 +381,7 @@ final class CameraOverlayController {
             sizeFraction: sizeFraction,
             bounds: bounds
         )
-        
+
         // Convert normalized position to screen coordinates
         let coords = initialPosition.normalizedCoordinates
         let windowOrigin = CameraOverlayLayout.originFromNormalized(
@@ -387,7 +390,7 @@ final class CameraOverlayController {
             overlaySize: overlaySize,
             bounds: bounds
         )
-        
+
         let windowFrame = CGRect(origin: windowOrigin, size: CGSize(width: overlaySize, height: overlaySize))
         let window = CameraOverlayWindow(contentRect: windowFrame, dragBounds: bounds, overlaySize: overlaySize)
         window.onPositionChanged = onPositionChanged
@@ -400,19 +403,19 @@ final class CameraOverlayController {
         let content = CameraOverlayContent(sessionHolder: holder, shape: shape)
         window.contentView = NSHostingView(rootView: content)
         window.orderFrontRegardless()
-        
+
         self.window = window
     }
-    
+
     func hide() {
         sessionHolder?.invalidate()
         sessionHolder = nil
-        
+
         window?.contentView = nil
         window?.close()
         window = nil
     }
-    
+
     /// Updates the drag bounds after the recorded window moved or resized,
     /// shifting the overlay by the same delta so it keeps its position
     /// relative to the recorded content, then re-clamping and republishing
@@ -425,10 +428,11 @@ final class CameraOverlayController {
             y: newBounds.minY - window.dragBounds.minY
         )
         window.dragBounds = newBounds
-        window.setFrameOrigin(NSPoint(
-            x: window.frame.origin.x + delta.x,
-            y: window.frame.origin.y + delta.y
-        ))
+        window.setFrameOrigin(
+            NSPoint(
+                x: window.frame.origin.x + delta.x,
+                y: window.frame.origin.y + delta.y
+            ))
         window.fitSizeToDragBounds()
         window.clampToDragBounds()
         window.notifyPositionChanged()

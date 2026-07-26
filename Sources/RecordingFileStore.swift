@@ -105,7 +105,8 @@ enum FileReplacementError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .rollbackFailed(let commitError, let restoreError, let backupURL):
-            return "Replacement failed (\(commitError.localizedDescription)), and the original file could not be restored. It remains at \(backupURL.path()): \(restoreError.localizedDescription)"
+            return
+                "Replacement failed (\(commitError.localizedDescription)), and the original file could not be restored. It remains at \(backupURL.path()): \(restoreError.localizedDescription)"
         }
     }
 }
@@ -126,7 +127,8 @@ enum FileReplacement {
             return nil
         }
 
-        let backupURL = outputURL
+        let backupURL =
+            outputURL
             .deletingLastPathComponent()
             .appendingPathComponent(".\(outputURL.lastPathComponent).reel-backup-\(UUID().uuidString)")
 
@@ -186,7 +188,9 @@ enum RecordingFileStore {
         guard values.isDirectory == true else {
             throw RecordingError.outputDirectoryCreationFailed(
                 outputDir,
-                NSError(domain: "ScreenRecorder", code: 6, userInfo: [NSLocalizedDescriptionKey: "Output path is not a directory"])
+                NSError(
+                    domain: "ScreenRecorder", code: 6,
+                    userInfo: [NSLocalizedDescriptionKey: "Output path is not a directory"])
             )
         }
 

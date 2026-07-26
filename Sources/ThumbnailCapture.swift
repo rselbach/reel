@@ -1,8 +1,9 @@
 import AppKit
-import os.log
 import ScreenCaptureKit
+import os.log
 
-private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "com.rselbach.reel", category: "ThumbnailCapture")
+private let logger = Logger(
+    subsystem: Bundle.main.bundleIdentifier ?? "com.rselbach.reel", category: "ThumbnailCapture")
 
 enum ThumbnailSizing {
     static func targetSize(sourceSize: CGSize, maxSize: CGSize) -> CGSize? {
@@ -49,7 +50,8 @@ class ThumbnailCapture {
             let config = SCStreamConfiguration()
 
             guard let targetSize = ThumbnailSizing.targetSize(sourceSize: sourceSize, maxSize: maxSize) else {
-                logger.warning("Cannot capture thumbnail for zero-size source: \(sourceSize.width)x\(sourceSize.height)")
+                logger.warning(
+                    "Cannot capture thumbnail for zero-size source: \(sourceSize.width)x\(sourceSize.height)")
                 return nil
             }
 

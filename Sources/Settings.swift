@@ -2,8 +2,8 @@ import AVFoundation
 import CoreGraphics
 import CoreImage
 import Foundation
-import os.log
 import ServiceManagement
+import os.log
 
 private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "com.rselbach.reel", category: "Settings")
 
@@ -60,9 +60,7 @@ enum RememberedTargetMatching {
         wantedTitle: String?
     ) -> Int? {
         let matches = bundleIDs.indices.filter {
-            bundleIDs[$0] == wantedBundleID &&
-                titles.indices.contains($0) &&
-                titles[$0] == wantedTitle
+            bundleIDs[$0] == wantedBundleID && titles.indices.contains($0) && titles[$0] == wantedTitle
         }
         return matches.count == 1 ? matches[0] : nil
     }
@@ -207,7 +205,8 @@ class AppSettings: ObservableObject {
         if FileManager.default.fileExists(atPath: url.path()) {
             var isDirectory = ObjCBool(false)
             guard FileManager.default.fileExists(atPath: url.path(), isDirectory: &isDirectory),
-                  isDirectory.boolValue else {
+                isDirectory.boolValue
+            else {
                 return false
             }
             return FileManager.default.isWritableFile(atPath: url.path())
@@ -217,8 +216,8 @@ class AppSettings: ObservableObject {
         guard parent.path != "/" && parent.path != url.path else {
             return false
         }
-        return FileManager.default.fileExists(atPath: parent.path()) &&
-            FileManager.default.isWritableFile(atPath: parent.path())
+        return FileManager.default.fileExists(atPath: parent.path())
+            && FileManager.default.isWritableFile(atPath: parent.path())
     }
 
     @Published var launchAtLogin: Bool {
@@ -561,10 +560,10 @@ class AppSettings: ObservableObject {
         /// Y: 0.0 = bottom, 1.0 = top (Core Image coordinate system)
         var normalizedCoordinates: (x: CGFloat, y: CGFloat) {
             switch self {
-            case .bottomLeft:  return (0.0, 0.0)
+            case .bottomLeft: return (0.0, 0.0)
             case .bottomRight: return (1.0, 0.0)
-            case .topLeft:     return (0.0, 1.0)
-            case .topRight:    return (1.0, 1.0)
+            case .topLeft: return (0.0, 1.0)
+            case .topRight: return (1.0, 1.0)
             }
         }
     }
@@ -641,7 +640,9 @@ class AppSettings: ObservableObject {
     var availableCameras: [AVCaptureDevice] {
         // Deployment target is macOS 26, so .deskViewCamera (macOS 13) and
         // .continuityCamera (macOS 14) are always available.
-        let deviceTypes: [AVCaptureDevice.DeviceType] = [.builtInWideAngleCamera, .external, .deskViewCamera, .continuityCamera]
+        let deviceTypes: [AVCaptureDevice.DeviceType] = [
+            .builtInWideAngleCamera, .external, .deskViewCamera, .continuityCamera,
+        ]
         return AVCaptureDevice.DiscoverySession(
             deviceTypes: deviceTypes,
             mediaType: .video,
@@ -813,13 +814,12 @@ class AppSettings: ObservableObject {
         static let modifierMask: UInt32 = 0x1E0000  // Cmd|Opt|Ctrl|Shift
         private static let nonShiftModifierMask: UInt32 = 0x1C0000  // Cmd|Opt|Ctrl
 
-        static let `default` = HotkeyCombo(keyCode: 15, modifiers: 0x120000) // Cmd+Shift+R
-        static let discardDefault = HotkeyCombo(keyCode: 15, modifiers: 0x1A0000) // Cmd+Opt+Shift+R
-        static let pauseDefault = HotkeyCombo(keyCode: 35, modifiers: 0x120000) // Cmd+Shift+P
+        static let `default` = HotkeyCombo(keyCode: 15, modifiers: 0x120000)  // Cmd+Shift+R
+        static let discardDefault = HotkeyCombo(keyCode: 15, modifiers: 0x1A0000)  // Cmd+Opt+Shift+R
+        static let pauseDefault = HotkeyCombo(keyCode: 35, modifiers: 0x120000)  // Cmd+Shift+P
 
         var isUsableGlobalShortcut: Bool {
-            Self.keyCodeNames[keyCode] != nil &&
-                modifiers & Self.nonShiftModifierMask != 0
+            Self.keyCodeNames[keyCode] != nil && modifiers & Self.nonShiftModifierMask != 0
         }
 
         var displayString: String {
@@ -827,7 +827,7 @@ class AppSettings: ObservableObject {
             if modifiers & 0x40000 != 0 { parts.append("⌃") }  // Control
             if modifiers & 0x80000 != 0 { parts.append("⌥") }  // Option
             if modifiers & 0x20000 != 0 { parts.append("⇧") }  // Shift
-            if modifiers & 0x100000 != 0 { parts.append("⌘") } // Command
+            if modifiers & 0x100000 != 0 { parts.append("⌘") }  // Command
 
             let keyString = keyCodeToString(keyCode)
             parts.append(keyString)
@@ -878,7 +878,8 @@ class AppSettings: ObservableObject {
                     return fallback
                 }
                 guard combo.isUsableGlobalShortcut else {
-                    logger.warning("Stored hotkey \(key) is not suitable for a global shortcut; falling back to default")
+                    logger.warning(
+                        "Stored hotkey \(key) is not suitable for a global shortcut; falling back to default")
                     return fallback
                 }
                 return combo
@@ -898,10 +899,13 @@ class AppSettings: ObservableObject {
         self.showCursor = defaults.object(forKey: DefaultsKey.showCursor) as? Bool ?? true
         self.highlightClicks = defaults.object(forKey: DefaultsKey.highlightClicks) as? Bool ?? true
         self.frameWindowRecordings = defaults.bool(forKey: DefaultsKey.frameWindowRecordings)
-        self.windowBackground = WindowBackground.fromStored(defaults.string(forKey: DefaultsKey.windowBackground)) ?? .charcoal
-        self.frameRate = Self.sanitizedFrameRate(defaults.object(forKey: DefaultsKey.frameRate) as? Int ?? Self.defaultFrameRate)
+        self.windowBackground =
+            WindowBackground.fromStored(defaults.string(forKey: DefaultsKey.windowBackground)) ?? .charcoal
+        self.frameRate = Self.sanitizedFrameRate(
+            defaults.object(forKey: DefaultsKey.frameRate) as? Int ?? Self.defaultFrameRate)
         self.videoQuality = VideoQuality.fromStored(defaults.string(forKey: DefaultsKey.videoQuality)) ?? .medium
-        self.videoResolution = VideoResolution.fromStored(defaults.string(forKey: DefaultsKey.videoResolution)) ?? .native
+        self.videoResolution =
+            VideoResolution.fromStored(defaults.string(forKey: DefaultsKey.videoResolution)) ?? .native
         self.videoCodec = VideoCodec.fromStored(defaults.string(forKey: DefaultsKey.videoCodec)) ?? .h264
         self.openFinderAfterRecording = defaults.object(forKey: DefaultsKey.openFinderAfterRecording) as? Bool ?? true
         self.showPreviewAfterRecording = defaults.object(forKey: DefaultsKey.showPreviewAfterRecording) as? Bool ?? true
@@ -949,7 +953,8 @@ class AppSettings: ObservableObject {
 
         self.recordCamera = defaults.bool(forKey: DefaultsKey.recordCamera)
         self.cameraDeviceID = defaults.string(forKey: DefaultsKey.cameraDeviceID)
-        self.cameraPosition = CameraOverlayPosition.fromStored(defaults.string(forKey: DefaultsKey.cameraPosition)) ?? .bottomRight
+        self.cameraPosition =
+            CameraOverlayPosition.fromStored(defaults.string(forKey: DefaultsKey.cameraPosition)) ?? .bottomRight
         if let storedFraction = defaults.object(forKey: DefaultsKey.cameraSizeFraction) as? Double {
             self.cameraSizeFraction = Self.sanitizedCameraSizeFraction(storedFraction)
         } else {
@@ -961,7 +966,8 @@ class AppSettings: ObservableObject {
 
         self.textOverlayEnabled = defaults.bool(forKey: DefaultsKey.textOverlayEnabled)
         self.textOverlayText = defaults.string(forKey: DefaultsKey.textOverlayText) ?? ""
-        self.textOverlayPosition = TextOverlayPosition.fromStored(defaults.string(forKey: DefaultsKey.textOverlayPosition)) ?? .center
+        self.textOverlayPosition =
+            TextOverlayPosition.fromStored(defaults.string(forKey: DefaultsKey.textOverlayPosition)) ?? .center
 
         self.recentRecordingPaths = defaults.stringArray(forKey: DefaultsKey.recentRecordings) ?? []
         self.rememberedTarget = Self.loadRememberedTarget(from: defaults)

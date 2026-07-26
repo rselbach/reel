@@ -4,12 +4,14 @@ import SwiftUI
 enum WelcomeText {
     static let windowTitle = "Welcome to Reel"
     static let title = "Welcome to Reel"
-    static let menuBarExplainer = "Reel lives in your menu bar — look for the record icon near your clock. Click it to choose what to record; while recording, click it to stop."
+    static let menuBarExplainer =
+        "Reel lives in your menu bar — look for the record icon near your clock. Click it to choose what to record; while recording, click it to stop."
     static let hotkeyPrefix = "Or toggle recording from anywhere with"
     static let permissionGranted = "Screen recording access granted"
     static let permissionExplainer = "Reel needs macOS screen recording permission to capture your screen."
     static let grantPermission = "Grant Screen Recording Access"
-    static let relaunchNote = "After granting access in System Settings, macOS requires relaunching Reel before recording works."
+    static let relaunchNote =
+        "After granting access in System Settings, macOS requires relaunching Reel before recording works."
     static let relaunchNow = "Relaunch Reel"
     static let relaunchFailedTitle = "Could not relaunch Reel"
     static let getStarted = "Get Started"

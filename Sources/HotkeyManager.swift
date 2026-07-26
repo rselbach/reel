@@ -133,9 +133,11 @@ class HotkeyManager {
     /// Replaces every shortcut as one transaction so swaps and default resets
     /// cannot leave only some actions registered.
     func updateHotkeys(_ replacements: [HotkeyAction: AppSettings.HotkeyCombo]) -> Bool {
-        guard HotkeyAction.allCases.allSatisfy({
-            replacements[$0]?.isUsableGlobalShortcut == true
-        }) else {
+        guard
+            HotkeyAction.allCases.allSatisfy({
+                replacements[$0]?.isUsableGlobalShortcut == true
+            })
+        else {
             return false
         }
 
@@ -170,7 +172,8 @@ class HotkeyManager {
 
     func handleHotKeyEvent(kind: UInt32, hotKeyID: EventHotKeyID) -> OSStatus {
         guard hotKeyID.signature == Self.signature,
-              let action = HotkeyAction(rawValue: hotKeyID.id) else {
+            let action = HotkeyAction(rawValue: hotKeyID.id)
+        else {
             return OSStatus(eventNotHandledErr)
         }
 

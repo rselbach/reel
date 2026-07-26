@@ -1,5 +1,5 @@
-import SwiftUI
 import ScreenCaptureKit
+import SwiftUI
 
 enum RecordingSelection: Equatable {
     case display(CGDirectDisplayID)
@@ -81,8 +81,8 @@ enum RecordingDialogLogic {
     static func windowMatchesSearch(appName: String?, windowTitle: String?, query: String) -> Bool {
         guard !query.isEmpty else { return true }
         let normalizedQuery = query.lowercased()
-        return (appName ?? "").lowercased().contains(normalizedQuery) ||
-            (windowTitle ?? "").lowercased().contains(normalizedQuery)
+        return (appName ?? "").lowercased().contains(normalizedQuery)
+            || (windowTitle ?? "").lowercased().contains(normalizedQuery)
     }
 }
 
@@ -146,9 +146,11 @@ private enum AppIconCache {
         if let image = images.object(forKey: bundleID as NSString) {
             return image
         }
-        guard let appURL = NSWorkspace.shared.urlForApplication(
-            withBundleIdentifier: bundleID
-        ) else {
+        guard
+            let appURL = NSWorkspace.shared.urlForApplication(
+                withBundleIdentifier: bundleID
+            )
+        else {
             return nil
         }
         let image = NSWorkspace.shared.icon(forFile: appURL.path())
@@ -160,11 +162,12 @@ private enum AppIconCache {
 struct RecordingDialog: View {
     let onStart: (RecordingSelection, RecordingOverrides) -> Void
     let onCancel: () -> Void
-    let onRefresh: @MainActor () async -> (
-        displays: [SCDisplay],
-        windows: [SCWindow],
-        excludedApplications: [SCRunningApplication]
-    )
+    let onRefresh:
+        @MainActor () async -> (
+            displays: [SCDisplay],
+            windows: [SCWindow],
+            excludedApplications: [SCRunningApplication]
+        )
     /// Output pixel size of the remembered area, when there is one to reuse.
     let lastRegionOutputSize: CGSize?
 
@@ -190,11 +193,12 @@ struct RecordingDialog: View {
         initialOverrides: RecordingOverrides,
         onStart: @escaping (RecordingSelection, RecordingOverrides) -> Void,
         onCancel: @escaping () -> Void,
-        onRefresh: @escaping @MainActor () async -> (
-            displays: [SCDisplay],
-            windows: [SCWindow],
-            excludedApplications: [SCRunningApplication]
-        )
+        onRefresh:
+            @escaping @MainActor () async -> (
+                displays: [SCDisplay],
+                windows: [SCWindow],
+                excludedApplications: [SCRunningApplication]
+            )
     ) {
         self.onStart = onStart
         self.onCancel = onCancel
@@ -205,11 +209,12 @@ struct RecordingDialog: View {
         _displays = State(initialValue: availableDisplays)
         _windows = State(initialValue: availableWindows)
         _excludedApplications = State(initialValue: excludedApplications)
-        _selection = State(initialValue: RecordingDialogLogic.validPreselection(
-            initialSelection,
-            displayIDs: availableDisplays.map(\.displayID),
-            windowIDs: availableWindows.map(\.windowID)
-        ))
+        _selection = State(
+            initialValue: RecordingDialogLogic.validPreselection(
+                initialSelection,
+                displayIDs: availableDisplays.map(\.displayID),
+                windowIDs: availableWindows.map(\.windowID)
+            ))
     }
 
     private var filteredWindows: [SCWindow] {
@@ -222,7 +227,7 @@ struct RecordingDialog: View {
             )
         }
     }
-    
+
     private let thumbnailSize = CGSize(width: 160, height: 100)
     private static let gridMinimum: CGFloat = 160
     private static let gridSpacing: CGFloat = 12
@@ -246,23 +251,24 @@ struct RecordingDialog: View {
             minimum: Self.gridMinimum,
             spacing: Self.gridSpacing
         )
-        selection = targets[
-            PickerNavigation.nextIndex(
-                from: current,
-                direction: direction,
-                count: targets.count,
-                columns: columns
-            )
-        ]
+        selection =
+            targets[
+                PickerNavigation.nextIndex(
+                    from: current,
+                    direction: direction,
+                    count: targets.count,
+                    columns: columns
+                )
+            ]
     }
-    
+
     var body: some View {
         VStack(spacing: 0) {
             Text("Select what to record")
                 .font(.headline)
                 .padding(.top, 16)
                 .padding(.bottom, 12)
-            
+
             if !displays.isEmpty {
                 Text("Displays")
                     .font(.subheadline)
@@ -370,7 +376,7 @@ struct RecordingDialog: View {
             }
 
             Divider()
-            
+
             // Changing the microphone or camera for one take should not mean
             // opening Settings and coming back.
             HStack(spacing: 12) {
@@ -394,8 +400,9 @@ struct RecordingDialog: View {
             .padding(.top, 10)
 
             if recordAudio,
-               AppSettings.shared.audioSource == .microphone,
-               let error = levelMonitor.errorMessage {
+                AppSettings.shared.audioSource == .microphone,
+                let error = levelMonitor.errorMessage
+            {
                 Text(error)
                     .font(.caption)
                     .foregroundColor(.orange)
@@ -433,7 +440,7 @@ struct RecordingDialog: View {
             refreshMetering()
         }
     }
-    
+
     /// Shown in place of the window grid. Missing displays *and* windows
     /// almost always means the screen recording permission is not in effect,
     /// so that case offers a way straight to System Settings.
@@ -485,7 +492,8 @@ struct RecordingDialog: View {
 
     private func openScreenCaptureSettings() {
         guard let url = SystemSettingsLink.screenCapturePrivacy,
-              NSWorkspace.shared.open(url) else {
+            NSWorkspace.shared.open(url)
+        else {
             settingsError = RecordingDialogText.openSystemSettingsFailed
             return
         }
@@ -503,12 +511,14 @@ struct RecordingDialog: View {
         // Replace a selected window with the refreshed ScreenCaptureKit
         // snapshot so resizing and other metadata changes reach the recorder.
         if case .window(let selected) = selection {
-            selection = windows
+            selection =
+                windows
                 .first(where: { $0.windowID == selected.windowID })
                 .map { .window($0) }
         }
         if case .display(let displayID) = selection,
-           !displays.contains(where: { $0.displayID == displayID }) {
+            !displays.contains(where: { $0.displayID == displayID })
+        {
             selection = nil
         }
         await loadThumbnails()
@@ -525,11 +535,13 @@ struct RecordingDialog: View {
             for (index, display) in displays.enumerated() {
                 let boxed = UncheckedSendable(value: display)
                 group.addTask {
-                    guard let image = await ThumbnailCapture.captureDisplay(
-                        boxed.value,
-                        excludingApplications: boxedExcludedApplications.value,
-                        maxSize: size
-                    ) else {
+                    guard
+                        let image = await ThumbnailCapture.captureDisplay(
+                            boxed.value,
+                            excludingApplications: boxedExcludedApplications.value,
+                            maxSize: size
+                        )
+                    else {
                         return nil
                     }
                     return UncheckedSendable(value: (index, image))
@@ -548,10 +560,12 @@ struct RecordingDialog: View {
                 for index in batch {
                     let boxed = UncheckedSendable(value: windows[index])
                     group.addTask {
-                        guard let image = await ThumbnailCapture.captureWindow(
-                            boxed.value,
-                            maxSize: size
-                        ) else {
+                        guard
+                            let image = await ThumbnailCapture.captureWindow(
+                                boxed.value,
+                                maxSize: size
+                            )
+                        else {
                             return nil
                         }
                         return UncheckedSendable(value: (boxed.value.windowID, image))
@@ -569,14 +583,14 @@ struct RecordingDialog: View {
         guard !Task.isCancelled else { return }
         isLoading = false
     }
-    
+
     private func windowTitle(for window: SCWindow) -> String {
         RecordingDialogLogic.windowTitle(
             appName: window.owningApplication?.applicationName,
             windowTitle: window.title
         )
     }
-    
+
     private func appIcon(for window: SCWindow) -> NSImage? {
         guard let bundleID = window.owningApplication?.bundleIdentifier else {
             return nil
@@ -615,7 +629,7 @@ struct ThumbnailCard: View {
                 RoundedRectangle(cornerRadius: 6)
                     .fill(Color(nsColor: .controlBackgroundColor))
                     .frame(height: 100)
-                
+
                 if let image {
                     Image(nsImage: image)
                         .resizable()
@@ -635,7 +649,7 @@ struct ThumbnailCard: View {
                 RoundedRectangle(cornerRadius: 6)
                     .stroke(isSelected ? Color.accentColor : Color.clear, lineWidth: 3)
             )
-            
+
             HStack(spacing: 4) {
                 if let appIcon {
                     Image(nsImage: appIcon)
