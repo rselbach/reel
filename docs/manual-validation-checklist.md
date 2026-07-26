@@ -2,9 +2,7 @@
 
 Source of truth: `docs/feature-status.csv`.
 
-Generated from the canonical tracker on 2026-06-21. This checklist is a companion artifact for executing the remaining manual validation pass; update the CSV after validation.
-
-Environment note: a bounded System Events probe on 2026-06-21 returned `UI elements enabled = false`, so this environment cannot inspect the menu bar, permission prompts, device pickers, or recording UI.
+Generated from the canonical tracker. This checklist is a companion artifact for executing the remaining manual validation pass; update the CSV after validation.
 
 Manual validation required: 44 stories.
 No further manual validation required: 2 stories.
@@ -31,7 +29,7 @@ Manual steps:
 2. verify only a menu-bar status item appears with Reel icon and no main app window
 3. quit from menu.
 
-Current status: Partial automated evidence passed; manual UI validation still pending. A bounded System Events probe on 2026-06-21 returned UI elements enabled = false, so this environment cannot inspect the app UI; validate manually using the listed steps.
+Current status: Partial automated evidence passed; manual UI validation still pending. Validate manually using the listed steps.
 
 Result: [ ] Pass  [ ] Fail  [ ] Blocked
 
@@ -51,7 +49,7 @@ Manual steps:
 4. press Relaunch Reel and verify a new instance starts and the old one quits
 5. verify recording works after the relaunch.
 
-Current status: Partial automated evidence passed; manual UI validation still pending. A bounded System Events probe on 2026-06-21 returned UI elements enabled = false, so this environment cannot inspect the app UI; validate manually using the listed steps.
+Current status: Partial automated evidence passed; manual UI validation still pending. Validate manually using the listed steps.
 
 Result: [ ] Pass  [ ] Fail  [ ] Blocked
 
@@ -69,7 +67,7 @@ Manual steps:
 2. verify System Settings opens Privacy & Security > Screen & System Audio Recording or equivalent Screen Capture pane
 3. verify failure alert if URL cannot open.
 
-Current status: Partial automated evidence passed; manual UI validation still pending. A bounded System Events probe on 2026-06-21 returned UI elements enabled = false, so this environment cannot inspect the app UI; validate manually using the listed steps.
+Current status: Partial automated evidence passed; manual UI validation still pending. Validate manually using the listed steps.
 
 Result: [ ] Pass  [ ] Fail  [ ] Blocked
 
@@ -88,7 +86,7 @@ Manual steps:
 3. reopen from menu
 4. verify a fresh New Recording dialog appears and Start is disabled until a source is selected.
 
-Current status: Partial automated evidence passed; manual UI validation still pending. A bounded System Events probe on 2026-06-21 returned UI elements enabled = false, so this environment cannot inspect the app UI; validate manually using the listed steps.
+Current status: Partial automated evidence passed; manual UI validation still pending. Validate manually using the listed steps.
 
 Result: [ ] Pass  [ ] Fail  [ ] Blocked
 
@@ -105,7 +103,7 @@ Manual steps:
 1. Record a single display and, if available, each external display
 2. verify selected display is captured, file plays, and oversized displays produce valid MP4 dimensions.
 
-Current status: Partial automated evidence passed; manual UI validation still pending. A bounded System Events probe on 2026-06-21 returned UI elements enabled = false, so this environment cannot inspect the app UI; validate manually using the listed steps.
+Current status: Partial automated evidence passed; manual UI validation still pending. Validate manually using the listed steps.
 
 Result: [ ] Pass  [ ] Fail  [ ] Blocked
 
@@ -124,7 +122,7 @@ Manual steps:
 3. select and double-click a window
 4. verify only that window is captured and large windows produce valid MP4 output.
 
-Current status: Partial automated evidence passed; manual UI validation still pending. A bounded System Events probe on 2026-06-21 returned UI elements enabled = false, so this environment cannot inspect the app UI; validate manually using the listed steps.
+Current status: Partial automated evidence passed; manual UI validation still pending. Validate manually using the listed steps.
 
 Result: [ ] Pass  [ ] Fail  [ ] Blocked
 
@@ -141,7 +139,7 @@ Manual steps:
 1. Open recording dialog with multiple windows
 2. observe thumbnail loading, fallback placeholder for any failed thumbnails, then close quickly during loading and verify no crash/stale update.
 
-Current status: Partial automated evidence passed; manual UI validation still pending. A bounded System Events probe on 2026-06-21 returned UI elements enabled = false, so this environment cannot inspect the app UI; validate manually using the listed steps.
+Current status: Partial automated evidence passed; manual UI validation still pending. Validate manually using the listed steps.
 
 Result: [ ] Pass  [ ] Fail  [ ] Blocked
 
@@ -162,7 +160,7 @@ Manual steps:
 5. verify pressing the hotkey again during the countdown cancels
 6. verify repeated start attempts do not create overlapping countdowns.
 
-Current status: Partial automated evidence passed; manual UI validation still pending. A bounded System Events probe on 2026-06-21 returned UI elements enabled = false, so this environment cannot inspect the app UI; validate manually using the listed steps.
+Current status: Partial automated evidence passed; manual UI validation still pending. Validate manually using the listed steps.
 
 Result: [ ] Pass  [ ] Fail  [ ] Blocked
 
@@ -180,7 +178,7 @@ Manual steps:
 2. verify red recording icon/menu state, output finalizes, preview/finder behavior follows settings
 3. force stream interruption if possible and verify cleanup/no orphan temp file.
 
-Current status: Partial automated evidence passed; manual UI validation still pending. A bounded System Events probe on 2026-06-21 returned UI elements enabled = false, so this environment cannot inspect the app UI; validate manually using the listed steps.
+Current status: Partial automated evidence passed; manual UI validation still pending. Validate manually using the listed steps.
 
 Result: [ ] Pass  [ ] Fail  [ ] Blocked
 
@@ -197,7 +195,7 @@ Manual steps:
 1. Start a recording and choose Quit Reel while recording
 2. verify app delays quit, finalizes recording, hides camera overlay, and then terminates.
 
-Current status: Partial automated evidence passed; manual UI validation still pending. A bounded System Events probe on 2026-06-21 returned UI elements enabled = false, so this environment cannot inspect the app UI; validate manually using the listed steps.
+Current status: Partial automated evidence passed; manual UI validation still pending. Validate manually using the listed steps.
 
 Result: [ ] Pass  [ ] Fail  [ ] Blocked
 
@@ -215,7 +213,7 @@ Manual steps:
 2. test unwritable/missing output folder fallback
 3. verify cancelled saves and stream errors leave no orphan temp output.
 
-Current status: Partial automated evidence passed; manual UI validation still pending. A bounded System Events probe on 2026-06-21 returned UI elements enabled = false, so this environment cannot inspect the app UI; validate manually using the listed steps.
+Current status: Partial automated evidence passed; manual UI validation still pending. Validate manually using the listed steps.
 
 Result: [ ] Pass  [ ] Fail  [ ] Blocked
 
@@ -235,7 +233,7 @@ Manual steps:
 4. repeat and save to chosen path
 5. verify file exists and plays.
 
-Current status: Partial automated evidence passed; manual UI validation still pending. A bounded System Events probe on 2026-06-21 returned UI elements enabled = false, so this environment cannot inspect the app UI; validate manually using the listed steps.
+Current status: Partial automated evidence passed; manual UI validation still pending. Validate manually using the listed steps.
 
 Result: [ ] Pass  [ ] Fail  [ ] Blocked
 
@@ -254,7 +252,7 @@ Manual steps:
 3. verify Finder reveals saved file
 4. simulate reveal failure if possible and verify menu error appears.
 
-Current status: Partial automated evidence passed; manual UI validation still pending. A bounded System Events probe on 2026-06-21 returned UI elements enabled = false, so this environment cannot inspect the app UI; validate manually using the listed steps.
+Current status: Partial automated evidence passed; manual UI validation still pending. Validate manually using the listed steps.
 
 Result: [ ] Pass  [ ] Fail  [ ] Blocked
 
@@ -273,7 +271,7 @@ Manual steps:
 3. press Record Again and verify the preview closes and the picker opens with the previous target preselected
 4. verify Done closes the preview without deleting the file.
 
-Current status: Partial automated evidence passed; manual UI validation still pending. A bounded System Events probe on 2026-06-21 returned UI elements enabled = false, so this environment cannot inspect the app UI; validate manually using the listed steps.
+Current status: Partial automated evidence passed; manual UI validation still pending. Validate manually using the listed steps.
 
 Result: [ ] Pass  [ ] Fail  [ ] Blocked
 
@@ -294,7 +292,7 @@ Manual steps:
 5. verify Smaller Copy is available without a trim set
 6. overwrite an existing file with each and verify the original is not lost if the write fails.
 
-Current status: Partial automated evidence passed; manual UI validation still pending. A bounded System Events probe on 2026-06-21 returned UI elements enabled = false, so this environment cannot inspect the app UI; validate manually using the listed steps.
+Current status: Partial automated evidence passed; manual UI validation still pending. Validate manually using the listed steps.
 
 Result: [ ] Pass  [ ] Fail  [ ] Blocked
 
@@ -313,7 +311,7 @@ Manual steps:
 3. confirm delete then verify file removed and preview closes
 4. simulate remove failure and verify alert.
 
-Current status: Partial automated evidence passed; manual UI validation still pending. A bounded System Events probe on 2026-06-21 returned UI elements enabled = false, so this environment cannot inspect the app UI; validate manually using the listed steps.
+Current status: Partial automated evidence passed; manual UI validation still pending. Validate manually using the listed steps.
 
 Result: [ ] Pass  [ ] Fail  [ ] Blocked
 
@@ -332,7 +330,7 @@ Manual steps:
 3. close/reopen and relaunch
 4. verify persistence and stale window references do not prevent reopening.
 
-Current status: Partial automated evidence passed; manual UI validation still pending. A bounded System Events probe on 2026-06-21 returned UI elements enabled = false, so this environment cannot inspect the app UI; validate manually using the listed steps.
+Current status: Partial automated evidence passed; manual UI validation still pending. Validate manually using the listed steps.
 
 Result: [ ] Pass  [ ] Fail  [ ] Blocked
 
@@ -350,7 +348,7 @@ Manual steps:
 2. verify SMAppService/login item state and UI state
 3. simulate/observe failure and verify error plus resync to actual status.
 
-Current status: Partial automated evidence passed; manual UI validation still pending. A bounded System Events probe on 2026-06-21 returned UI elements enabled = false, so this environment cannot inspect the app UI; validate manually using the listed steps.
+Current status: Partial automated evidence passed; manual UI validation still pending. Validate manually using the listed steps.
 
 Result: [ ] Pass  [ ] Fail  [ ] Blocked
 
@@ -369,7 +367,7 @@ Manual steps:
 3. select device/default/stale device
 4. record and verify audio track/sync and warning behavior on failure.
 
-Current status: Partial automated evidence passed; manual UI validation still pending. A bounded System Events probe on 2026-06-21 returned UI elements enabled = false, so this environment cannot inspect the app UI; validate manually using the listed steps.
+Current status: Partial automated evidence passed; manual UI validation still pending. Validate manually using the listed steps.
 
 Result: [ ] Pass  [ ] Fail  [ ] Blocked
 
@@ -389,7 +387,7 @@ Manual steps:
 4. cancel a countdown and verify the camera turns off
 5. verify the composited bubble in the file matches the on-screen position.
 
-Current status: Partial automated evidence passed; manual UI validation still pending. A bounded System Events probe on 2026-06-21 returned UI elements enabled = false, so this environment cannot inspect the app UI; validate manually using the listed steps.
+Current status: Partial automated evidence passed; manual UI validation still pending. Validate manually using the listed steps.
 
 Result: [ ] Pass  [ ] Fail  [ ] Blocked
 
@@ -407,7 +405,7 @@ Manual steps:
 2. test empty text, whitespace-only text, long text, top/center/bottom positions
 3. record and visually verify overlay visibility and clamping.
 
-Current status: Partial automated evidence passed; manual UI validation still pending. A bounded System Events probe on 2026-06-21 returned UI elements enabled = false, so this environment cannot inspect the app UI; validate manually using the listed steps.
+Current status: Partial automated evidence passed; manual UI validation still pending. Validate manually using the listed steps.
 
 Result: [ ] Pass  [ ] Fail  [ ] Blocked
 
@@ -426,7 +424,7 @@ Manual steps:
 3. switch to an area recording and verify both show the area and its size
 4. clear the selection by closing the recorded window and verify the summary disappears and the shortcut opens the picker.
 
-Current status: Partial automated evidence passed; manual UI validation still pending. A bounded System Events probe on 2026-06-21 returned UI elements enabled = false, so this environment cannot inspect the app UI; validate manually using the listed steps.
+Current status: Partial automated evidence passed; manual UI validation still pending. Validate manually using the listed steps.
 
 Result: [ ] Pass  [ ] Fail  [ ] Blocked
 
@@ -446,7 +444,7 @@ Manual steps:
 4. try to assign one row the other's combination and verify it is refused with an explanation
 5. press Escape while recording a shortcut and verify the previous combination is kept.
 
-Current status: Partial automated evidence passed; manual UI validation still pending. A bounded System Events probe on 2026-06-21 returned UI elements enabled = false, so this environment cannot inspect the app UI; validate manually using the listed steps.
+Current status: Partial automated evidence passed; manual UI validation still pending. Validate manually using the listed steps.
 
 Result: [ ] Pass  [ ] Fail  [ ] Blocked
 
@@ -465,7 +463,7 @@ Manual steps:
 3. close via title bar and reopen
 4. verify links open expected targets.
 
-Current status: Partial automated evidence passed; manual UI validation still pending. A bounded System Events probe on 2026-06-21 returned UI elements enabled = false, so this environment cannot inspect the app UI; validate manually using the listed steps.
+Current status: Partial automated evidence passed; manual UI validation still pending. Validate manually using the listed steps.
 
 Result: [ ] Pass  [ ] Fail  [ ] Blocked
 
@@ -482,7 +480,7 @@ Manual steps:
 1. Choose Check for Updates
 2. verify Sparkle UI opens and handles no-update/update/error states using configured appcast and public key.
 
-Current status: Partial automated evidence passed; manual UI validation still pending. A bounded System Events probe on 2026-06-21 returned UI elements enabled = false, so this environment cannot inspect the app UI; validate manually using the listed steps.
+Current status: Partial automated evidence passed; manual UI validation still pending. Validate manually using the listed steps.
 
 Result: [ ] Pass  [ ] Fail  [ ] Blocked
 
@@ -498,7 +496,7 @@ Manual steps:
 
 1. Enable Record camera overlay, choose a camera, start a recording, drag the floating camera preview to each edge/corner, confirm it remains within the recorded bounds, confirm the final recording shows the camera overlay in the dragged position, and confirm the live floating window itself is not recursively captured.
 
-Current status: Partial automated evidence passed; manual UI validation still pending. A bounded System Events probe on 2026-06-21 returned UI elements enabled = false, so this environment cannot inspect the app UI; validate manually using the listed steps.
+Current status: Partial automated evidence passed; manual UI validation still pending. Validate manually using the listed steps.
 
 Result: [ ] Pass  [ ] Fail  [ ] Blocked
 
@@ -514,7 +512,7 @@ Manual steps:
 
 1. Run Reel without Accessibility permission, open the menu, confirm Enable Keyboard Shortcuts appears, select it, grant permission in System Settings, confirm the menu item disappears after polling, and confirm the configured hotkey toggles recording.
 
-Current status: Partial automated evidence passed; manual UI validation still pending. A bounded System Events probe on 2026-06-21 returned UI elements enabled = false, so this environment cannot inspect the app UI; validate manually using the listed steps.
+Current status: Partial automated evidence passed; manual UI validation still pending. Validate manually using the listed steps.
 
 Result: [ ] Pass  [ ] Fail  [ ] Blocked
 
@@ -531,7 +529,7 @@ Manual steps:
 1. Enable Add text overlay with whitespace-only text and record briefly, confirm no empty overlay appears
 2. then enter visible text with leading/trailing spaces, record again, and confirm only trimmed visible text appears.
 
-Current status: Partial automated evidence passed; manual UI validation still pending. A bounded System Events probe on 2026-06-21 returned UI elements enabled = false, so this environment cannot inspect the app UI; validate manually using the listed steps.
+Current status: Partial automated evidence passed; manual UI validation still pending. Validate manually using the listed steps.
 
 Result: [ ] Pass  [ ] Fail  [ ] Blocked
 
@@ -547,7 +545,7 @@ Manual steps:
 
 1. Open About Reel, confirm version/build/commit display, click GitHub and confirm the project repository opens, and if the build has a valid commit hash click the commit link and confirm the exact GitHub commit opens.
 
-Current status: Partial automated evidence passed; manual UI validation still pending. A bounded System Events probe on 2026-06-21 returned UI elements enabled = false, so this environment cannot inspect the app UI; validate manually using the listed steps.
+Current status: Partial automated evidence passed; manual UI validation still pending. Validate manually using the listed steps.
 
 Result: [ ] Pass  [ ] Fail  [ ] Blocked
 
@@ -570,7 +568,7 @@ Manual steps:
 7. double-click a card and verify it starts immediately
 8. record an area and verify Use Last Area appears with the right dimensions.
 
-Current status: Partial automated evidence passed; manual UI validation still pending. A bounded System Events probe on 2026-06-21 returned UI elements enabled = false, so this environment cannot inspect the app UI; validate manually using the listed steps.
+Current status: Partial automated evidence passed; manual UI validation still pending. Validate manually using the listed steps.
 
 Result: [ ] Pass  [ ] Fail  [ ] Blocked
 
@@ -589,7 +587,7 @@ Manual steps:
 3. free up space and verify recording starts normally
 4. set the output folder to a path that does not exist and verify recording still starts.
 
-Current status: Partial automated evidence passed; manual UI validation still pending. A bounded System Events probe on 2026-06-21 returned UI elements enabled = false, so this environment cannot inspect the app UI; validate manually using the listed steps.
+Current status: Partial automated evidence passed; manual UI validation still pending. Validate manually using the listed steps.
 
 Result: [ ] Pass  [ ] Fail  [ ] Blocked
 
@@ -607,7 +605,7 @@ Manual steps:
 2. fill the volume from another process while recording
 3. verify the recording stops on its own within about ten seconds, the resulting file plays back, and the message names the remaining space.
 
-Current status: Partial automated evidence passed; manual UI validation still pending. A bounded System Events probe on 2026-06-21 returned UI elements enabled = false, so this environment cannot inspect the app UI; validate manually using the listed steps.
+Current status: Partial automated evidence passed; manual UI validation still pending. Validate manually using the listed steps.
 
 Result: [ ] Pass  [ ] Fail  [ ] Blocked
 
@@ -628,7 +626,7 @@ Manual steps:
 5. rename the recorded window's document and verify the same app's window is still selected
 6. close the app entirely and verify the picker appears instead.
 
-Current status: Partial automated evidence passed; manual UI validation still pending. A bounded System Events probe on 2026-06-21 returned UI elements enabled = false, so this environment cannot inspect the app UI; validate manually using the listed steps.
+Current status: Partial automated evidence passed; manual UI validation still pending. Validate manually using the listed steps.
 
 Result: [ ] Pass  [ ] Fail  [ ] Blocked
 
@@ -649,7 +647,7 @@ Manual steps:
 5. record a full display and verify no border is drawn
 6. stop each recording and verify the border disappears.
 
-Current status: Partial automated evidence passed; manual UI validation still pending. A bounded System Events probe on 2026-06-21 returned UI elements enabled = false, so this environment cannot inspect the app UI; validate manually using the listed steps.
+Current status: Partial automated evidence passed; manual UI validation still pending. Validate manually using the listed steps.
 
 Result: [ ] Pass  [ ] Fail  [ ] Blocked
 
@@ -668,7 +666,7 @@ Manual steps:
 3. record system audio and verify the same
 4. turn the setting off in General and verify no cues play.
 
-Current status: Partial automated evidence passed; manual UI validation still pending. A bounded System Events probe on 2026-06-21 returned UI elements enabled = false, so this environment cannot inspect the app UI; validate manually using the listed steps.
+Current status: Partial automated evidence passed; manual UI validation still pending. Validate manually using the listed steps.
 
 Result: [ ] Pass  [ ] Fail  [ ] Blocked
 
@@ -687,7 +685,7 @@ Manual steps:
 3. press the discard shortcut during a recording and verify it ends immediately with no confirmation and no file
 4. open Settings, Shortcuts and verify both shortcuts are listed and that assigning one the other's combination is refused with an explanation.
 
-Current status: Partial automated evidence passed; manual UI validation still pending. A bounded System Events probe on 2026-06-21 returned UI elements enabled = false, so this environment cannot inspect the app UI; validate manually using the listed steps.
+Current status: Partial automated evidence passed; manual UI validation still pending. Validate manually using the listed steps.
 
 Result: [ ] Pass  [ ] Fail  [ ] Blocked
 
@@ -709,7 +707,7 @@ Manual steps:
 6. pause and then stop without resuming and verify the file is valid
 7. pause and then discard and verify nothing is written.
 
-Current status: Partial automated evidence passed; manual UI validation still pending. A bounded System Events probe on 2026-06-21 returned UI elements enabled = false, so this environment cannot inspect the app UI; validate manually using the listed steps.
+Current status: Partial automated evidence passed; manual UI validation still pending. Validate manually using the listed steps.
 
 Result: [ ] Pass  [ ] Fail  [ ] Blocked
 
@@ -728,7 +726,7 @@ Manual steps:
 3. verify the HEVC file is noticeably smaller
 4. record a 5K display natively with HEVC and verify the output keeps the full resolution rather than being scaled to 4096 wide.
 
-Current status: Partial automated evidence passed; manual UI validation still pending. A bounded System Events probe on 2026-06-21 returned UI elements enabled = false, so this environment cannot inspect the app UI; validate manually using the listed steps.
+Current status: Partial automated evidence passed; manual UI validation still pending. Validate manually using the listed steps.
 
 Result: [ ] Pass  [ ] Fail  [ ] Blocked
 
@@ -749,7 +747,7 @@ Manual steps:
 5. record an area and verify clicks outside it are not marked
 6. disable the setting and verify no marks appear.
 
-Current status: Partial automated evidence passed; manual UI validation still pending. A bounded System Events probe on 2026-06-21 returned UI elements enabled = false, so this environment cannot inspect the app UI; validate manually using the listed steps.
+Current status: Partial automated evidence passed; manual UI validation still pending. Validate manually using the listed steps.
 
 Result: [ ] Pass  [ ] Fail  [ ] Blocked
 
@@ -770,7 +768,7 @@ Manual steps:
 5. click during the recording and verify the mark lands on the window, not offset into the padding
 6. record a display and an area and verify neither is framed.
 
-Current status: Partial automated evidence passed; manual UI validation still pending. A bounded System Events probe on 2026-06-21 returned UI elements enabled = false, so this environment cannot inspect the app UI; validate manually using the listed steps.
+Current status: Partial automated evidence passed; manual UI validation still pending. Validate manually using the listed steps.
 
 Result: [ ] Pass  [ ] Fail  [ ] Blocked
 
@@ -791,7 +789,7 @@ Manual steps:
 5. switch the source to System Audio and verify metering stops
 6. close Settings and verify the microphone is released.
 
-Current status: Partial automated evidence passed; manual UI validation still pending. A bounded System Events probe on 2026-06-21 returned UI elements enabled = false, so this environment cannot inspect the app UI; validate manually using the listed steps.
+Current status: Partial automated evidence passed; manual UI validation still pending. Validate manually using the listed steps.
 
 Result: [ ] Pass  [ ] Fail  [ ] Blocked
 
@@ -811,7 +809,7 @@ Manual steps:
 4. press the global shortcut and verify it uses the Settings defaults rather than the last picker choice
 5. verify the picker meter responds while the microphone toggle is on.
 
-Current status: Partial automated evidence passed; manual UI validation still pending. A bounded System Events probe on 2026-06-21 returned UI elements enabled = false, so this environment cannot inspect the app UI; validate manually using the listed steps.
+Current status: Partial automated evidence passed; manual UI validation still pending. Validate manually using the listed steps.
 
 Result: [ ] Pass  [ ] Fail  [ ] Blocked
 
@@ -830,7 +828,7 @@ Manual steps:
 3. export a GIF from a recording several minutes long and verify it still spans the whole range and plays at real speed rather than being cut short
 4. verify the GIF opens in Finder preview and a browser.
 
-Current status: Partial automated evidence passed; manual UI validation still pending. A bounded System Events probe on 2026-06-21 returned UI elements enabled = false, so this environment cannot inspect the app UI; validate manually using the listed steps.
+Current status: Partial automated evidence passed; manual UI validation still pending. Validate manually using the listed steps.
 
 Result: [ ] Pass  [ ] Fail  [ ] Blocked
 
@@ -853,7 +851,7 @@ Manual steps:
 7. confirm with a double-click
 8. press Escape and verify nothing is recorded.
 
-Current status: Partial automated evidence passed; manual UI validation still pending. A bounded System Events probe on 2026-06-21 returned UI elements enabled = false, so this environment cannot inspect the app UI; validate manually using the listed steps.
+Current status: Partial automated evidence passed; manual UI validation still pending. Validate manually using the listed steps.
 
 Result: [ ] Pass  [ ] Fail  [ ] Blocked
 

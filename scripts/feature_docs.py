@@ -22,11 +22,6 @@ EXPECTED_COLUMNS = [
 ]
 
 AUTOMATION_ONLY_STATUS = "Not required beyond recorded automated evidence"
-GENERATED_DATE = "2026-06-21"
-UI_AUTOMATION_NOTE = (
-    "a bounded System Events probe on 2026-06-21 returned "
-    "`UI elements enabled = false`"
-)
 
 
 def clean(value):
@@ -68,7 +63,11 @@ def read_tracker():
 def write_tracker(rows):
     TRACKER_PATH.parent.mkdir(parents=True, exist_ok=True)
     with TRACKER_PATH.open("w", newline="") as handle:
-        writer = csv.DictWriter(handle, fieldnames=EXPECTED_COLUMNS)
+        writer = csv.DictWriter(
+            handle,
+            fieldnames=EXPECTED_COLUMNS,
+            lineterminator="\n",
+        )
         writer.writeheader()
         writer.writerows(rows)
 
@@ -99,15 +98,9 @@ def render_checklist(rows):
         "Source of truth: `docs/feature-status.csv`.",
         "",
         (
-            f"Generated from the canonical tracker on {GENERATED_DATE}. "
-            "This checklist is a companion artifact for executing the remaining "
-            "manual validation pass; update the CSV after validation."
-        ),
-        "",
-        (
-            "Environment note: a bounded System Events probe on 2026-06-21 "
-            "returned `UI elements enabled = false`, so this environment cannot "
-            "inspect the menu bar, permission prompts, device pickers, or recording UI."
+            "Generated from the canonical tracker. This checklist is a companion "
+            "artifact for executing the remaining manual validation pass; update "
+            "the CSV after validation."
         ),
         "",
         f"Manual validation required: {len(manual_required)} stories.",

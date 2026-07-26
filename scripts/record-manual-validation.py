@@ -19,8 +19,7 @@ RESULT_STATUSES = {
     "blocked": "Manual validation blocked",
     "reset-pending": (
         "Partial automated evidence passed; manual UI validation still pending. "
-        "A bounded System Events probe on 2026-06-21 returned UI elements enabled = false, "
-        "so this environment cannot inspect the app UI; validate manually using the listed steps."
+        "Validate manually using the listed steps."
     ),
 }
 

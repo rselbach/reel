@@ -6,6 +6,7 @@ from feature_docs import (
     ROOT,
     automation_only_rows,
     manual_required_rows,
+    render_checklist,
 )
 
 
@@ -34,6 +35,19 @@ def validate_tracker(rows):
         raise ValueError(
             "stories missing manual validation steps: "
             + ", ".join(missing_manual_steps)
+        )
+
+    missing_evidence_paths = []
+    for row in rows:
+        for evidence in row["Code evidence"].split(";"):
+            path_text = evidence.strip().split(maxsplit=1)[0]
+            matches = list(ROOT.glob(path_text))
+            if not matches:
+                missing_evidence_paths.append(f"{row['ID']}:{path_text}")
+    if missing_evidence_paths:
+        raise ValueError(
+            "code evidence references missing paths: "
+            + ", ".join(missing_evidence_paths)
         )
 
 
@@ -76,5 +90,10 @@ def validate_checklist(rows):
         heading = f"## {row['ID']} - {row['Feature']}"
         if heading not in checklist:
             raise ValueError(f"checklist missing heading: {heading}")
+
+    if checklist != render_checklist(rows):
+        raise ValueError(
+            "checklist content is stale; run `just generate-checklist`"
+        )
 
     return len(manual_required), len(automation_only)
