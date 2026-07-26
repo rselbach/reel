@@ -510,6 +510,25 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertGreaterThan(sampling.delay, 0)
     }
 
+    func testExportsUseHiddenSiblingFilesBeforeAtomicReplacement() {
+        let videoOutput = URL(fileURLWithPath: "/tmp/Greendale/demo.mp4")
+        let gifOutput = URL(fileURLWithPath: "/tmp/Greendale/demo.gif")
+
+        let videoTemp = ExportFileNaming.temporaryURL(
+            for: videoOutput,
+            identifier: "Troy"
+        )
+        let gifTemp = ExportFileNaming.temporaryURL(
+            for: gifOutput,
+            identifier: "Abed"
+        )
+
+        XCTAssertEqual(videoTemp.path(), "/tmp/Greendale/.demo-Troy.mp4")
+        XCTAssertEqual(gifTemp.path(), "/tmp/Greendale/.demo-Abed.gif")
+        XCTAssertNotEqual(videoTemp, videoOutput)
+        XCTAssertNotEqual(gifTemp, gifOutput)
+    }
+
     @MainActor
     func testPerTakeOverridesReplaceOnlyWhatTheyName() {
         let settings = AppSettings.shared

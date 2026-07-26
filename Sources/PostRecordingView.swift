@@ -150,6 +150,17 @@ enum GIFExport {
     }
 }
 
+enum ExportFileNaming {
+    static func temporaryURL(for outputURL: URL, identifier: String = UUID().uuidString) -> URL {
+        let fileExtension = outputURL.pathExtension
+        return outputURL
+            .deletingLastPathComponent()
+            .appendingPathComponent(
+                ".\(outputURL.deletingPathExtension().lastPathComponent)-\(identifier).\(fileExtension)"
+            )
+    }
+}
+
 enum PostRecordingLogic {
     static func hasTrimChanges(duration: Double, trimStart: Double, trimEnd: Double) -> Bool {
         duration > 0 && (trimStart > TrimConstants.threshold || trimEnd < duration - TrimConstants.threshold)
@@ -187,6 +198,7 @@ struct PostRecordingView: View {
     @State private var trimEnd: Double = 0
     @State private var currentTime: Double = 0
     @State private var isExporting = false
+    @State private var exportTask: Task<Void, Never>?
     @State private var showDeleteConfirmation = false
     @State private var exportError: String?
     @State private var justCopied = false
@@ -208,6 +220,7 @@ struct PostRecordingView: View {
                         }
                     )
                     .padding(.horizontal)
+                    .disabled(isExporting)
 
                     if hasTrimChanges {
                         Text(PostRecordingText.keyframeNote)
@@ -245,11 +258,13 @@ struct PostRecordingView: View {
                 .onDrag {
                     NSItemProvider(contentsOf: videoURL) ?? NSItemProvider()
                 }
+                .allowsHitTesting(!isExporting)
                 .help(PostRecordingText.dragHint)
 
                 Button(justCopied ? PostRecordingText.copied : PostRecordingText.copy) {
                     copyToPasteboard()
                 }
+                .disabled(isExporting)
 
                 Spacer()
             }
@@ -259,11 +274,13 @@ struct PostRecordingView: View {
                 Button(PostRecordingText.revealInFinder) {
                     onRevealInFinder()
                 }
+                .disabled(isExporting)
 
                 Button(PostRecordingText.delete, role: .destructive) {
                     showDeleteConfirmation = true
                 }
                 .foregroundColor(.red)
+                .disabled(isExporting)
 
                 Spacer()
 
@@ -272,22 +289,29 @@ struct PostRecordingView: View {
                 Button(PostRecordingText.recordAgain) {
                     onRecordAgain()
                 }
+                .disabled(isExporting)
 
                 if hasTrimChanges {
                     Button(PostRecordingText.saveTrimmed) {
-                        Task { await export(preset: AVAssetExportPresetPassthrough, suffix: "trimmed") }
+                        startVideoExport(
+                            preset: AVAssetExportPresetPassthrough,
+                            suffix: "trimmed"
+                        )
                     }
                     .disabled(!canExport)
                 }
 
                 Button(PostRecordingText.exportSmaller) {
-                    Task { await export(preset: AVAssetExportPreset1280x720, suffix: "720p") }
+                    startVideoExport(
+                        preset: AVAssetExportPreset1280x720,
+                        suffix: "720p"
+                    )
                 }
                 .disabled(!canExport)
                 .help(PostRecordingText.exportSmallerHelp)
 
                 Button(PostRecordingText.exportGIF) {
-                    Task { await exportGIF() }
+                    startGIFExport()
                 }
                 .disabled(!canExport)
                 .help(PostRecordingText.exportGIFHelp)
@@ -301,6 +325,7 @@ struct PostRecordingView: View {
                     onDismiss()
                 }
                 .buttonStyle(.borderedProminent)
+                .disabled(isExporting)
             }
             .padding(.horizontal)
         }
@@ -318,6 +343,9 @@ struct PostRecordingView: View {
             setupPlayer()
         }
         .onDisappear {
+            exportTask?.cancel()
+            exportTask = nil
+            isExporting = false
             cleanupPlayer()
         }
     }
@@ -409,20 +437,38 @@ struct PostRecordingView: View {
         }
     }
 
-    /// Writes a copy of the current trim range using the given export preset:
-    /// passthrough for a lossless trim, a sized preset for a smaller file.
-    private func export(preset: String, suffix: String) async {
+    private func startVideoExport(preset: String, suffix: String) {
         guard !isExporting else { return }
         isExporting = true
         exportError = nil
-
-        guard let outputURL = await selectExportURL(suffix: suffix) else {
+        exportTask = Task { @MainActor in
+            await performVideoExport(preset: preset, suffix: suffix)
             isExporting = false
+            exportTask = nil
+        }
+    }
+
+    private func startGIFExport() {
+        guard !isExporting else { return }
+        isExporting = true
+        exportError = nil
+        exportTask = Task { @MainActor in
+            await performGIFExport()
+            isExporting = false
+            exportTask = nil
+        }
+    }
+
+    /// Writes a copy of the current trim range using the given export preset:
+    /// passthrough for a lossless trim, a sized preset for a smaller file.
+    private func performVideoExport(preset: String, suffix: String) async {
+        guard let outputURL = await selectExportURL(suffix: suffix) else {
             return
         }
 
         do {
             let warning = try await exportVideo(to: outputURL, preset: preset)
+            try Task.checkCancellation()
             if let warning {
                 exportError = warning.localizedDescription
             }
@@ -431,34 +477,45 @@ struct PostRecordingView: View {
                 let revealError = "Video saved, but Finder could not reveal it."
                 exportError = exportError.map { "\($0)\n\(revealError)" } ?? revealError
             }
+        } catch is CancellationError {
+            return
         } catch {
             exportError = "Export failed: \(error.localizedDescription)"
         }
-
-        isExporting = false
     }
 
-    private func exportGIF() async {
-        guard !isExporting else { return }
-        isExporting = true
-        exportError = nil
-
+    private func performGIFExport() async {
         guard let outputURL = await selectExportURL(suffix: "gif", contentType: .gif) else {
-            isExporting = false
             return
         }
 
         do {
-            try await writeGIF(to: outputURL)
+            let warning = try await exportGIF(to: outputURL)
+            try Task.checkCancellation()
+            if let warning {
+                exportError = warning.localizedDescription
+            }
             let revealed = NSWorkspace.shared.selectFile(outputURL.path(), inFileViewerRootedAtPath: "")
             if !revealed {
-                exportError = "GIF saved, but Finder could not reveal it."
+                let revealError = "GIF saved, but Finder could not reveal it."
+                exportError = exportError.map { "\($0)\n\(revealError)" } ?? revealError
             }
+        } catch is CancellationError {
+            return
         } catch {
             exportError = "GIF export failed: \(error.localizedDescription)"
         }
+    }
 
-        isExporting = false
+    private func exportGIF(to outputURL: URL) async throws -> FileReplacementWarning? {
+        let tempURL = ExportFileNaming.temporaryURL(for: outputURL)
+        defer {
+            removeTemporaryExport(at: tempURL, kind: "GIF")
+        }
+
+        try await writeGIF(to: tempURL)
+        try Task.checkCancellation()
+        return try FileReplacement.commit(tempURL: tempURL, to: outputURL)
     }
 
     private func writeGIF(to outputURL: URL) async throws {
@@ -490,8 +547,10 @@ struct PostRecordingView: View {
         ] as CFDictionary
 
         for seconds in sampling.times {
+            try Task.checkCancellation()
             let time = CMTime(seconds: seconds, preferredTimescale: 600)
             let frame = try await generator.image(at: time)
+            try Task.checkCancellation()
             CGImageDestinationAddImage(destination, frame.image, frameProperties)
         }
 
@@ -521,19 +580,9 @@ struct PostRecordingView: View {
 
     private func exportVideo(to outputURL: URL, preset: String) async throws -> FileReplacementWarning? {
         let asset = AVURLAsset(url: videoURL)
-        let tempURL = outputURL
-            .deletingLastPathComponent()
-            .appendingPathComponent(".\(outputURL.deletingPathExtension().lastPathComponent)-\(UUID().uuidString).mp4")
+        let tempURL = ExportFileNaming.temporaryURL(for: outputURL)
         defer {
-            if FileManager.default.fileExists(atPath: tempURL.path()) {
-                do {
-                    try FileManager.default.removeItem(at: tempURL)
-                } catch {
-                    logger.error(
-                        "Failed to remove temporary trim export at \(tempURL.path(), privacy: .public): \(error.localizedDescription, privacy: .public)"
-                    )
-                }
-            }
+            removeTemporaryExport(at: tempURL, kind: "video")
         }
 
         let startTime = CMTime(seconds: trimStart, preferredTimescale: 600)
@@ -548,7 +597,19 @@ struct PostRecordingView: View {
         }
         session.timeRange = timeRange
         try await session.export(to: tempURL, as: .mp4)
+        try Task.checkCancellation()
         return try FileReplacement.commit(tempURL: tempURL, to: outputURL)
+    }
+
+    private func removeTemporaryExport(at url: URL, kind: String) {
+        guard FileManager.default.fileExists(atPath: url.path()) else { return }
+        do {
+            try FileManager.default.removeItem(at: url)
+        } catch {
+            logger.error(
+                "Failed to remove temporary \(kind, privacy: .public) export at \(url.path(), privacy: .public): \(error.localizedDescription, privacy: .public)"
+            )
+        }
     }
 }
 
