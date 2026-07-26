@@ -542,6 +542,33 @@ final class AppSettingsTests: XCTestCase {
         )
     }
 
+    func testAudioWaitsForVideoToCommitTheResumeOffset() {
+        XCTAssertTrue(RecordingTimeline.canAppendAudio(
+            captureStopped: false,
+            paused: false,
+            sessionStarted: true,
+            awaitingResumeFrame: false
+        ))
+        XCTAssertFalse(RecordingTimeline.canAppendAudio(
+            captureStopped: false,
+            paused: true,
+            sessionStarted: true,
+            awaitingResumeFrame: false
+        ))
+        XCTAssertFalse(RecordingTimeline.canAppendAudio(
+            captureStopped: false,
+            paused: false,
+            sessionStarted: true,
+            awaitingResumeFrame: true
+        ))
+        XCTAssertFalse(RecordingTimeline.canAppendAudio(
+            captureStopped: true,
+            paused: false,
+            sessionStarted: true,
+            awaitingResumeFrame: false
+        ))
+    }
+
     @MainActor
     func testAudioLevelScaleMapsDecibelsOntoTheMeter() {
         XCTAssertEqual(AudioLevelScale.normalized(decibels: 0), 1, accuracy: 0.0001)

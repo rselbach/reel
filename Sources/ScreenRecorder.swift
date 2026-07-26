@@ -56,6 +56,17 @@ enum RecordingSourceError: LocalizedError, Equatable {
     }
 }
 
+enum RecordingTimeline {
+    static func canAppendAudio(
+        captureStopped: Bool,
+        paused: Bool,
+        sessionStarted: Bool,
+        awaitingResumeFrame: Bool
+    ) -> Bool {
+        !captureStopped && !paused && sessionStarted && !awaitingResumeFrame
+    }
+}
+
 /// Per-recording changes to the persisted settings, chosen in the picker and
 /// applied to one take only.
 struct RecordingOverrides: Equatable {
@@ -342,7 +353,8 @@ class ScreenRecorder: NSObject, ObservableObject {
     // which corrupts AVAssetWriterInput appends (timestamps must be monotonic).
     private let streamOutputQueue = DispatchQueue(label: "com.rselbach.reel.stream-output")
     // Separate serial queue for SCStream system-audio samples so audio
-    // delivery is never blocked behind frame compositing.
+    // delivery is never blocked behind frame compositing. Writer appends are
+    // still serialized with video by frameLock.
     private let systemAudioQueue = DispatchQueue(label: "com.rselbach.reel.system-audio")
 
     // Thread-safe state for frame processing (accessed from ScreenCaptureKit callback queue)
@@ -836,6 +848,8 @@ class ScreenRecorder: NSObject, ObservableObject {
     }
     
     private nonisolated func signalCaptureStop() {
+        // Taking the lock waits for an append already in progress. Once this
+        // returns, finalization can safely mark every writer input finished.
         withFrameLock {
             frameState.isCaptureStopped = true
         }
@@ -1900,26 +1914,27 @@ extension ScreenRecorder: AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptur
     /// Samples arriving before the video session starts are dropped so audio
     /// never leads the first frame.
     private nonisolated func appendAudioSampleBuffer(_ sampleBuffer: CMSampleBuffer) {
-        let writer = withFrameLock { () -> FrameWriter? in
-            guard !frameState.isCaptureStopped, !frameState.isPaused else { return nil }
-            return frameState.frameWriter
-        }
+        withFrameLock {
+            guard var writer = frameState.frameWriter else { return }
+            guard RecordingTimeline.canAppendAudio(
+                captureStopped: frameState.isCaptureStopped,
+                paused: frameState.isPaused,
+                sessionStarted: writer.startTime != nil,
+                awaitingResumeFrame: writer.pauseStartTime != nil
+            ),
+            let audio = writer.audioInput,
+            audio.isReadyForMoreMediaData else {
+                return
+            }
 
-        guard var writer,
-              writer.startTime != nil,
-              let audio = writer.audioInput,
-              audio.isReadyForMoreMediaData
-        else { return }
+            // Audio carries its own timestamps, so the pause offset has to be
+            // applied to the buffer rather than passed alongside it.
+            guard let sampleBuffer = retimed(sampleBuffer, by: writer.pausedDuration) else {
+                logger.warning("Could not retime audio sample for pause offset; dropping it")
+                return
+            }
 
-        // Audio carries its own timestamps, so the pause offset has to be
-        // applied to the buffer rather than passed alongside it.
-        guard let sampleBuffer = retimed(sampleBuffer, by: writer.pausedDuration) else {
-            logger.warning("Could not retime audio sample for pause offset; dropping it")
-            return
-        }
-
-        if !audio.append(sampleBuffer) {
-            withFrameLock {
+            if !audio.append(sampleBuffer) {
                 handleAppendFailure(&writer, context: "Failed to append audio sample")
                 frameState.frameWriter = writer
                 frameState.isCaptureStopped = true
