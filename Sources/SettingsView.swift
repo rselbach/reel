@@ -339,6 +339,18 @@ struct RecordingTab: View {
         .onDisappear { levelMonitor.stop() }
         .onChange(of: shouldMeter) { refreshMetering() }
         .onChange(of: settings.audioDeviceID) { refreshMetering() }
+        .onReceive(
+            NotificationCenter.default.publisher(for: AVCaptureDevice.wasConnectedNotification)
+        ) { _ in
+            settings.objectWillChange.send()
+            refreshMetering()
+        }
+        .onReceive(
+            NotificationCenter.default.publisher(for: AVCaptureDevice.wasDisconnectedNotification)
+        ) { _ in
+            settings.objectWillChange.send()
+            refreshMetering()
+        }
     }
 
     private func refreshMetering() {

@@ -596,7 +596,6 @@ class AppSettings: ObservableObject {
             return AVCaptureDevice.default(for: .audio)
         }
         return availableAudioDevices.first { $0.uniqueID == id }
-            ?? AVCaptureDevice.default(for: .audio)
     }
 
     var availableCameras: [AVCaptureDevice] {
@@ -615,7 +614,6 @@ class AppSettings: ObservableObject {
             return AVCaptureDevice.default(for: .video)
         }
         return availableCameras.first { $0.uniqueID == id }
-            ?? AVCaptureDevice.default(for: .video)
     }
 
     enum WindowBackground: String, StoredAppSetting {

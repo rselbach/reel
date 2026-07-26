@@ -42,6 +42,8 @@ final class AudioLevelMonitor: ObservableObject {
     private var session: AVCaptureSession?
     private var output: AVCaptureAudioDataOutput?
     private var timer: Timer?
+    private var startTask: Task<Void, Never>?
+    private var generation = 0
     private let delegate = DiscardingAudioDelegate()
     private let sessionQueue = DispatchQueue(label: "com.rselbach.reel.level-meter")
 
@@ -50,33 +52,42 @@ final class AudioLevelMonitor: ObservableObject {
 
     func start(device: AVCaptureDevice?) {
         stop()
+        errorMessage = nil
 
         guard let device else {
             errorMessage = AudioLevelText.noInput
             return
         }
 
-        Task { @MainActor in
-            guard await ensureMicrophoneAccess() else {
-                errorMessage = AudioLevelText.accessDenied
+        let generation = self.generation
+        startTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer { self.startTask = nil }
+            guard await self.ensureMicrophoneAccess(),
+                  !Task.isCancelled,
+                  self.generation == generation else {
+                if !Task.isCancelled, self.generation == generation {
+                    self.errorMessage = AudioLevelText.accessDenied
+                }
                 return
             }
-            beginMetering(device: device)
+            self.beginMetering(device: device, generation: generation)
         }
     }
 
     func stop() {
+        generation &+= 1
+        startTask?.cancel()
+        startTask = nil
         timer?.invalidate()
         timer = nil
 
-        // Matches the recorder: capture sessions are started and stopped
-        // synchronously on a dedicated queue.
         let session = self.session
-        sessionQueue.sync {
-            session?.stopRunning()
-        }
         self.session = nil
         output = nil
+        sessionQueue.async {
+            session?.stopRunning()
+        }
         level = 0
         isRunning = false
     }
@@ -94,7 +105,8 @@ final class AudioLevelMonitor: ObservableObject {
         }
     }
 
-    private func beginMetering(device: AVCaptureDevice) {
+    private func beginMetering(device: AVCaptureDevice, generation: Int) {
+        guard self.generation == generation else { return }
         let session = AVCaptureSession()
         let output = AVCaptureAudioDataOutput()
         output.setSampleBufferDelegate(delegate, queue: sessionQueue)
@@ -120,12 +132,34 @@ final class AudioLevelMonitor: ObservableObject {
         self.session = session
         self.output = output
         errorMessage = nil
-        isRunning = true
 
-        sessionQueue.sync {
+        sessionQueue.async { [weak self] in
             session.startRunning()
+            let isRunning = session.isRunning
+            Task { @MainActor in
+                self?.captureSessionDidStart(
+                    session,
+                    generation: generation,
+                    isRunning: isRunning
+                )
+            }
+        }
+    }
+
+    private func captureSessionDidStart(
+        _ session: AVCaptureSession,
+        generation: Int,
+        isRunning: Bool
+    ) {
+        guard self.generation == generation, self.session === session else { return }
+        guard isRunning else {
+            self.session = nil
+            output = nil
+            errorMessage = AudioLevelText.unavailable
+            return
         }
 
+        self.isRunning = true
         let timer = Timer(timeInterval: Self.refreshInterval, repeats: true) { [weak self] _ in
             Task { @MainActor in
                 self?.sampleLevel()

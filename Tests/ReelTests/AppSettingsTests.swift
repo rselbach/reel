@@ -570,6 +570,23 @@ final class AppSettingsTests: XCTestCase {
     }
 
     @MainActor
+    func testUnavailableExplicitDevicesDoNotSilentlyUseDefaults() {
+        let settings = AppSettings.shared
+        let originalAudioID = settings.audioDeviceID
+        let originalCameraID = settings.cameraDeviceID
+        defer {
+            settings.audioDeviceID = originalAudioID
+            settings.cameraDeviceID = originalCameraID
+        }
+
+        settings.audioDeviceID = "com.greendale.missing-microphone"
+        settings.cameraDeviceID = "com.greendale.missing-camera"
+
+        XCTAssertNil(settings.selectedAudioDevice)
+        XCTAssertNil(settings.selectedCamera)
+    }
+
+    @MainActor
     func testFailedRecordingStartReturnsFalseAndReleasesItsOptions() async {
         let recorder = ScreenRecorder()
         recorder.recordingMode = .display

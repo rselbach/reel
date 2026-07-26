@@ -393,6 +393,17 @@ struct RecordingDialog: View {
             .padding(.horizontal, 16)
             .padding(.top, 10)
 
+            if recordAudio,
+               AppSettings.shared.audioSource == .microphone,
+               let error = levelMonitor.errorMessage {
+                Text(error)
+                    .font(.caption)
+                    .foregroundColor(.orange)
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 16)
+            }
+
             HStack {
                 Button("Cancel") {
                     onCancel()
