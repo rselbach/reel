@@ -2052,6 +2052,21 @@ final class AppSettingsTests: XCTestCase {
             50
         )
         XCTAssertEqual(TrimSliderMath.formattedTime(65.4), "1:05.4")
+        XCTAssertEqual(TrimSliderMath.formattedTime(.nan), "0:00.0")
+        XCTAssertEqual(
+            TrimSliderMath.playheadPosition(currentTime: .nan, duration: 10, width: 100),
+            0
+        )
+        XCTAssertEqual(
+            TrimSliderMath.translatedSeekTime(
+                origin: 5,
+                translationWidth: 20,
+                usableWidth: 100,
+                duration: 10
+            ),
+            7,
+            accuracy: 0.001
+        )
     }
 
     func testTrimSliderMathClampsSeekAndMaintainsMinimumRange() {
@@ -2113,6 +2128,33 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertFalse(PostRecordingLogic.hasTrimChanges(duration: 10, trimStart: 0.05, trimEnd: 9.95))
         XCTAssertTrue(PostRecordingLogic.hasTrimChanges(duration: 10, trimStart: 0.2, trimEnd: 10))
         XCTAssertTrue(PostRecordingLogic.hasTrimChanges(duration: 10, trimStart: 0, trimEnd: 9.8))
+    }
+
+    func testPostRecordingLogicExportsOnlyAValidLoadedRange() {
+        XCTAssertTrue(PostRecordingLogic.canExport(
+            duration: 10,
+            trimStart: 0,
+            trimEnd: 10,
+            isExporting: false
+        ))
+        XCTAssertFalse(PostRecordingLogic.canExport(
+            duration: 0,
+            trimStart: 0,
+            trimEnd: 0,
+            isExporting: false
+        ))
+        XCTAssertFalse(PostRecordingLogic.canExport(
+            duration: 10,
+            trimStart: 5,
+            trimEnd: 5,
+            isExporting: false
+        ))
+        XCTAssertFalse(PostRecordingLogic.canExport(
+            duration: 10,
+            trimStart: 0,
+            trimEnd: 10,
+            isExporting: true
+        ))
     }
 
     @MainActor

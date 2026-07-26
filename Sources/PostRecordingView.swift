@@ -46,7 +46,7 @@ enum TrimSliderMath {
     }
 
     static func playheadPosition(currentTime: Double, duration: Double, width: CGFloat) -> CGFloat {
-        guard duration > 0 else { return 0 }
+        guard currentTime.isFinite, duration.isFinite, duration > 0 else { return 0 }
         return (currentTime / duration) * width
     }
 
@@ -81,12 +81,26 @@ enum TrimSliderMath {
     }
 
     static func seekTime(locationX: CGFloat, handleWidth: CGFloat, usableWidth: CGFloat, duration: Double) -> Double {
-        guard usableWidth > 0 else { return 0 }
+        guard usableWidth > 0, duration.isFinite, duration > 0 else { return 0 }
         let newTime = (locationX - handleWidth) / usableWidth * duration
         return min(max(0, newTime), duration)
     }
 
+    static func translatedSeekTime(
+        origin: Double,
+        translationWidth: CGFloat,
+        usableWidth: CGFloat,
+        duration: Double
+    ) -> Double {
+        guard origin.isFinite, usableWidth > 0, duration.isFinite, duration > 0 else {
+            return 0
+        }
+        let newTime = origin + Double(translationWidth / usableWidth) * duration
+        return min(max(0, newTime), duration)
+    }
+
     static func formattedTime(_ seconds: Double) -> String {
+        guard seconds.isFinite else { return "0:00.0" }
         let mins = Int(seconds) / 60
         let secs = Int(seconds) % 60
         let frac = Int((seconds.truncatingRemainder(dividingBy: 1)) * 10)
@@ -139,6 +153,22 @@ enum GIFExport {
 enum PostRecordingLogic {
     static func hasTrimChanges(duration: Double, trimStart: Double, trimEnd: Double) -> Bool {
         duration > 0 && (trimStart > TrimConstants.threshold || trimEnd < duration - TrimConstants.threshold)
+    }
+
+    static func canExport(
+        duration: Double,
+        trimStart: Double,
+        trimEnd: Double,
+        isExporting: Bool
+    ) -> Bool {
+        duration.isFinite &&
+            trimStart.isFinite &&
+            trimEnd.isFinite &&
+            duration > 0 &&
+            trimStart >= 0 &&
+            trimEnd > trimStart &&
+            trimEnd <= duration &&
+            !isExporting
     }
 }
 
@@ -247,19 +277,19 @@ struct PostRecordingView: View {
                     Button(PostRecordingText.saveTrimmed) {
                         Task { await export(preset: AVAssetExportPresetPassthrough, suffix: "trimmed") }
                     }
-                    .disabled(isExporting)
+                    .disabled(!canExport)
                 }
 
                 Button(PostRecordingText.exportSmaller) {
                     Task { await export(preset: AVAssetExportPreset1280x720, suffix: "720p") }
                 }
-                .disabled(isExporting)
+                .disabled(!canExport)
                 .help(PostRecordingText.exportSmallerHelp)
 
                 Button(PostRecordingText.exportGIF) {
                     Task { await exportGIF() }
                 }
-                .disabled(isExporting)
+                .disabled(!canExport)
                 .help(PostRecordingText.exportGIFHelp)
 
                 if isExporting {
@@ -296,12 +326,26 @@ struct PostRecordingView: View {
         PostRecordingLogic.hasTrimChanges(duration: duration, trimStart: trimStart, trimEnd: trimEnd)
     }
 
+    private var canExport: Bool {
+        PostRecordingLogic.canExport(
+            duration: duration,
+            trimStart: trimStart,
+            trimEnd: trimEnd,
+            isExporting: isExporting
+        )
+    }
+
     /// Puts the recording file on the pasteboard so it can be pasted into
     /// Slack, Mail, Finder, etc.
     private func copyToPasteboard() {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
-        pasteboard.writeObjects([videoURL as NSURL])
+        guard pasteboard.writeObjects([videoURL as NSURL]) else {
+            exportError = "Could not copy the recording to the clipboard."
+            justCopied = false
+            return
+        }
+        exportError = nil
         justCopied = true
         Task { @MainActor in
             do {
@@ -357,7 +401,10 @@ struct PostRecordingView: View {
             guard newPlayer != nil else { return }
             Task { @MainActor [self] in
                 guard !isCleanedUp else { return }
-                currentTime = CMTimeGetSeconds(time)
+                let seconds = CMTimeGetSeconds(time)
+                if seconds.isFinite {
+                    currentTime = seconds
+                }
             }
         }
     }
@@ -533,6 +580,7 @@ struct TrimSlider: View {
     private let trackHeight: CGFloat = 50
     @State private var startHandleDragOrigin: Double?
     @State private var endHandleDragOrigin: Double?
+    @State private var playheadDragOrigin: Double?
 
     var body: some View {
         VStack(spacing: 8) {
@@ -635,12 +683,20 @@ struct TrimSlider: View {
                         .gesture(
                             DragGesture()
                                 .onChanged { value in
-                                    onSeek(TrimSliderMath.seekTime(
-                                        locationX: value.location.x,
-                                        handleWidth: handleWidth,
+                                    if playheadDragOrigin == nil {
+                                        playheadDragOrigin = currentTime
+                                    }
+                                    let time = TrimSliderMath.translatedSeekTime(
+                                        origin: playheadDragOrigin ?? currentTime,
+                                        translationWidth: value.translation.width,
                                         usableWidth: usableWidth,
                                         duration: duration
-                                    ))
+                                    )
+                                    currentTime = time
+                                    onSeek(time)
+                                }
+                                .onEnded { _ in
+                                    playheadDragOrigin = nil
                                 }
                         )
                 }
