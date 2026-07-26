@@ -260,6 +260,22 @@ class ScreenRecorder: NSObject, ObservableObject {
         }
     }
 
+    /// Output pixel size of the remembered region with the current resolution
+    /// and codec settings applied.
+    var selectedRegionOutputSize: CGSize? {
+        guard let region = selectedRegion,
+              let display = regionDisplay(for: region) else {
+            return nil
+        }
+        let dimensions = captureDimensions(
+            forRegion: region.rect,
+            on: display,
+            maxHeight: settings.videoResolution.maxHeight,
+            codec: settings.videoCodec
+        )
+        return CGSize(width: dimensions.width, height: dimensions.height)
+    }
+
     /// Re-applies the target remembered from a previous launch. Must run after
     /// shareable content has loaded, since the display, window, or region has
     /// to still exist before it can be selected. Anything that has gone away

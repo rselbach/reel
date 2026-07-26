@@ -34,8 +34,20 @@ enum RegionSelectionLabel {
     static let margin: CGFloat = 8
     static let padding = CGSize(width: 10, height: 5)
 
-    static func text(for rect: CGRect) -> String {
-        "\(Int(rect.width.rounded())) × \(Int(rect.height.rounded()))"
+    @MainActor
+    static func text(
+        for rect: CGRect,
+        backingScaleFactor: CGFloat,
+        maxHeight: CGFloat?,
+        codec: AppSettings.VideoCodec
+    ) -> String {
+        let dimensions = ScreenRecorder.outputDimensions(
+            width: Int(rect.width * backingScaleFactor),
+            height: Int(rect.height * backingScaleFactor),
+            maxHeight: maxHeight,
+            codec: codec
+        )
+        return "\(dimensions.width) × \(dimensions.height) px"
     }
 
     /// Puts the readout just above the selection, flipping to just below when
@@ -361,7 +373,10 @@ final class RegionSelectionWindow: NSWindow {
         isReleasedWhenClosed = false
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
 
-        let view = RegionSelectionView(frame: NSRect(origin: .zero, size: screen.frame.size))
+        let view = RegionSelectionView(
+            frame: NSRect(origin: .zero, size: screen.frame.size),
+            backingScaleFactor: screen.backingScaleFactor
+        )
         view.autoresizingMask = [.width, .height]
         contentView = view
     }
@@ -395,6 +410,7 @@ final class RegionSelectionView: NSView {
     private var handleDragOrigin: CGPoint?
     private var rectAtHandleDragStart: CGRect?
     private var isRatioLocked = false
+    private let backingScaleFactor: CGFloat
     private let hintLabel: NSTextField
 
     private enum Hint {
@@ -402,7 +418,8 @@ final class RegionSelectionView: NSView {
         static let adjust = "Drag to adjust — hold ⇧ for 16:9, Return to record, Esc to cancel"
     }
 
-    override init(frame frameRect: NSRect) {
+    init(frame frameRect: NSRect, backingScaleFactor: CGFloat) {
+        self.backingScaleFactor = backingScaleFactor
         hintLabel = NSTextField(labelWithString: Hint.draw)
         super.init(frame: frameRect)
 
@@ -417,6 +434,7 @@ final class RegionSelectionView: NSView {
     }
 
     required init?(coder: NSCoder) {
+        backingScaleFactor = 1
         hintLabel = NSTextField(labelWithString: "")
         super.init(coder: coder)
     }
@@ -614,7 +632,13 @@ final class RegionSelectionView: NSView {
             .font: NSFont.monospacedDigitSystemFont(ofSize: 12, weight: .medium),
             .foregroundColor: NSColor.white
         ]
-        let dimensions = RegionSelectionLabel.text(for: rect)
+        let settings = AppSettings.shared
+        let dimensions = RegionSelectionLabel.text(
+            for: rect,
+            backingScaleFactor: backingScaleFactor,
+            maxHeight: settings.videoResolution.maxHeight,
+            codec: settings.videoCodec
+        )
         let text = (
             isRatioLocked ? "\(dimensions)  \(RegionAspectConstraint.label)" : dimensions
         ) as NSString

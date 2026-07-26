@@ -433,12 +433,22 @@ final class AppSettingsTests: XCTestCase {
     @MainActor
     func testSelectionReadoutReportsPixelDimensions() {
         XCTAssertEqual(
-            RegionSelectionLabel.text(for: CGRect(x: 10, y: 20, width: 1920, height: 1080)),
-            "1920 × 1080"
+            RegionSelectionLabel.text(
+                for: CGRect(x: 10, y: 20, width: 640, height: 360),
+                backingScaleFactor: 2,
+                maxHeight: nil,
+                codec: .h264
+            ),
+            "1280 × 720 px"
         )
         XCTAssertEqual(
-            RegionSelectionLabel.text(for: CGRect(x: 0, y: 0, width: 640.4, height: 360.6)),
-            "640 × 361"
+            RegionSelectionLabel.text(
+                for: CGRect(x: 0, y: 0, width: 1920, height: 1080),
+                backingScaleFactor: 2,
+                maxHeight: 1080,
+                codec: .h264
+            ),
+            "1920 × 1080 px"
         )
     }
 
@@ -1238,7 +1248,7 @@ final class AppSettingsTests: XCTestCase {
                 mode: .display,
                 displayLabel: "Display 2",
                 windowLabel: nil,
-                regionSize: nil
+                regionOutputSize: nil
             ),
             "Shortcut records: Display 2"
         )
@@ -1247,7 +1257,7 @@ final class AppSettingsTests: XCTestCase {
                 mode: .window,
                 displayLabel: nil,
                 windowLabel: "Spanish 101",
-                regionSize: nil
+                regionOutputSize: nil
             ),
             "Shortcut records: Spanish 101"
         )
@@ -1256,9 +1266,9 @@ final class AppSettingsTests: XCTestCase {
                 mode: .region,
                 displayLabel: nil,
                 windowLabel: nil,
-                regionSize: CGSize(width: 1280, height: 720)
+                regionOutputSize: CGSize(width: 1280, height: 720)
             ),
-            "Shortcut records: Area (1280 × 720)"
+            "Shortcut records: Area (1280 × 720 px)"
         )
     }
 
@@ -1267,13 +1277,28 @@ final class AppSettingsTests: XCTestCase {
         // Nothing selected means the shortcut opens the picker, so promising
         // a target would be a lie.
         XCTAssertNil(
-            QuickRecordSummary.text(mode: .display, displayLabel: nil, windowLabel: nil, regionSize: nil)
+            QuickRecordSummary.text(
+                mode: .display,
+                displayLabel: nil,
+                windowLabel: nil,
+                regionOutputSize: nil
+            )
         )
         XCTAssertNil(
-            QuickRecordSummary.text(mode: .window, displayLabel: "Display 1", windowLabel: nil, regionSize: nil)
+            QuickRecordSummary.text(
+                mode: .window,
+                displayLabel: "Display 1",
+                windowLabel: nil,
+                regionOutputSize: nil
+            )
         )
         XCTAssertNil(
-            QuickRecordSummary.text(mode: .region, displayLabel: nil, windowLabel: nil, regionSize: nil)
+            QuickRecordSummary.text(
+                mode: .region,
+                displayLabel: nil,
+                windowLabel: nil,
+                regionOutputSize: nil
+            )
         )
     }
 
@@ -1281,11 +1306,11 @@ final class AppSettingsTests: XCTestCase {
     func testLastAreaLabelNamesTheRememberedSize() {
         XCTAssertEqual(
             RecordingDialogLogic.lastAreaLabel(size: CGSize(width: 1280, height: 720)),
-            "Use Last Area (1280 × 720)"
+            "Use Last Area (1280 × 720 px)"
         )
         XCTAssertEqual(
             RecordingDialogLogic.lastAreaLabel(size: CGSize(width: 640.4, height: 360.6)),
-            "Use Last Area (640 × 361)"
+            "Use Last Area (640 × 361 px)"
         )
     }
 

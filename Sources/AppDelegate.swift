@@ -82,7 +82,7 @@ enum QuickRecordSummary {
         mode: RecordingMode,
         displayLabel: String?,
         windowLabel: String?,
-        regionSize: CGSize?
+        regionOutputSize: CGSize?
     ) -> String? {
         switch mode {
         case .display:
@@ -90,10 +90,10 @@ enum QuickRecordSummary {
         case .window:
             return windowLabel.map { prefix + $0 }
         case .region:
-            guard let regionSize else { return nil }
-            let width = Int(regionSize.width.rounded())
-            let height = Int(regionSize.height.rounded())
-            return "\(prefix)Area (\(width) × \(height))"
+            guard let regionOutputSize else { return nil }
+            let width = Int(regionOutputSize.width.rounded())
+            let height = Int(regionOutputSize.height.rounded())
+            return "\(prefix)Area (\(width) × \(height) px)"
         }
     }
 }
@@ -788,7 +788,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 availableDisplays: screenRecorder.availableDisplays,
                 availableWindows: screenRecorder.availableWindows,
                 initialSelection: currentRecordingSelection,
-                lastRegionSize: screenRecorder.selectedRegion?.rect.size,
+                lastRegionOutputSize: screenRecorder.selectedRegionOutputSize,
                 initialOverrides: RecordingOverrides(
                     recordAudio: AppSettings.shared.recordAudio,
                     recordCamera: AppSettings.shared.recordCamera
@@ -829,7 +829,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                     windowTitle: window.title
                 )
             },
-            regionSize: screenRecorder.selectedRegion?.rect.size
+            regionOutputSize: screenRecorder.selectedRegionOutputSize
         )
     }
 

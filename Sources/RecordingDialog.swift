@@ -53,7 +53,7 @@ enum RecordingDialogLogic {
     /// Names the remembered area by its size, so it is obvious which area is
     /// about to be reused.
     static func lastAreaLabel(size: CGSize) -> String {
-        "Use Last Area (\(Int(size.width.rounded())) × \(Int(size.height.rounded())))"
+        "Use Last Area (\(Int(size.width.rounded())) × \(Int(size.height.rounded())) px)"
     }
 
     /// Keeps a preselected target only when it is actually listed, so Start
@@ -123,8 +123,8 @@ struct RecordingDialog: View {
     let onStart: (RecordingSelection, RecordingOverrides) -> Void
     let onCancel: () -> Void
     let onRefresh: @MainActor () async -> (displays: [SCDisplay], windows: [SCWindow])
-    /// Size of the remembered area, when there is one to offer reusing.
-    let lastRegionSize: CGSize?
+    /// Output pixel size of the remembered area, when there is one to reuse.
+    let lastRegionOutputSize: CGSize?
 
     @State private var displays: [SCDisplay]
     @State private var windows: [SCWindow]
@@ -142,7 +142,7 @@ struct RecordingDialog: View {
         availableDisplays: [SCDisplay],
         availableWindows: [SCWindow],
         initialSelection: RecordingSelection?,
-        lastRegionSize: CGSize?,
+        lastRegionOutputSize: CGSize?,
         initialOverrides: RecordingOverrides,
         onStart: @escaping (RecordingSelection, RecordingOverrides) -> Void,
         onCancel: @escaping () -> Void,
@@ -151,7 +151,7 @@ struct RecordingDialog: View {
         self.onStart = onStart
         self.onCancel = onCancel
         self.onRefresh = onRefresh
-        self.lastRegionSize = lastRegionSize
+        self.lastRegionOutputSize = lastRegionOutputSize
         _recordAudio = State(initialValue: initialOverrides.recordAudio ?? false)
         _recordCamera = State(initialValue: initialOverrides.recordCamera ?? false)
         _displays = State(initialValue: availableDisplays)
@@ -251,12 +251,12 @@ struct RecordingDialog: View {
                     Label(RecordingDialogText.selectArea, systemImage: "rectangle.dashed")
                 }
 
-                if let lastRegionSize {
+                if let lastRegionOutputSize {
                     Button {
                         start(.lastRegion)
                     } label: {
                         Label(
-                            RecordingDialogLogic.lastAreaLabel(size: lastRegionSize),
+                            RecordingDialogLogic.lastAreaLabel(size: lastRegionOutputSize),
                             systemImage: "arrow.counterclockwise"
                         )
                     }
