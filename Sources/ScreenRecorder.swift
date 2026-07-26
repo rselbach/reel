@@ -439,12 +439,11 @@ class ScreenRecorder: NSObject, ObservableObject {
     }
 
     func requestPermission() async {
-        await updateShareableContent(updatePermissionState: true, failureMessage: "Permission denied")
+        await updateShareableContent(failureMessage: "Permission denied")
     }
 
     func refreshWindows() async {
-        guard hasPermission else { return }
-        await updateShareableContent(updatePermissionState: false, failureMessage: "Failed to refresh windows")
+        await updateShareableContent(failureMessage: "Failed to refresh windows")
     }
 
     /// Re-validates the last recording selection before a hotkey-initiated
@@ -473,7 +472,7 @@ class ScreenRecorder: NSObject, ObservableObject {
         }
     }
 
-    private func updateShareableContent(updatePermissionState: Bool, failureMessage: String) async {
+    private func updateShareableContent(failureMessage: String) async {
         do {
             let content = try await loadShareableContent()
             availableDisplays = content.displays
@@ -482,17 +481,13 @@ class ScreenRecorder: NSObject, ObservableObject {
             if selectedDisplayID == nil {
                 selectedDisplayID = content.displays.first?.displayID
             }
-            if updatePermissionState {
-                hasPermission = true
-                errorMessage = nil
-            }
+            hasPermission = true
+            errorMessage = nil
         } catch {
             availableDisplays = []
             availableWindows = []
             captureExcludedApplications = []
-            if updatePermissionState {
-                hasPermission = false
-            }
+            hasPermission = false
             errorMessage = "\(failureMessage): \(error.localizedDescription)"
         }
     }
