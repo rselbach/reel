@@ -37,6 +37,10 @@ build-app: build
     mkdir -p "{{ app_dir }}/Contents/Frameworks"
     cp .build/release/Reel "{{ app_dir }}/Contents/MacOS/"
     cp Sources/Info.plist "{{ app_dir }}/Contents/Info.plist"
+    latest_tag="$(git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null || true)"
+    if [[ -n "${latest_tag}" ]]; then
+        ./scripts/release/set-version.sh "${latest_tag#v}" "{{ app_dir }}/Contents/Info.plist"
+    fi
     # Inject git commit hash
     GIT_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "dev")
     /usr/libexec/PlistBuddy -c "Set :GitCommit $GIT_COMMIT" "{{ app_dir }}/Contents/Info.plist"
