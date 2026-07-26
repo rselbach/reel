@@ -303,10 +303,6 @@ class ScreenRecorder: NSObject, ObservableObject {
     private var outputURL: URL?
     /// Settings snapshot for the recording currently in flight.
     private var activeOptions: RecordingOptions?
-    /// Applied to the next recording only, then cleared. Set by the picker so
-    /// a take can turn the microphone or camera on or off without changing the
-    /// saved defaults.
-    var pendingOverrides: RecordingOverrides = .none
     private var lowSpaceTimer: Timer?
     private var cursorTimer: Timer?
     private let captureSessionQueue = DispatchQueue(label: "com.rselbach.reel.capture")
@@ -517,7 +513,7 @@ class ScreenRecorder: NSObject, ObservableObject {
         )
     }
 
-    func startRecording() async {
+    func startRecording(overrides: RecordingOverrides = .none) async {
         guard !isRecording, !isStarting else { return }
         isStarting = true
         defer { finishStarting() }
@@ -527,8 +523,7 @@ class ScreenRecorder: NSObject, ObservableObject {
 
         // Snapshot settings once so nothing edited mid-take can change the
         // recording that is already running.
-        let options = RecordingOptions(settings: settings, overrides: pendingOverrides)
-        pendingOverrides = .none
+        let options = RecordingOptions(settings: settings, overrides: overrides)
         activeOptions = options
 
         let filter: SCContentFilter
@@ -1156,8 +1151,8 @@ class ScreenRecorder: NSObject, ObservableObject {
     /// during the countdown instead of doing it on camera. The session is
     /// reused by startRecording, so the camera is only opened once.
     /// Returns false when there is no camera to show.
-    func prepareCameraPreview() async -> Bool {
-        guard pendingOverrides.recordCamera ?? settings.recordCamera else { return false }
+    func prepareCameraPreview(overrides: RecordingOverrides = .none) async -> Bool {
+        guard overrides.recordCamera ?? settings.recordCamera else { return false }
         guard cameraCaptureSession == nil else { return true }
         guard await ensureAVPermission(for: .video) else { return false }
         guard let device = settings.selectedCamera else { return false }

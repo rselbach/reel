@@ -120,13 +120,11 @@ private struct UncheckedSendable<T>: @unchecked Sendable {
 }
 
 struct RecordingDialog: View {
-    let onStart: (RecordingSelection) -> Void
+    let onStart: (RecordingSelection, RecordingOverrides) -> Void
     let onCancel: () -> Void
     let onRefresh: @MainActor () async -> (displays: [SCDisplay], windows: [SCWindow])
     /// Size of the remembered area, when there is one to offer reusing.
     let lastRegionSize: CGSize?
-    /// Applied to this take only, leaving the saved defaults alone.
-    let onOverridesChanged: (RecordingOverrides) -> Void
 
     @State private var displays: [SCDisplay]
     @State private var windows: [SCWindow]
@@ -146,16 +144,14 @@ struct RecordingDialog: View {
         initialSelection: RecordingSelection?,
         lastRegionSize: CGSize?,
         initialOverrides: RecordingOverrides,
-        onStart: @escaping (RecordingSelection) -> Void,
+        onStart: @escaping (RecordingSelection, RecordingOverrides) -> Void,
         onCancel: @escaping () -> Void,
-        onRefresh: @escaping @MainActor () async -> (displays: [SCDisplay], windows: [SCWindow]),
-        onOverridesChanged: @escaping (RecordingOverrides) -> Void
+        onRefresh: @escaping @MainActor () async -> (displays: [SCDisplay], windows: [SCWindow])
     ) {
         self.onStart = onStart
         self.onCancel = onCancel
         self.onRefresh = onRefresh
         self.lastRegionSize = lastRegionSize
-        self.onOverridesChanged = onOverridesChanged
         _recordAudio = State(initialValue: initialOverrides.recordAudio ?? false)
         _recordCamera = State(initialValue: initialOverrides.recordCamera ?? false)
         _displays = State(initialValue: availableDisplays)
@@ -238,7 +234,7 @@ struct RecordingDialog: View {
                                 isSelected: selection == .display(displayID),
                                 isLoading: isLoading,
                                 action: { selection = .display(displayID) },
-                                onDoubleClick: { onStart(.display(displayID)) }
+                                onDoubleClick: { start(.display(displayID)) }
                             )
                             .frame(width: 160)
                         }
@@ -250,14 +246,14 @@ struct RecordingDialog: View {
 
             HStack {
                 Button {
-                    onStart(.region)
+                    start(.region)
                 } label: {
                     Label(RecordingDialogText.selectArea, systemImage: "rectangle.dashed")
                 }
 
                 if let lastRegionSize {
                     Button {
-                        onStart(.lastRegion)
+                        start(.lastRegion)
                     } label: {
                         Label(
                             RecordingDialogLogic.lastAreaLabel(size: lastRegionSize),
@@ -306,7 +302,7 @@ struct RecordingDialog: View {
                                 isSelected: selection == .window(window),
                                 isLoading: isLoading,
                                 action: { selection = .window(window) },
-                                onDoubleClick: { onStart(.window(window)) }
+                                onDoubleClick: { start(.window(window)) }
                             )
                         }
                     }
@@ -349,7 +345,7 @@ struct RecordingDialog: View {
 
                 Button("Start Recording") {
                     if let selection {
-                        onStart(selection)
+                        start(selection)
                     }
                 }
                 .keyboardShortcut(.defaultAction)
@@ -365,10 +361,8 @@ struct RecordingDialog: View {
         .onAppear { refreshMetering() }
         .onDisappear { levelMonitor.stop() }
         .onChange(of: recordAudio) {
-            publishOverrides()
             refreshMetering()
         }
-        .onChange(of: recordCamera) { publishOverrides() }
     }
     
     /// Shown in place of the window grid. Missing displays *and* windows
@@ -405,8 +399,9 @@ struct RecordingDialog: View {
         .padding(.vertical, 16)
     }
 
-    private func publishOverrides() {
-        onOverridesChanged(
+    private func start(_ selection: RecordingSelection) {
+        onStart(
+            selection,
             RecordingOverrides(recordAudio: recordAudio, recordCamera: recordCamera)
         )
     }

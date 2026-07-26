@@ -323,8 +323,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                     return
                 }
 
-                self.screenRecorder.pendingOverrides = .none
-                guard await self.runCountdown() else { return }
+                guard await self.runCountdown(overrides: .none) else { return }
                 await self.screenRecorder.startRecording()
                 self.recordingDidStart()
             }
@@ -758,11 +757,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                     recordAudio: AppSettings.shared.recordAudio,
                     recordCamera: AppSettings.shared.recordCamera
                 ),
-                onStart: { [weak self] selection in
+                onStart: { [weak self] selection, overrides in
                     guard let self else { return }
                     self.recordingDialogWindow?.close()
                     self.recordingDialogWindow = nil
-                    self.startRecording(selection: selection)
+                    self.startRecording(selection: selection, overrides: overrides)
                 },
                 onCancel: { [weak self] in
                     self?.recordingDialogWindow?.close()
@@ -772,9 +771,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                     guard let self else { return ([], []) }
                     await self.screenRecorder.refreshWindows()
                     return (self.screenRecorder.availableDisplays, self.screenRecorder.availableWindows)
-                },
-                onOverridesChanged: { [weak self] overrides in
-                    self?.screenRecorder.pendingOverrides = overrides
                 }
             )
 
@@ -827,7 +823,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
     }
 
-    private func startRecording(selection: RecordingSelection) {
+    private func startRecording(
+        selection: RecordingSelection,
+        overrides: RecordingOverrides
+    ) {
         Task { @MainActor in
             guard !isCountdownActive else { return }
 
@@ -847,19 +846,19 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 screenRecorder.recordingMode = .region
             }
 
-            guard await runCountdown() else { return }
-            await screenRecorder.startRecording()
+            guard await runCountdown(overrides: overrides) else { return }
+            await screenRecorder.startRecording(overrides: overrides)
             recordingDidStart()
         }
     }
     
     /// Runs the pre-recording countdown (if enabled) and returns true when
     /// recording should start.
-    private func runCountdown() async -> Bool {
+    private func runCountdown(overrides: RecordingOverrides) async -> Bool {
         guard !isCountdownActive else { return false }
         isCountdownActive = true
 
-        if await screenRecorder.prepareCameraPreview() {
+        if await screenRecorder.prepareCameraPreview(overrides: overrides) {
             showCameraOverlayForCountdown()
         }
 
