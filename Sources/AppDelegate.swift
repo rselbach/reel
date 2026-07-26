@@ -666,6 +666,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
            let url = screenRecorder.lastRecordedURL {
             showPreview(for: url)
         }
+        if let message = screenRecorder.errorMessage {
+            showErrorAlert(title: AppMenuText.recordingWarning, message: message)
+        }
     }
 
     /// Runs the "Ask each time" save panel on the recorder's behalf.

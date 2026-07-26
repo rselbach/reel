@@ -18,12 +18,20 @@ private enum RecordingConstants {
 }
 
 enum RecordingFinalizationLogic {
+    static func destination(tempURL: URL, requestedURL: URL?) -> URL {
+        requestedURL ?? tempURL
+    }
+
     static func shouldRevealInFinder(openFinderAfterRecording: Bool, showPreviewAfterRecording: Bool) -> Bool {
         openFinderAfterRecording && !showPreviewAfterRecording
     }
 
     static func finderRevealFailureMessage(for url: URL) -> String {
         "Recording saved, but Finder could not reveal it: \(url.path())"
+    }
+
+    static func retainedRecordingMessage(for url: URL, saveError: Error) -> String {
+        "Could not save to the chosen location. The recording was kept at \(url.path()): \(saveError.localizedDescription)"
     }
 }
 
@@ -203,9 +211,8 @@ class ScreenRecorder: NSObject, ObservableObject {
     var onPauseStateChanged: ((Bool) -> Void)?
 
     /// Asks where to put a finished recording when the user chose "Ask each
-    /// time". Returning nil discards it. The recorder owns the temporary
-    /// file's lifetime but never presents UI itself; leaving this unset keeps
-    /// the recording at its default location rather than losing it.
+    /// time". Returning nil keeps it at its default location. The recorder
+    /// owns the temporary file's lifetime but never presents UI itself.
     var requestSaveDestination: (@MainActor (SaveDestinationRequest) async -> URL?)?
 
     var countdownTargetFrame: CGRect? {
@@ -1236,21 +1243,28 @@ class ScreenRecorder: NSObject, ObservableObject {
                 suggestedName: tempURL.lastPathComponent,
                 directory: options.outputDirectory
             )
-            guard let url = await requestSaveDestination(request) else {
-                logger.info("Save cancelled; discarding temporary recording")
-                discardTempRecording(tempURL)
-                lastRecordedURL = nil
-                errorMessage = nil
-                return
-            }
-
-            finalURL = url
-            do {
-                replacementWarning = try moveTempRecording(from: tempURL, to: finalURL)
-            } catch {
-                errorMessage = "Failed to save: \(error.localizedDescription)"
-                discardTempRecording(tempURL)
-                return
+            let requestedURL = await requestSaveDestination(request)
+            finalURL = RecordingFinalizationLogic.destination(
+                tempURL: tempURL,
+                requestedURL: requestedURL
+            )
+            if requestedURL != nil {
+                do {
+                    replacementWarning = try moveTempRecording(from: tempURL, to: finalURL)
+                } catch {
+                    guard FileManager.default.fileExists(atPath: tempURL.path()) else {
+                        errorMessage = "Failed to save recording: \(error.localizedDescription)"
+                        lastRecordedURL = nil
+                        return
+                    }
+                    finalURL = tempURL
+                    errorMessage = RecordingFinalizationLogic.retainedRecordingMessage(
+                        for: tempURL,
+                        saveError: error
+                    )
+                }
+            } else {
+                logger.info("Save cancelled; keeping recording at \(tempURL.path(), privacy: .public)")
             }
         }
 
@@ -1359,7 +1373,7 @@ class ScreenRecorder: NSObject, ObservableObject {
         if hasCapturedFrames {
             await finalizeRecording()
             if lastRecordedURL != nil {
-                errorMessage = savedMessage
+                errorMessage = errorMessage.map { "\(savedMessage)\n\($0)" } ?? savedMessage
             }
         } else {
             assetWriter?.cancelWriting()

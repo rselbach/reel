@@ -1597,11 +1597,45 @@ final class AppSettingsTests: XCTestCase {
         ))
     }
 
+    func testCancelledSaveKeepsTheCompletedRecordingAtItsDefaultDestination() {
+        let tempURL = URL(fileURLWithPath: "/tmp/Greendale/Reel-Test.mp4")
+        let selectedURL = URL(fileURLWithPath: "/tmp/Troy/Reel-Test.mp4")
+
+        XCTAssertEqual(
+            RecordingFinalizationLogic.destination(tempURL: tempURL, requestedURL: nil),
+            tempURL
+        )
+        XCTAssertEqual(
+            RecordingFinalizationLogic.destination(
+                tempURL: tempURL,
+                requestedURL: selectedURL
+            ),
+            selectedURL
+        )
+    }
+
     func testRecordingFinalizationFinderRevealFailureMessageIncludesPath() {
         let url = URL(fileURLWithPath: "/tmp/Reel-Test.mp4")
         XCTAssertEqual(
             RecordingFinalizationLogic.finderRevealFailureMessage(for: url),
             "Recording saved, but Finder could not reveal it: /tmp/Reel-Test.mp4"
+        )
+    }
+
+    func testRecordingFinalizationExplainsWhereAFailedSaveWasRetained() {
+        let url = URL(fileURLWithPath: "/tmp/Greendale/Reel-Test.mp4")
+        let error = NSError(
+            domain: "Greendale",
+            code: 1,
+            userInfo: [NSLocalizedDescriptionKey: "Destination is read-only"]
+        )
+
+        XCTAssertEqual(
+            RecordingFinalizationLogic.retainedRecordingMessage(for: url, saveError: error),
+            """
+            Could not save to the chosen location. The recording was kept at \
+            /tmp/Greendale/Reel-Test.mp4: Destination is read-only
+            """
         )
     }
 
