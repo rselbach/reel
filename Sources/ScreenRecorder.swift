@@ -553,6 +553,48 @@ class ScreenRecorder: NSObject, ObservableObject {
         )
     }
 
+    /// Fits window content so the padded framing canvas, not just the source
+    /// pixels, remains within the encoder's dimension ceiling.
+    static func framedContentDimensionsFitting(
+        width: Int,
+        height: Int,
+        maxSize: CGSize
+    ) -> (width: Int, height: Int) {
+        guard width > 0, height > 0 else { return (width, height) }
+
+        let canvasSize = WindowFrameLayout.canvasSize(
+            contentSize: CGSize(width: width, height: height)
+        )
+        if canvasSize.width <= maxSize.width, canvasSize.height <= maxSize.height {
+            return (width, height)
+        }
+
+        var lowerScale: CGFloat = 0
+        var upperScale: CGFloat = 1
+        var best = (width: 2, height: 2)
+
+        for _ in 0..<32 {
+            let scale = (lowerScale + upperScale) / 2
+            let candidate = dimensionsFitting(
+                width: max(2, Int((CGFloat(width) * scale).rounded(.down))),
+                height: max(2, Int((CGFloat(height) * scale).rounded(.down))),
+                maxSize: maxSize
+            )
+            let candidateCanvas = WindowFrameLayout.canvasSize(
+                contentSize: CGSize(width: candidate.width, height: candidate.height)
+            )
+            if candidateCanvas.width <= maxSize.width,
+               candidateCanvas.height <= maxSize.height {
+                best = candidate
+                lowerScale = scale
+            } else {
+                upperScale = scale
+            }
+        }
+
+        return best
+    }
+
     @discardableResult
     func startRecording(overrides: RecordingOverrides = .none) async -> Bool {
         guard !isRecording, !isStarting else { return false }
@@ -568,8 +610,8 @@ class ScreenRecorder: NSObject, ObservableObject {
         activeOptions = options
 
         let filter: SCContentFilter
-        let captureWidth: Int
-        let captureHeight: Int
+        var captureWidth: Int
+        var captureHeight: Int
 
         switch recordingMode {
         case .display:
@@ -614,6 +656,20 @@ class ScreenRecorder: NSObject, ObservableObject {
         // disk destroys the whole take. Refuse up front instead.
         if let shortfall = diskSpaceShortfall(options: options) {
             return failStart(shortfall)
+        }
+
+        if recordingMode == .window, options.frameWindowRecordings {
+            var framedMaxSize = options.videoCodec.maxDimensions
+            if let maxHeight = options.resolutionMaxHeight {
+                framedMaxSize.height = min(framedMaxSize.height, maxHeight)
+            }
+            let dimensions = Self.framedContentDimensionsFitting(
+                width: captureWidth,
+                height: captureHeight,
+                maxSize: framedMaxSize
+            )
+            captureWidth = dimensions.width
+            captureHeight = dimensions.height
         }
 
         // Framing draws the window inset on a larger canvas, so the file is
@@ -1650,9 +1706,15 @@ class ScreenRecorder: NSObject, ObservableObject {
         return dest
     }
 
-    private nonisolated func handleAppendFailure(_ writer: inout FrameWriter, context: String) {
+    private nonisolated func handleAppendFailure(
+        _ writer: inout FrameWriter,
+        context: String,
+        reason explicitReason: String? = nil
+    ) {
         writer.hasWriteFailure = true
-        let reason = writer.assetWriter.error?.localizedDescription ?? "Unknown writer error"
+        let reason = explicitReason
+            ?? writer.assetWriter.error?.localizedDescription
+            ?? "Unknown writer error"
         logger.error("\(context, privacy: .public): \(reason, privacy: .public)")
         Task { @MainActor in
             await stopAfterWriteFailure(context: context, reason: reason)
@@ -1817,6 +1879,20 @@ extension ScreenRecorder: SCStreamOutput {
                 ) {
                     frameToWrite = composited
                     usedCompositedBuffer = true
+                } else if !FrameFallbackLogic.canAppendRawFrame(
+                    hasWindowFrame: snapshot.windowFrame != nil
+                ) {
+                    withFrameLock {
+                        guard var writer = frameState.frameWriter else { return }
+                        handleAppendFailure(
+                            &writer,
+                            context: "Failed to composite framed window",
+                            reason: "The compositor did not produce an output frame"
+                        )
+                        frameState.frameWriter = writer
+                        frameState.isCaptureStopped = true
+                    }
+                    return
                 } else {
                     logger.warning("Frame compositing failed, using screen-only frame")
                 }

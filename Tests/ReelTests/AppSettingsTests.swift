@@ -636,6 +636,47 @@ final class AppSettingsTests: XCTestCase {
     }
 
     @MainActor
+    func testFramedWindowContentFitsTheFinalCanvasWithinCodecLimits() {
+        let dimensions = ScreenRecorder.framedContentDimensionsFitting(
+            width: 4096,
+            height: 2304,
+            maxSize: h264Limits
+        )
+        let canvas = WindowFrameLayout.canvasSize(
+            contentSize: CGSize(width: dimensions.width, height: dimensions.height)
+        )
+
+        XCTAssertLessThan(dimensions.width, 4096)
+        XCTAssertLessThanOrEqual(canvas.width, h264Limits.width)
+        XCTAssertLessThanOrEqual(canvas.height, h264Limits.height)
+        XCTAssertEqual(dimensions.width % 2, 0)
+        XCTAssertEqual(dimensions.height % 2, 0)
+        XCTAssertEqual(
+            Double(dimensions.width) / Double(dimensions.height),
+            16.0 / 9.0,
+            accuracy: 0.01
+        )
+
+        let p1080Dimensions = ScreenRecorder.framedContentDimensionsFitting(
+            width: 1920,
+            height: 1080,
+            maxSize: CGSize(width: h264Limits.width, height: 1080)
+        )
+        let p1080Canvas = WindowFrameLayout.canvasSize(
+            contentSize: CGSize(
+                width: p1080Dimensions.width,
+                height: p1080Dimensions.height
+            )
+        )
+        XCTAssertLessThanOrEqual(p1080Canvas.height, 1080)
+    }
+
+    func testRawFrameFallbackIsRejectedForFramedOutput() {
+        XCTAssertTrue(FrameFallbackLogic.canAppendRawFrame(hasWindowFrame: false))
+        XCTAssertFalse(FrameFallbackLogic.canAppendRawFrame(hasWindowFrame: true))
+    }
+
+    @MainActor
     func testFramingAppliesOnlyToWindowRecordings() {
         var options = RecordingOptions(settings: AppSettings.shared)
         options.frameWindowRecordings = true

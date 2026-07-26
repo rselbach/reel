@@ -110,6 +110,14 @@ enum WindowFrameLayout {
     }
 }
 
+enum FrameFallbackLogic {
+    /// A raw screen buffer has the writer's dimensions unless framing added a
+    /// larger canvas. In the framed case, it is not a compatible fallback.
+    static func canAppendRawFrame(hasWindowFrame: Bool) -> Bool {
+        !hasWindowFrame
+    }
+}
+
 enum CursorHighlightLayout {
     /// Highlight diameter as a fraction of the frame height, so it reads the
     /// same whether the recording is 720p or native Retina.
