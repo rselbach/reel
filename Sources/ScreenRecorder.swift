@@ -67,6 +67,16 @@ enum RecordingTimeline {
     }
 }
 
+enum CaptureExclusionLogic {
+    static func isCurrentApplication(
+        bundleID: String?,
+        currentBundleID: String?
+    ) -> Bool {
+        guard let currentBundleID else { return false }
+        return bundleID == currentBundleID
+    }
+}
+
 /// Per-recording changes to the persisted settings, chosen in the picker and
 /// applied to one take only.
 struct RecordingOverrides: Equatable {
@@ -221,6 +231,7 @@ class ScreenRecorder: NSObject, ObservableObject {
     @Published var hasPermission = false
     @Published var availableDisplays: [SCDisplay] = []
     @Published var availableWindows: [SCWindow] = []
+    private(set) var captureExcludedApplications: [SCRunningApplication] = []
     @Published var selectedDisplayID: CGDirectDisplayID?
     @Published var selectedWindow: SCWindow?
     @Published var selectedRegion: RecordingRegion?
@@ -446,6 +457,7 @@ class ScreenRecorder: NSObject, ObservableObject {
             let content = try await loadShareableContent()
             availableDisplays = content.displays
             availableWindows = content.windows
+            captureExcludedApplications = content.excludedApplications
             if selectedDisplayID == nil {
                 selectedDisplayID = content.displays.first?.displayID
             }
@@ -456,6 +468,7 @@ class ScreenRecorder: NSObject, ObservableObject {
         } catch {
             availableDisplays = []
             availableWindows = []
+            captureExcludedApplications = []
             if updatePermissionState {
                 hasPermission = false
             }
@@ -463,7 +476,11 @@ class ScreenRecorder: NSObject, ObservableObject {
         }
     }
 
-    private func loadShareableContent() async throws -> (displays: [SCDisplay], windows: [SCWindow]) {
+    private func loadShareableContent() async throws -> (
+        displays: [SCDisplay],
+        windows: [SCWindow],
+        excludedApplications: [SCRunningApplication]
+    ) {
         let content = try await SCShareableContent.excludingDesktopWindows(
             false,
             onScreenWindowsOnly: true
@@ -474,7 +491,13 @@ class ScreenRecorder: NSObject, ObservableObject {
             window.frame.height > RecordingConstants.minimumWindowSize &&
             window.owningApplication?.bundleIdentifier != Bundle.main.bundleIdentifier
         }
-        return (content.displays, windows)
+        let excludedApplications = content.applications.filter {
+            CaptureExclusionLogic.isCurrentApplication(
+                bundleID: $0.bundleIdentifier,
+                currentBundleID: Bundle.main.bundleIdentifier
+            )
+        }
+        return (content.displays, windows, excludedApplications)
     }
 
     private func captureDimensions(for display: SCDisplay, maxHeight: CGFloat?, codec: AppSettings.VideoCodec) -> (width: Int, height: Int) {
@@ -634,7 +657,11 @@ class ScreenRecorder: NSObject, ObservableObject {
             guard let display = selectedDisplay else {
                 return failStart("No display selected")
             }
-            filter = SCContentFilter(display: display, excludingWindows: [])
+            filter = SCContentFilter(
+                display: display,
+                excludingApplications: captureExcludedApplications,
+                exceptingWindows: []
+            )
             let dimensions = captureDimensions(for: display, maxHeight: options.resolutionMaxHeight, codec: options.videoCodec)
             captureWidth = dimensions.width
             captureHeight = dimensions.height
@@ -653,7 +680,11 @@ class ScreenRecorder: NSObject, ObservableObject {
                   let display = regionDisplay(for: region) else {
                 return failStart("No region selected")
             }
-            filter = SCContentFilter(display: display, excludingWindows: [])
+            filter = SCContentFilter(
+                display: display,
+                excludingApplications: captureExcludedApplications,
+                exceptingWindows: []
+            )
             let dimensions = captureDimensions(
                 forRegion: region.rect,
                 on: display,

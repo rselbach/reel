@@ -122,12 +122,17 @@ private struct UncheckedSendable<T>: @unchecked Sendable {
 struct RecordingDialog: View {
     let onStart: (RecordingSelection, RecordingOverrides) -> Void
     let onCancel: () -> Void
-    let onRefresh: @MainActor () async -> (displays: [SCDisplay], windows: [SCWindow])
+    let onRefresh: @MainActor () async -> (
+        displays: [SCDisplay],
+        windows: [SCWindow],
+        excludedApplications: [SCRunningApplication]
+    )
     /// Output pixel size of the remembered area, when there is one to reuse.
     let lastRegionOutputSize: CGSize?
 
     @State private var displays: [SCDisplay]
     @State private var windows: [SCWindow]
+    @State private var excludedApplications: [SCRunningApplication]
     @State private var selection: RecordingSelection?
     @State private var displayThumbnails: [Int: NSImage] = [:]
     @State private var windowThumbnails: [CGWindowID: NSImage] = [:]
@@ -141,12 +146,17 @@ struct RecordingDialog: View {
     init(
         availableDisplays: [SCDisplay],
         availableWindows: [SCWindow],
+        excludedApplications: [SCRunningApplication],
         initialSelection: RecordingSelection?,
         lastRegionOutputSize: CGSize?,
         initialOverrides: RecordingOverrides,
         onStart: @escaping (RecordingSelection, RecordingOverrides) -> Void,
         onCancel: @escaping () -> Void,
-        onRefresh: @escaping @MainActor () async -> (displays: [SCDisplay], windows: [SCWindow])
+        onRefresh: @escaping @MainActor () async -> (
+            displays: [SCDisplay],
+            windows: [SCWindow],
+            excludedApplications: [SCRunningApplication]
+        )
     ) {
         self.onStart = onStart
         self.onCancel = onCancel
@@ -156,6 +166,7 @@ struct RecordingDialog: View {
         _recordCamera = State(initialValue: initialOverrides.recordCamera ?? false)
         _displays = State(initialValue: availableDisplays)
         _windows = State(initialValue: availableWindows)
+        _excludedApplications = State(initialValue: excludedApplications)
         _selection = State(initialValue: RecordingDialogLogic.validPreselection(
             initialSelection,
             displayIDs: availableDisplays.map(\.displayID),
@@ -428,6 +439,7 @@ struct RecordingDialog: View {
         let content = await onRefresh()
         displays = content.displays
         windows = content.windows
+        excludedApplications = content.excludedApplications
         displayThumbnails = [:]
         windowThumbnails = [:]
         // Replace a selected window with the refreshed ScreenCaptureKit
@@ -449,12 +461,17 @@ struct RecordingDialog: View {
     /// captures overlap instead of loading one by one.
     private func loadThumbnails() async {
         let size = thumbnailSize
+        let boxedExcludedApplications = UncheckedSendable(value: excludedApplications)
 
         await withTaskGroup(of: UncheckedSendable<(Int, NSImage)>?.self) { group in
             for (index, display) in displays.enumerated() {
                 let boxed = UncheckedSendable(value: display)
                 group.addTask {
-                    guard let image = await ThumbnailCapture.captureDisplay(boxed.value, maxSize: size) else {
+                    guard let image = await ThumbnailCapture.captureDisplay(
+                        boxed.value,
+                        excludingApplications: boxedExcludedApplications.value,
+                        maxSize: size
+                    ) else {
                         return nil
                     }
                     return UncheckedSendable(value: (index, image))

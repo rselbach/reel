@@ -20,8 +20,16 @@ enum ThumbnailSizing {
 // concurrent tasks and SCScreenshotManager is safe to call off the main
 // thread.
 class ThumbnailCapture {
-    static func captureDisplay(_ display: SCDisplay, maxSize: CGSize = CGSize(width: 320, height: 180)) async -> NSImage? {
-        let filter = SCContentFilter(display: display, excludingWindows: [])
+    static func captureDisplay(
+        _ display: SCDisplay,
+        excludingApplications: [SCRunningApplication],
+        maxSize: CGSize = CGSize(width: 320, height: 180)
+    ) async -> NSImage? {
+        let filter = SCContentFilter(
+            display: display,
+            excludingApplications: excludingApplications,
+            exceptingWindows: []
+        )
         let sourceSize = CGSize(width: CGFloat(display.width), height: CGFloat(display.height))
         return await capture(filter: filter, sourceSize: sourceSize, maxSize: maxSize)
     }

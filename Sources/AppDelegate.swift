@@ -798,6 +798,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             let dialogView = RecordingDialog(
                 availableDisplays: screenRecorder.availableDisplays,
                 availableWindows: screenRecorder.availableWindows,
+                excludedApplications: screenRecorder.captureExcludedApplications,
                 initialSelection: currentRecordingSelection,
                 lastRegionOutputSize: screenRecorder.selectedRegionOutputSize,
                 initialOverrides: RecordingOverrides(
@@ -815,9 +816,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                     self?.recordingDialogWindow = nil
                 },
                 onRefresh: { [weak self] in
-                    guard let self else { return ([], []) }
+                    guard let self else { return ([], [], []) }
                     await self.screenRecorder.refreshWindows()
-                    return (self.screenRecorder.availableDisplays, self.screenRecorder.availableWindows)
+                    return (
+                        self.screenRecorder.availableDisplays,
+                        self.screenRecorder.availableWindows,
+                        self.screenRecorder.captureExcludedApplications
+                    )
                 }
             )
 

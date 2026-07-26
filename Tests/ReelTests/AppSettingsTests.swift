@@ -1846,6 +1846,21 @@ final class AppSettingsTests: XCTestCase {
         ))
     }
 
+    func testCaptureExcludesOnlyReelsOwnApplication() {
+        XCTAssertTrue(CaptureExclusionLogic.isCurrentApplication(
+            bundleID: "com.rselbach.reel",
+            currentBundleID: "com.rselbach.reel"
+        ))
+        XCTAssertFalse(CaptureExclusionLogic.isCurrentApplication(
+            bundleID: "com.greendale.study",
+            currentBundleID: "com.rselbach.reel"
+        ))
+        XCTAssertFalse(CaptureExclusionLogic.isCurrentApplication(
+            bundleID: "com.rselbach.reel",
+            currentBundleID: nil
+        ))
+    }
+
     func testFileReplacementMovesNewFileIntoEmptyDestination() throws {
         let directory = try makeTemporaryDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
