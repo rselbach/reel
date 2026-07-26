@@ -21,6 +21,9 @@ enum HotkeyRegistrationText {
     static func message(shortcut: String) -> String {
         "Could not register \(shortcut). It may already be used by macOS or another app."
     }
+
+    static let defaultsMessage =
+        "Could not restore the default shortcuts. One may already be used by macOS or another app."
 }
 
 enum RecentRecordingsLogic {
@@ -333,6 +336,10 @@ class AppSettings: ObservableObject {
         }
     }
 
+    var usesDefaultHotkeys: Bool {
+        HotkeyAction.allCases.allSatisfy { hotkey(for: $0) == $0.defaultCombo }
+    }
+
     /// Assigns a shortcut, refusing combinations already taken by another
     /// action rather than letting the second registration fail silently.
     func setHotkey(
@@ -361,6 +368,25 @@ class AppSettings: ObservableObject {
         case .discardRecording: discardHotkey = combo
         case .pauseRecording: pauseHotkey = combo
         }
+    }
+
+    func resetHotkeys(
+        register: ([HotkeyAction: HotkeyCombo]) -> Bool = {
+            HotkeyManager.shared.updateHotkeys($0)
+        }
+    ) {
+        let defaults = Dictionary(
+            uniqueKeysWithValues: HotkeyAction.allCases.map { ($0, $0.defaultCombo) }
+        )
+        guard register(defaults) else {
+            hotkeyError = HotkeyRegistrationText.defaultsMessage
+            return
+        }
+
+        recordingHotkey = HotkeyAction.toggleRecording.defaultCombo
+        discardHotkey = HotkeyAction.discardRecording.defaultCombo
+        pauseHotkey = HotkeyAction.pauseRecording.defaultCombo
+        hotkeyError = nil
     }
 
     private func persistHotkey(_ combo: HotkeyCombo, key: String) {
@@ -779,7 +805,7 @@ class AppSettings: ObservableObject {
         return closest
     }
 
-    struct HotkeyCombo: Codable, Equatable {
+    struct HotkeyCombo: Codable, Hashable {
         var keyCode: UInt16
         var modifiers: UInt32
 

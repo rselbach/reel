@@ -41,6 +41,7 @@ enum SettingsText {
     static let text = "Text:"
     static let pressShortcut = "Press shortcut..."
     static let shortcutHelp = "Press the button and type your desired shortcut."
+    static let restoreDefaultShortcuts = "Restore Default Shortcuts"
     static let defaultDevice = "Default"
     static let unavailableDevice = "Unavailable device"
 }
@@ -395,6 +396,11 @@ struct ShortcutsTab: View {
                     .foregroundColor(.red)
                     .lineLimit(2)
             }
+
+            Button(SettingsText.restoreDefaultShortcuts) {
+                settings.resetHotkeys()
+            }
+            .disabled(settings.usesDefaultHotkeys)
 
             Text(SettingsText.shortcutHelp)
                 .font(.caption)

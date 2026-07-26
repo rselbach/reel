@@ -947,13 +947,7 @@ final class AppSettingsTests: XCTestCase {
 
     @MainActor
     func testDefaultShortcutsDoNotCollide() {
-        let defaults = HotkeyAction.allCases.map { action -> AppSettings.HotkeyCombo in
-            switch action {
-            case .toggleRecording: return .default
-            case .discardRecording: return .discardDefault
-            case .pauseRecording: return .pauseDefault
-            }
-        }
+        let defaults = HotkeyAction.allCases.map(\.defaultCombo)
         XCTAssertEqual(Set(defaults.map(\.displayString)).count, defaults.count)
         XCTAssertTrue(defaults.allSatisfy(\.isUsableGlobalShortcut))
     }
@@ -1001,6 +995,56 @@ final class AppSettingsTests: XCTestCase {
             settings.hotkeyError,
             "Could not register ⌘F12. It may already be used by macOS or another app."
         )
+    }
+
+    @MainActor
+    func testRestoringDefaultHotkeysRegistersAndSavesAllActions() {
+        let settings = AppSettings.shared
+        let originals = HotkeyAction.allCases.map { ($0, settings.hotkey(for: $0)) }
+        defer {
+            settings.recordingHotkey = originals[0].1
+            settings.discardHotkey = originals[1].1
+            settings.pauseHotkey = originals[2].1
+            settings.hotkeyError = nil
+        }
+
+        settings.recordingHotkey = .init(keyCode: KeyCode.f1, modifiers: 0x100000)
+        settings.discardHotkey = .init(keyCode: KeyCode.f2, modifiers: 0x100000)
+        settings.pauseHotkey = .init(keyCode: KeyCode.f3, modifiers: 0x100000)
+        var registered: [HotkeyAction: AppSettings.HotkeyCombo] = [:]
+
+        settings.resetHotkeys {
+            registered = $0
+            return true
+        }
+
+        XCTAssertTrue(settings.usesDefaultHotkeys)
+        XCTAssertEqual(
+            registered,
+            Dictionary(uniqueKeysWithValues: HotkeyAction.allCases.map { ($0, $0.defaultCombo) })
+        )
+    }
+
+    @MainActor
+    func testFailedDefaultHotkeyRestoreLeavesEveryShortcutUntouched() {
+        let settings = AppSettings.shared
+        let originals = HotkeyAction.allCases.map { ($0, settings.hotkey(for: $0)) }
+        defer {
+            settings.recordingHotkey = originals[0].1
+            settings.discardHotkey = originals[1].1
+            settings.pauseHotkey = originals[2].1
+            settings.hotkeyError = nil
+        }
+
+        settings.recordingHotkey = .init(keyCode: KeyCode.f1, modifiers: 0x100000)
+        settings.discardHotkey = .init(keyCode: KeyCode.f2, modifiers: 0x100000)
+        settings.pauseHotkey = .init(keyCode: KeyCode.f3, modifiers: 0x100000)
+        let customized = HotkeyAction.allCases.map { settings.hotkey(for: $0) }
+
+        settings.resetHotkeys { _ in false }
+
+        XCTAssertEqual(HotkeyAction.allCases.map { settings.hotkey(for: $0) }, customized)
+        XCTAssertEqual(settings.hotkeyError, HotkeyRegistrationText.defaultsMessage)
     }
 
     @MainActor
@@ -1159,6 +1203,7 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(SettingsText.defaultDevice, "Default")
         XCTAssertEqual(SettingsText.unavailableDevice, "Unavailable device")
         XCTAssertEqual(SettingsText.pressShortcut, "Press shortcut...")
+        XCTAssertEqual(SettingsText.restoreDefaultShortcuts, "Restore Default Shortcuts")
     }
 
     @MainActor

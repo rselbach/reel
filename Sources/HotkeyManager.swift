@@ -32,6 +32,14 @@ enum HotkeyAction: UInt32, CaseIterable {
         case .pauseRecording: return "Pause and resume:"
         }
     }
+
+    var defaultCombo: AppSettings.HotkeyCombo {
+        switch self {
+        case .toggleRecording: return .default
+        case .discardRecording: return .discardDefault
+        case .pauseRecording: return .pauseDefault
+        }
+    }
 }
 
 /// Carbon event handler; must be a C function, so it trampolines back into
@@ -118,6 +126,44 @@ class HotkeyManager {
                 _ = register(action)
             }
             return false
+        }
+        return true
+    }
+
+    /// Replaces every shortcut as one transaction so swaps and default resets
+    /// cannot leave only some actions registered.
+    func updateHotkeys(_ replacements: [HotkeyAction: AppSettings.HotkeyCombo]) -> Bool {
+        guard HotkeyAction.allCases.allSatisfy({
+            replacements[$0]?.isUsableGlobalShortcut == true
+        }) else {
+            return false
+        }
+
+        let replacementCombos = HotkeyAction.allCases.compactMap { replacements[$0] }
+        guard Set(replacementCombos).count == replacementCombos.count else {
+            return false
+        }
+
+        let previousCombos = combos
+        for (action, combo) in replacements {
+            combos[action] = combo
+        }
+        guard isStarted else { return true }
+
+        for action in HotkeyAction.allCases {
+            unregister(action)
+        }
+        for action in HotkeyAction.allCases {
+            guard register(action, notifyOnFailure: false) else {
+                for registeredAction in HotkeyAction.allCases {
+                    unregister(registeredAction)
+                }
+                combos = previousCombos
+                for previousAction in HotkeyAction.allCases where previousCombos[previousAction] != nil {
+                    _ = register(previousAction)
+                }
+                return false
+            }
         }
         return true
     }
