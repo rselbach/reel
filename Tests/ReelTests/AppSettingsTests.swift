@@ -1818,6 +1818,21 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertFalse(StatusItemClickLogic.shouldStopRecording(isRecording: false, isRightClick: true))
     }
 
+    func testRecordingToggleCancelsAnInFlightStartBeforeStartingAnother() {
+        XCTAssertEqual(
+            RecordingToggleLogic.action(isRecording: false, hasPendingStart: false),
+            .start
+        )
+        XCTAssertEqual(
+            RecordingToggleLogic.action(isRecording: false, hasPendingStart: true),
+            .cancelPendingStart
+        )
+        XCTAssertEqual(
+            RecordingToggleLogic.action(isRecording: true, hasPendingStart: true),
+            .stop
+        )
+    }
+
     func testRecordingElapsedFormatCoversMinutesAndHours() {
         XCTAssertEqual(RecordingElapsedFormat.string(seconds: 0), "0:00")
         XCTAssertEqual(RecordingElapsedFormat.string(seconds: 42), "0:42")

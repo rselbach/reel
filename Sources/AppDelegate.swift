@@ -57,6 +57,21 @@ enum StatusItemClickLogic {
     }
 }
 
+enum RecordingToggleLogic {
+    enum Action: Equatable {
+        case start
+        case cancelPendingStart
+        case stop
+    }
+
+    static func action(isRecording: Bool, hasPendingStart: Bool) -> Action {
+        if isRecording {
+            return .stop
+        }
+        return hasPendingStart ? .cancelPendingStart : .start
+    }
+}
+
 enum QuickRecordSummary {
     static let prefix = "Shortcut records: "
 
@@ -150,6 +165,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var welcomeWindow: NSWindow?
     private var isCountdownActive = false
     private var activeCountdown: CountdownOverlay?
+    private var recordingStartTask: Task<Void, Never>?
+    private var isPresentingRecordingDialog = false
     private var hotkeyObserver: NSObjectProtocol?
     private var cameraOverlayController: CameraOverlayController?
     private var captureBoundsIndicator: CaptureBoundsIndicator?
@@ -299,41 +316,48 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     private func handleToggleRecording() {
-        Task { @MainActor [weak self] in
-            guard let self else { return }
-            if self.screenRecorder.isRecording {
+        switch RecordingToggleLogic.action(
+            isRecording: screenRecorder.isRecording,
+            hasPendingStart: recordingStartTask != nil
+        ) {
+        case .stop:
+            Task { @MainActor [weak self] in
+                guard let self else { return }
                 await self.stopRecordingFlow()
-            } else {
-                // Check permission and available displays before starting
+            }
+        case .cancelPendingStart:
+            cancelPendingRecordingStart()
+        case .start:
+            recordingStartTask = Task { @MainActor [weak self] in
+                guard let self else { return }
+                defer { self.recordingStartTask = nil }
+
+                // Check permission and available displays before starting.
                 guard self.screenRecorder.hasPermission,
                       !self.screenRecorder.availableDisplays.isEmpty else {
-                    // Show dialog if no permission or no displays available
                     self.showRecordingDialog()
                     return
                 }
                 // Fall back to the picker when the remembered selection no
                 // longer exists (window closed, display unplugged).
-                guard await self.screenRecorder.validateSelectionForQuickStart() else {
-                    self.showRecordingDialog()
-                    return
-                }
-                // Pressing the hotkey again during the countdown cancels it
-                if self.isCountdownActive {
-                    self.activeCountdown?.cancel()
+                guard await self.screenRecorder.validateSelectionForQuickStart(),
+                      !Task.isCancelled else {
+                    if !Task.isCancelled {
+                        self.showRecordingDialog()
+                    }
                     return
                 }
 
-                guard await self.runCountdown(overrides: .none) else { return }
-                guard await self.screenRecorder.startRecording() else {
-                    self.hideCameraOverlay()
-                    self.reportStartOutcome()
-                    self.rebuildMenu()
-                    return
-                }
-                RecordingCue.start.play()
-                self.recordingDidStart()
+                await self.startCurrentTarget(overrides: .none)
             }
         }
+    }
+
+    private func cancelPendingRecordingStart() {
+        recordingStartTask?.cancel()
+        activeCountdown?.cancel()
+        hideCameraOverlay()
+        screenRecorder.discardCameraPreview()
     }
 
     /// Surfaces start failures (and degraded starts, e.g. mic didn't come up)
@@ -749,12 +773,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     @objc private func showRecordingDialog() {
-        if recordingDialogWindow != nil {
+        if let recordingDialogWindow {
             presentWindow(recordingDialogWindow)
             return
         }
+        guard !isPresentingRecordingDialog else { return }
+        isPresentingRecordingDialog = true
         
         Task { @MainActor in
+            defer { isPresentingRecordingDialog = false }
             await screenRecorder.refreshWindows()
             
             let dialogView = RecordingDialog(
@@ -836,45 +863,78 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         selection: RecordingSelection,
         overrides: RecordingOverrides
     ) {
-        Task { @MainActor in
-            guard !isCountdownActive else { return }
+        guard recordingStartTask == nil else { return }
+        recordingStartTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer { self.recordingStartTask = nil }
 
             switch selection {
             case .display(let displayID):
-                screenRecorder.selectedDisplayID = displayID
-                screenRecorder.recordingMode = .display
+                self.screenRecorder.selectedDisplayID = displayID
+                self.screenRecorder.recordingMode = .display
             case .window(let window):
-                screenRecorder.selectedWindow = window
-                screenRecorder.recordingMode = .window
+                self.screenRecorder.selectedWindow = window
+                self.screenRecorder.recordingMode = .window
             case .region:
-                guard let region = await RegionSelector().select() else { return }
-                screenRecorder.selectedRegion = region
-                screenRecorder.recordingMode = .region
+                guard let region = await RegionSelector().select(),
+                      !Task.isCancelled else { return }
+                self.screenRecorder.selectedRegion = region
+                self.screenRecorder.recordingMode = .region
             case .lastRegion:
-                guard screenRecorder.selectedRegion != nil else { return }
-                screenRecorder.recordingMode = .region
+                guard self.screenRecorder.selectedRegion != nil else { return }
+                self.screenRecorder.recordingMode = .region
             }
 
-            guard await runCountdown(overrides: overrides) else { return }
-            guard await screenRecorder.startRecording(overrides: overrides) else {
-                hideCameraOverlay()
-                reportStartOutcome()
-                rebuildMenu()
-                return
-            }
-            RecordingCue.start.play()
-            recordingDidStart()
+            await self.startCurrentTarget(overrides: overrides)
         }
+    }
+
+    private func startCurrentTarget(overrides: RecordingOverrides) async {
+        guard !Task.isCancelled,
+              !screenRecorder.isRecording,
+              !screenRecorder.isStarting,
+              await runCountdown(overrides: overrides),
+              !Task.isCancelled else {
+            return
+        }
+
+        guard await screenRecorder.startRecording(overrides: overrides) else {
+            hideCameraOverlay()
+            if !Task.isCancelled {
+                reportStartOutcome()
+            }
+            rebuildMenu()
+            return
+        }
+
+        guard !Task.isCancelled else {
+            hideCameraOverlay()
+            await screenRecorder.discardRecording()
+            rebuildMenu()
+            return
+        }
+
+        RecordingCue.start.play()
+        recordingDidStart()
     }
     
     /// Runs the pre-recording countdown (if enabled) and returns true when
     /// recording should start.
     private func runCountdown(overrides: RecordingOverrides) async -> Bool {
-        guard !isCountdownActive else { return false }
+        guard !isCountdownActive, !Task.isCancelled else { return false }
         isCountdownActive = true
+        defer {
+            activeCountdown = nil
+            isCountdownActive = false
+        }
 
         if await screenRecorder.prepareCameraPreview(overrides: overrides) {
             showCameraOverlayForCountdown()
+        }
+        guard !Task.isCancelled else {
+            hideCameraOverlay()
+            screenRecorder.discardCameraPreview()
+            return false
         }
 
         let countdown = CountdownOverlay()
@@ -883,10 +943,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             targetFrame: screenRecorder.countdownTargetFrame,
             duration: AppSettings.shared.countdownDuration
         )
-        activeCountdown = nil
-        isCountdownActive = false
 
-        guard shouldStart else {
+        guard shouldStart, !Task.isCancelled else {
             hideCameraOverlay()
             screenRecorder.discardCameraPreview()
             return false
