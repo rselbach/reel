@@ -778,7 +778,8 @@ class AppSettings: ObservableObject {
         static let pauseDefault = HotkeyCombo(keyCode: 35, modifiers: 0x120000) // Cmd+Shift+P
 
         var isUsableGlobalShortcut: Bool {
-            modifiers & Self.nonShiftModifierMask != 0
+            Self.keyCodeNames[keyCode] != nil &&
+                modifiers & Self.nonShiftModifierMask != 0
         }
 
         var displayString: String {
@@ -818,7 +819,7 @@ class AppSettings: ObservableObject {
         ]
 
         private func keyCodeToString(_ keyCode: UInt16) -> String {
-            Self.keyCodeNames[keyCode] ?? "?"
+            Self.keyCodeNames[keyCode] ?? "Key \(keyCode)"
         }
     }
 

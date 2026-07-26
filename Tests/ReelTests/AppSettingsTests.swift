@@ -989,7 +989,8 @@ final class AppSettingsTests: XCTestCase {
     @MainActor
     func testHotkeyDisplayStringUsesFallbackForUnknownKeyCode() {
         let combo = AppSettings.HotkeyCombo(keyCode: 255, modifiers: 0x100000)
-        XCTAssertEqual(combo.displayString, "⌘?")
+        XCTAssertEqual(combo.displayString, "⌘Key 255")
+        XCTAssertFalse(combo.isUsableGlobalShortcut)
     }
 
     @MainActor
@@ -1026,6 +1027,14 @@ final class AppSettingsTests: XCTestCase {
     func testHotkeyRecorderDecisionRejectsShiftOnlyShortcut() {
         XCTAssertEqual(
             HotkeyRecorderLogic.decision(keyCode: KeyCode.r, modifierFlags: [.shift]),
+            .reject
+        )
+    }
+
+    @MainActor
+    func testHotkeyRecorderDecisionRejectsUnsupportedKeys() {
+        XCTAssertEqual(
+            HotkeyRecorderLogic.decision(keyCode: 255, modifierFlags: [.command]),
             .reject
         )
     }
