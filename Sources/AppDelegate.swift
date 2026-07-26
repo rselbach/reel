@@ -42,7 +42,7 @@ enum AppMenuText {
     static let failedToOpenPrivacySettings = "Failed to open system privacy settings."
     static let couldNotOpenSystemPreferences = "Could not open System Preferences."
     static let couldNotRevealRecording = "Could not reveal recording"
-    static let couldNotDeleteRecording = "Could not delete recording"
+    static let couldNotDeleteRecording = "Could not move recording to Trash"
     static let recordingPreviewTitle = "Recording Preview"
     static let newRecordingTitle = "New Recording"
     static let settingsWindowTitle = "Reel Settings"
@@ -749,7 +749,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             },
             onDelete: { [weak self] in
                 do {
-                    try FileManager.default.removeItem(at: url)
+                    try FileManager.default.trashItem(at: url, resultingItemURL: nil)
                 } catch {
                     let alert = NSAlert()
                     alert.messageText = AppMenuText.couldNotDeleteRecording
@@ -759,6 +759,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                     alert.runModal()
                     return
                 }
+                AppSettings.shared.forgetRecentRecording(url)
+                if self?.screenRecorder.lastRecordedURL == url {
+                    self?.screenRecorder.lastRecordedURL = nil
+                }
+                self?.rebuildMenu()
                 self?.previewWindow?.close()
                 self?.previewWindow = nil
             }

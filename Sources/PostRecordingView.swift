@@ -114,7 +114,7 @@ enum PostRecordingText {
     static let copy = "Copy"
     static let copied = "Copied!"
     static let dragHint = "Drag this recording into Slack, Mail, or Finder"
-    static let delete = "Delete"
+    static let delete = "Move to Trash"
     static let saveTrimmed = "Save Trimmed..."
     static let exportSmaller = "Smaller Copy..."
     static let exportGIF = "GIF..."
@@ -123,8 +123,8 @@ enum PostRecordingText {
     static let keyframeNote = "Trimming is lossless; the start point snaps to the nearest keyframe."
     static let done = "Done"
     static let recordAgain = "Record Again"
-    static let deleteConfirmationTitle = "Delete recording?"
-    static let deleteConfirmationMessage = "This will permanently remove the file from disk."
+    static let deleteConfirmationTitle = "Move recording to Trash?"
+    static let deleteConfirmationMessage = "You can recover it from the Trash."
 }
 
 enum GIFExport {

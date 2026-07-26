@@ -24,6 +24,10 @@ enum RecentRecordingsLogic {
         paths.insert(path, at: 0)
         return Array(paths.prefix(limit))
     }
+
+    static func removingPath(_ path: String, from current: [String]) -> [String] {
+        current.filter { $0 != path }
+    }
 }
 
 /// The recording target remembered between launches.
@@ -468,6 +472,13 @@ class AppSettings: ObservableObject {
             current: recentRecordingPaths,
             adding: url.path(),
             limit: Self.maxRecentRecordings
+        )
+    }
+
+    func forgetRecentRecording(_ url: URL) {
+        recentRecordingPaths = RecentRecordingsLogic.removingPath(
+            url.path(),
+            from: recentRecordingPaths
         )
     }
 

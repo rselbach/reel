@@ -1077,18 +1077,18 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(AppMenuText.newRecordingTitle, "New Recording")
         XCTAssertEqual(AppMenuText.settingsWindowTitle, "Reel Settings")
         XCTAssertEqual(AppMenuText.couldNotRevealRecording, "Could not reveal recording")
-        XCTAssertEqual(AppMenuText.couldNotDeleteRecording, "Could not delete recording")
+        XCTAssertEqual(AppMenuText.couldNotDeleteRecording, "Could not move recording to Trash")
     }
 
     func testPostRecordingTextMatchesPreviewActions() {
         XCTAssertEqual(PostRecordingText.loading, "Loading...")
         XCTAssertEqual(PostRecordingText.revealInFinder, "Reveal in Finder")
-        XCTAssertEqual(PostRecordingText.delete, "Delete")
+        XCTAssertEqual(PostRecordingText.delete, "Move to Trash")
         XCTAssertEqual(PostRecordingText.saveTrimmed, "Save Trimmed...")
         XCTAssertEqual(PostRecordingText.done, "Done")
         XCTAssertEqual(PostRecordingText.recordAgain, "Record Again")
-        XCTAssertEqual(PostRecordingText.deleteConfirmationTitle, "Delete recording?")
-        XCTAssertEqual(PostRecordingText.deleteConfirmationMessage, "This will permanently remove the file from disk.")
+        XCTAssertEqual(PostRecordingText.deleteConfirmationTitle, "Move recording to Trash?")
+        XCTAssertEqual(PostRecordingText.deleteConfirmationMessage, "You can recover it from the Trash.")
     }
 
     func testSettingsTextMatchesGeneralRecordingAndShortcutControls() {
@@ -1668,6 +1668,13 @@ final class AppSettingsTests: XCTestCase {
                 limit: 5
             ),
             ["/6.mp4", "/1.mp4", "/2.mp4", "/3.mp4", "/4.mp4"]
+        )
+        XCTAssertEqual(
+            RecentRecordingsLogic.removingPath(
+                "/2.mp4",
+                from: ["/1.mp4", "/2.mp4", "/3.mp4"]
+            ),
+            ["/1.mp4", "/3.mp4"]
         )
     }
 
