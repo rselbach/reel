@@ -37,21 +37,21 @@ enum RememberedTarget: Codable, Equatable {
 }
 
 enum RememberedTargetMatching {
-    /// Picks the window that best matches a remembered target: same app and
-    /// same title if that window is still open, otherwise any window of the
-    /// same app, so relaunching into a renamed window still works.
+    /// Restores a remembered window only when its app and title identify one
+    /// current window unambiguously. Falling back to another window from the
+    /// same app could silently record unrelated or private content.
     static func bestMatchIndex(
         bundleIDs: [String?],
         titles: [String?],
         wantedBundleID: String,
         wantedTitle: String?
     ) -> Int? {
-        let candidates = bundleIDs.indices.filter { bundleIDs[$0] == wantedBundleID }
-        if let wantedTitle,
-           let exact = candidates.first(where: { titles.indices.contains($0) && titles[$0] == wantedTitle }) {
-            return exact
+        let matches = bundleIDs.indices.filter {
+            bundleIDs[$0] == wantedBundleID &&
+                titles.indices.contains($0) &&
+                titles[$0] == wantedTitle
         }
-        return candidates.first
+        return matches.count == 1 ? matches[0] : nil
     }
 }
 

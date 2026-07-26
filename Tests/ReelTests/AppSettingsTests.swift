@@ -65,9 +65,14 @@ final class AppSettingsTests: XCTestCase {
     }
 
     @MainActor
-    func testRememberedWindowPrefersSameTitleThenSameApp() {
-        let bundleIDs: [String?] = ["com.greendale.study", "com.greendale.study", "com.greendale.dean"]
-        let titles: [String?] = ["Spanish 101", "Biology 101", "Dean's Office"]
+    func testRememberedWindowRequiresOneExactAppAndTitleMatch() {
+        let bundleIDs: [String?] = [
+            "com.greendale.study",
+            "com.greendale.study",
+            "com.greendale.dean",
+            "com.greendale.study"
+        ]
+        let titles: [String?] = ["Spanish 101", "Biology 101", "Dean's Office", nil]
 
         XCTAssertEqual(
             RememberedTargetMatching.bestMatchIndex(
@@ -79,16 +84,23 @@ final class AppSettingsTests: XCTestCase {
             1
         )
 
-        // Renamed window: fall back to the first window of the same app
-        // rather than losing the target entirely.
-        XCTAssertEqual(
+        XCTAssertNil(
             RememberedTargetMatching.bestMatchIndex(
                 bundleIDs: bundleIDs,
                 titles: titles,
                 wantedBundleID: "com.greendale.study",
                 wantedTitle: "Anthropology 101"
+            )
+        )
+
+        XCTAssertEqual(
+            RememberedTargetMatching.bestMatchIndex(
+                bundleIDs: bundleIDs,
+                titles: titles,
+                wantedBundleID: "com.greendale.study",
+                wantedTitle: nil
             ),
-            0
+            3
         )
 
         XCTAssertNil(
@@ -98,6 +110,19 @@ final class AppSettingsTests: XCTestCase {
                 wantedBundleID: "com.greendale.cafeteria",
                 wantedTitle: nil
             )
+        )
+
+        XCTAssertNil(
+            RememberedTargetMatching.bestMatchIndex(
+                bundleIDs: [
+                    "com.greendale.study",
+                    "com.greendale.study"
+                ],
+                titles: ["Spanish 101", "Spanish 101"],
+                wantedBundleID: "com.greendale.study",
+                wantedTitle: "Spanish 101"
+            ),
+            "duplicate titles are ambiguous and must not select either window"
         )
     }
 
