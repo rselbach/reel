@@ -966,19 +966,41 @@ final class AppSettingsTests: XCTestCase {
         defer {
             settings.recordingHotkey = originalToggle
             settings.discardHotkey = originalDiscard
-            settings.hotkeyConflictError = nil
+            settings.hotkeyError = nil
         }
 
         settings.setHotkey(.default, for: .toggleRecording)
         settings.setHotkey(.discardDefault, for: .discardRecording)
-        XCTAssertNil(settings.hotkeyConflictError)
+        XCTAssertNil(settings.hotkeyError)
 
         // Carbon would refuse the second registration and leave one shortcut
         // silently dead, so the assignment is rejected up front instead.
         settings.setHotkey(.default, for: .discardRecording)
         XCTAssertEqual(settings.discardHotkey, .discardDefault)
-        XCTAssertNotNil(settings.hotkeyConflictError)
-        XCTAssertTrue(settings.hotkeyConflictError?.contains("toggle recording") ?? false)
+        XCTAssertNotNil(settings.hotkeyError)
+        XCTAssertTrue(settings.hotkeyError?.contains("toggle recording") ?? false)
+    }
+
+    @MainActor
+    func testFailedHotkeyRegistrationDoesNotSaveTheShortcut() {
+        let settings = AppSettings.shared
+        let original = settings.recordingHotkey
+        defer {
+            settings.recordingHotkey = original
+            settings.hotkeyError = nil
+        }
+
+        let replacement = AppSettings.HotkeyCombo(
+            keyCode: KeyCode.f12,
+            modifiers: 0x100000
+        )
+        settings.setHotkey(replacement, for: .toggleRecording) { _, _ in false }
+
+        XCTAssertEqual(settings.recordingHotkey, original)
+        XCTAssertEqual(
+            settings.hotkeyError,
+            "Could not register ⌘F12. It may already be used by macOS or another app."
+        )
     }
 
     @MainActor

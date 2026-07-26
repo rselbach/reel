@@ -17,6 +17,12 @@ enum HotkeyConflictText {
     }
 }
 
+enum HotkeyRegistrationText {
+    static func message(shortcut: String) -> String {
+        "Could not register \(shortcut). It may already be used by macOS or another app."
+    }
+}
+
 enum RecentRecordingsLogic {
     /// Most-recent-first, deduplicated, capped at limit.
     static func updatedPaths(current: [String], adding path: String, limit: Int) -> [String] {
@@ -298,28 +304,26 @@ class AppSettings: ObservableObject {
 
     @Published var recordingHotkey: HotkeyCombo {
         didSet {
-            persistHotkey(recordingHotkey, key: DefaultsKey.recordingHotkey, action: .toggleRecording)
+            persistHotkey(recordingHotkey, key: DefaultsKey.recordingHotkey)
         }
     }
 
     /// Ends a take and throws the file away, for a flubbed demo.
     @Published var discardHotkey: HotkeyCombo {
         didSet {
-            persistHotkey(discardHotkey, key: DefaultsKey.discardHotkey, action: .discardRecording)
+            persistHotkey(discardHotkey, key: DefaultsKey.discardHotkey)
         }
     }
 
     /// Pauses or resumes without ending the take.
     @Published var pauseHotkey: HotkeyCombo {
         didSet {
-            persistHotkey(pauseHotkey, key: DefaultsKey.pauseHotkey, action: .pauseRecording)
+            persistHotkey(pauseHotkey, key: DefaultsKey.pauseHotkey)
         }
     }
 
-    /// Non-nil when the user tried to assign a shortcut another action already
-    /// owns. Carbon would simply refuse the second registration, leaving one
-    /// shortcut silently dead.
-    @Published var hotkeyConflictError: String?
+    /// Non-nil when a shortcut conflicts or cannot be registered globally.
+    @Published var hotkeyError: String?
 
     func hotkey(for action: HotkeyAction) -> HotkeyCombo {
         switch action {
@@ -331,16 +335,27 @@ class AppSettings: ObservableObject {
 
     /// Assigns a shortcut, refusing combinations already taken by another
     /// action rather than letting the second registration fail silently.
-    func setHotkey(_ combo: HotkeyCombo, for action: HotkeyAction) {
+    func setHotkey(
+        _ combo: HotkeyCombo,
+        for action: HotkeyAction,
+        register: (HotkeyCombo, HotkeyAction) -> Bool = {
+            HotkeyManager.shared.updateHotkey($0, for: $1)
+        }
+    ) {
         if let conflict = HotkeyAction.allCases.first(where: { $0 != action && hotkey(for: $0) == combo }) {
-            hotkeyConflictError = HotkeyConflictText.message(
+            hotkeyError = HotkeyConflictText.message(
                 shortcut: combo.displayString,
                 otherAction: conflict.displayName
             )
             return
         }
 
-        hotkeyConflictError = nil
+        guard register(combo, action) else {
+            hotkeyError = HotkeyRegistrationText.message(shortcut: combo.displayString)
+            return
+        }
+
+        hotkeyError = nil
         switch action {
         case .toggleRecording: recordingHotkey = combo
         case .discardRecording: discardHotkey = combo
@@ -348,14 +363,13 @@ class AppSettings: ObservableObject {
         }
     }
 
-    private func persistHotkey(_ combo: HotkeyCombo, key: String, action: HotkeyAction) {
+    private func persistHotkey(_ combo: HotkeyCombo, key: String) {
         do {
             let data = try JSONEncoder().encode(combo)
             UserDefaults.standard.set(data, forKey: key)
         } catch {
             logger.warning("Failed to persist \(key): \(error.localizedDescription)")
         }
-        HotkeyManager.shared.updateHotkey(combo, for: action)
         NotificationCenter.default.post(name: Self.hotkeyChangedNotification, object: nil)
     }
 

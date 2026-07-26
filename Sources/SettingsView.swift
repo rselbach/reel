@@ -389,8 +389,8 @@ struct ShortcutsTab: View {
                 )
             }
 
-            if let conflict = settings.hotkeyConflictError {
-                Text(conflict)
+            if let error = settings.hotkeyError {
+                Text(error)
                     .font(.caption)
                     .foregroundColor(.red)
                     .lineLimit(2)

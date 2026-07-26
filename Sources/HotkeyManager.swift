@@ -84,12 +84,12 @@ class HotkeyManager {
 
     func start() {
         guard !isStarted else { return }
+        guard installEventHandlerIfNeeded() else { return }
         isStarted = true
-        installEventHandlerIfNeeded()
 
         for action in HotkeyAction.allCases {
             combos[action] = AppSettings.shared.hotkey(for: action)
-            register(action)
+            _ = register(action)
         }
     }
 
@@ -104,11 +104,22 @@ class HotkeyManager {
         isStarted = false
     }
 
-    /// Re-registers one shortcut after the user records a new combination.
-    func updateHotkey(_ combo: AppSettings.HotkeyCombo, for action: HotkeyAction) {
+    /// Re-registers one shortcut after the user records a new combination,
+    /// restoring the previous registration if Carbon rejects the replacement.
+    func updateHotkey(_ combo: AppSettings.HotkeyCombo, for action: HotkeyAction) -> Bool {
+        guard combo.isUsableGlobalShortcut else { return false }
+
+        let previousCombo = combos[action]
         combos[action] = combo
-        guard isStarted else { return }
-        register(action)
+        guard isStarted else { return true }
+        guard register(action, notifyOnFailure: false) else {
+            combos[action] = previousCombo
+            if previousCombo != nil {
+                _ = register(action)
+            }
+            return false
+        }
+        return true
     }
 
     func handleHotKeyEvent(kind: UInt32, hotKeyID: EventHotKeyID) -> OSStatus {
@@ -131,8 +142,8 @@ class HotkeyManager {
         }
     }
 
-    private func installEventHandlerIfNeeded() {
-        guard eventHandler == nil else { return }
+    private func installEventHandlerIfNeeded() -> Bool {
+        guard eventHandler == nil else { return true }
 
         var eventTypes = [
             EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed)),
@@ -150,18 +161,19 @@ class HotkeyManager {
         if status != noErr {
             logger.error("InstallEventHandler failed (status: \(status))")
             onHotkeyDisabled?("Failed to enable global hotkeys (error \(status)).")
+            return false
         }
+        return true
     }
 
-    private func register(_ action: HotkeyAction) {
-        unregister(action)
-
-        guard let combo = combos[action] else { return }
+    private func register(_ action: HotkeyAction, notifyOnFailure: Bool = true) -> Bool {
+        guard let combo = combos[action] else { return false }
         guard combo.isUsableGlobalShortcut else {
             logger.warning("Refusing to register unusable global shortcut for \(action.rawValue)")
-            return
+            return false
         }
 
+        unregister(action)
         let hotKeyID = EventHotKeyID(signature: Self.signature, id: action.rawValue)
         var ref: EventHotKeyRef?
         let status = RegisterEventHotKey(
@@ -175,14 +187,17 @@ class HotkeyManager {
 
         guard status == noErr, let ref else {
             logger.error("RegisterEventHotKey failed for \(action.rawValue) (status: \(status))")
-            onHotkeyDisabled?(
-                "Failed to register the global shortcut \(combo.displayString). It may already be in use by another app."
-            )
-            return
+            if notifyOnFailure {
+                onHotkeyDisabled?(
+                    "Failed to register the global shortcut \(combo.displayString). It may already be in use by another app."
+                )
+            }
+            return false
         }
 
         hotKeyRefs[action] = ref
         heldActions.remove(action)
+        return true
     }
 
     private func unregister(_ action: HotkeyAction) {
