@@ -62,7 +62,11 @@ final class AudioLevelMonitor: ObservableObject {
         let generation = self.generation
         startTask = Task { @MainActor [weak self] in
             guard let self else { return }
-            defer { self.startTask = nil }
+            defer {
+                if self.generation == generation {
+                    self.startTask = nil
+                }
+            }
             guard await self.ensureMicrophoneAccess(),
                   !Task.isCancelled,
                   self.generation == generation else {
