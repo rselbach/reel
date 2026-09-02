@@ -15,7 +15,7 @@ struct VideoPlayerView: NSViewRepresentable {
     func makeNSView(context: Context) -> AVPlayerView {
         let view = AVPlayerView()
         view.player = player
-        view.controlsStyle = .floating
+        view.controlsStyle = .none
         return view
     }
 
@@ -24,88 +24,13 @@ struct VideoPlayerView: NSViewRepresentable {
     }
 
     static func dismantleNSView(_ nsView: AVPlayerView, coordinator: ()) {
-        // Disconnect player during teardown to prevent use-after-free
         nsView.player = nil
     }
 }
 
-private enum TrimConstants {
-    static let threshold: Double = 0.1
-    static let minimumDuration: Double = 0.5
-}
-
-enum TrimSliderMath {
-    static func startPosition(trimStart: Double, duration: Double, width: CGFloat) -> CGFloat {
-        guard duration > 0 else { return 0 }
-        return (trimStart / duration) * width
-    }
-
-    static func endPosition(trimEnd: Double, duration: Double, width: CGFloat) -> CGFloat {
-        guard duration > 0 else { return width }
-        return (trimEnd / duration) * width
-    }
-
-    static func playheadPosition(currentTime: Double, duration: Double, width: CGFloat) -> CGFloat {
-        guard currentTime.isFinite, duration.isFinite, duration > 0 else { return 0 }
-        return (currentTime / duration) * width
-    }
-
-    static func clampedStart(
-        origin: Double,
-        translationWidth: CGFloat,
-        usableWidth: CGFloat,
-        duration: Double,
-        trimEnd: Double
-    ) -> Double {
-        guard usableWidth > 0 else { return origin }
-        let delta = (translationWidth / usableWidth) * duration
-        let newStart = origin + delta
-        let minimumDuration = min(TrimConstants.minimumDuration, max(0, duration))
-        let latestStart = max(0, trimEnd - minimumDuration)
-        return min(max(0, newStart), latestStart)
-    }
-
-    static func clampedEnd(
-        origin: Double,
-        translationWidth: CGFloat,
-        usableWidth: CGFloat,
-        duration: Double,
-        trimStart: Double
-    ) -> Double {
-        guard usableWidth > 0 else { return origin }
-        let delta = (translationWidth / usableWidth) * duration
-        let newEnd = origin + delta
-        let minimumDuration = min(TrimConstants.minimumDuration, max(0, duration))
-        let earliestEnd = min(duration, trimStart + minimumDuration)
-        return max(min(duration, newEnd), earliestEnd)
-    }
-
-    static func seekTime(locationX: CGFloat, handleWidth: CGFloat, usableWidth: CGFloat, duration: Double) -> Double {
-        guard usableWidth > 0, duration.isFinite, duration > 0 else { return 0 }
-        let newTime = (locationX - handleWidth) / usableWidth * duration
-        return min(max(0, newTime), duration)
-    }
-
-    static func translatedSeekTime(
-        origin: Double,
-        translationWidth: CGFloat,
-        usableWidth: CGFloat,
-        duration: Double
-    ) -> Double {
-        guard origin.isFinite, usableWidth > 0, duration.isFinite, duration > 0 else {
-            return 0
-        }
-        let newTime = origin + Double(translationWidth / usableWidth) * duration
-        return min(max(0, newTime), duration)
-    }
-
-    static func formattedTime(_ seconds: Double) -> String {
-        guard seconds.isFinite else { return "0:00.0" }
-        let mins = Int(seconds) / 60
-        let secs = Int(seconds) % 60
-        let frac = Int((seconds.truncatingRemainder(dividingBy: 1)) * 10)
-        return String(format: "%d:%02d.%d", mins, secs, frac)
-    }
+enum PlaybackIntent: Equatable {
+    case paused
+    case playing
 }
 
 enum PostRecordingText {
@@ -115,12 +40,36 @@ enum PostRecordingText {
     static let copied = "Copied!"
     static let dragHint = "Drag this recording into Slack, Mail, or Finder"
     static let delete = "Move to Trash"
-    static let saveTrimmed = "Save Trimmed..."
+    static let saveEdited = "Save Edited..."
+    static let timeline = "Timeline"
+    static let timelineHelp = "Drag the playhead to seek. Right-click the timeline to split at the playhead."
+    static let sourceTimeline = "Source timeline"
+    static let clearSelection = "Clear Selection"
+    static let splitClipAtPlayhead = "Split Clip at Playhead"
+    static let deleteClip = "Delete Clip"
+    static let restoreClip = "Restore Clip"
+    static let clip = "Clip"
+    static let deletedClip = "Deleted clip"
+    static let deleted = "Deleted"
+    static let clipHint = "Select this clip to delete or restore it."
+    static let editClipFailedTitle = "Could Not Edit Clip"
+    static let splitClipFailedMessage =
+        "Move the playhead at least 0.05 seconds from either edge of a clip, then split again."
+    static let deleteClipFailedMessage =
+        "The edited recording must keep at least 0.5 seconds."
+    static let playhead = "Playhead"
+    static let playheadHint = "Drag to seek. Right-click the timeline to split here."
+    static let backFiveSeconds = "Back 5 seconds"
+    static let forwardFiveSeconds = "Forward 5 seconds"
+    static let play = "Play"
+    static let pause = "Pause"
+    static let editedPlaybackTime = "Edited playback time"
     static let exportSmaller = "Smaller Copy..."
     static let exportGIF = "GIF..."
     static let exportGIFHelp = "Silent, looping, capped in size and frame count for README and issue embeds."
     static let exportSmallerHelp = "Re-encodes at 720p for sharing in chat, issues, and pull requests."
-    static let keyframeNote = "Trimming is lossless; the start point snaps to the nearest keyframe."
+    static let editNote =
+        "Deleted clips are skipped during playback and when saving an edited copy."
     static let done = "Done"
     static let recordAgain = "Record Again"
     static let changeTarget = "Change Target..."
@@ -129,25 +78,22 @@ enum PostRecordingText {
 }
 
 enum GIFExport {
-    /// GIF has no interframe compression worth the name, so both the frame
-    /// rate and the pixel width stay modest.
     static let frameRate: Double = 12
     static let maxWidth: CGFloat = 800
-    /// Roughly 25 seconds at the target frame rate. Longer ranges are sampled
-    /// more sparsely rather than cut short, so the whole range is represented.
     static let maxFrames = 300
 
-    /// Sample times across a trim range, plus the per-frame delay that plays
-    /// them back at real speed.
-    static func frames(start: Double, end: Double) -> (times: [Double], delay: Double) {
-        let duration = max(0, end - start)
-        guard duration > 0 else { return ([start], 1 / frameRate) }
+    static func frames(edit: TimelineEdit) -> (times: [Double], delay: Double) {
+        let duration = edit.editedDuration
+        guard duration > 0 else { return ([], 1 / frameRate) }
 
         let ideal = Int((duration * frameRate).rounded())
         let count = min(maxFrames, max(1, ideal))
         let spacing = duration / Double(count)
 
-        return ((0..<count).map { start + spacing * Double($0) }, spacing)
+        let times = (0..<count).compactMap {
+            edit.sourceTime(forEditedTime: spacing * Double($0))
+        }
+        return (times, spacing)
     }
 }
 
@@ -164,18 +110,9 @@ enum ExportFileNaming {
 }
 
 enum PostRecordingLogic {
-    static func hasTrimChanges(duration: Double, trimStart: Double, trimEnd: Double) -> Bool {
-        duration > 0 && (trimStart > TrimConstants.threshold || trimEnd < duration - TrimConstants.threshold)
-    }
-
-    static func canExport(
-        duration: Double,
-        trimStart: Double,
-        trimEnd: Double,
-        isExporting: Bool
-    ) -> Bool {
-        duration.isFinite && trimStart.isFinite && trimEnd.isFinite && duration > 0 && trimStart >= 0
-            && trimEnd > trimStart && trimEnd <= duration && !isExporting
+    static func canExport(edit: TimelineEdit?, isExporting: Bool) -> Bool {
+        guard let edit else { return false }
+        return edit.editedDuration > 0 && !isExporting
     }
 }
 
@@ -189,11 +126,12 @@ struct PostRecordingView: View {
 
     @State private var player: AVPlayer?
     @State private var timeObserver: Any?
+    @State private var deletedClipBoundaryObservers: [Any] = []
     @State private var isCleanedUp = false
-    @State private var duration: Double = 0
-    @State private var trimStart: Double = 0
-    @State private var trimEnd: Double = 0
+    @State private var edit: TimelineEdit?
     @State private var currentTime: Double = 0
+    @State private var playbackIntent: PlaybackIntent = .paused
+    @State private var timelineSelection: TimelineSelection = .none
     @State private var isExporting = false
     @State private var exportTask: Task<Void, Never>?
     @State private var showDeleteConfirmation = false
@@ -201,33 +139,46 @@ struct PostRecordingView: View {
     @State private var justCopied = false
 
     var body: some View {
-        VStack(spacing: 16) {
+        VStack(spacing: 14) {
             if let player {
                 VideoPlayerView(player: player)
-                    .frame(minWidth: 640, minHeight: 360)
-
-                if duration > 0 {
-                    TrimSlider(
-                        duration: duration,
-                        trimStart: $trimStart,
-                        trimEnd: $trimEnd,
-                        currentTime: $currentTime,
-                        onSeek: { time in
-                            player.seek(to: CMTime(seconds: time, preferredTimescale: 600))
-                        }
-                    )
-                    .padding(.horizontal)
-                    .disabled(isExporting)
-
-                    if hasTrimChanges {
-                        Text(PostRecordingText.keyframeNote)
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                }
+                    .frame(minWidth: 700, minHeight: 300, maxHeight: .infinity)
+                    .layoutPriority(1)
             } else {
                 ProgressView(PostRecordingText.loading)
-                    .frame(minWidth: 640, minHeight: 360)
+                    .frame(minWidth: 700, minHeight: 300, maxHeight: .infinity)
+                    .layoutPriority(1)
+            }
+
+            PlaybackTransport(
+                intent: playbackIntent,
+                currentTime: editedCurrentTime,
+                duration: edit?.editedDuration ?? 0,
+                isEnabled: player != nil && edit != nil && !isExporting,
+                onTogglePlayback: togglePlayback,
+                onSkip: skipEditedSeconds
+            )
+            .padding(.horizontal)
+
+            if let loadedEdit = edit {
+                PostRecordingTimelineView(
+                    videoURL: videoURL,
+                    edit: Binding(
+                        get: { self.edit ?? loadedEdit },
+                        set: { self.edit = $0 }
+                    ),
+                    currentSourceTime: currentTime,
+                    selection: $timelineSelection,
+                    onSeek: seekPlayer
+                )
+                .padding(.horizontal)
+                .disabled(isExporting)
+
+                if hasEdits {
+                    Text(PostRecordingText.editNote)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
             }
 
             if let error = exportError {
@@ -237,8 +188,6 @@ struct PostRecordingView: View {
             }
 
             HStack(spacing: 12) {
-                // Draggable file chip: the whole point of these recordings is
-                // sharing them, so make the file itself grabbable.
                 HStack(spacing: 6) {
                     Image(systemName: "film")
                     Text(videoURL.lastPathComponent)
@@ -264,10 +213,7 @@ struct PostRecordingView: View {
                 .disabled(isExporting)
 
                 Spacer()
-            }
-            .padding(.horizontal)
 
-            HStack(spacing: 12) {
                 Button(PostRecordingText.revealInFinder) {
                     onRevealInFinder()
                 }
@@ -278,11 +224,10 @@ struct PostRecordingView: View {
                 }
                 .foregroundColor(.red)
                 .disabled(isExporting)
+            }
+            .padding(.horizontal)
 
-                Spacer()
-
-                // The next thing after watching a take back is almost always
-                // another take of the same thing.
+            HStack(spacing: 12) {
                 Button(PostRecordingText.recordAgain) {
                     onRecordAgain()
                 }
@@ -293,11 +238,13 @@ struct PostRecordingView: View {
                 }
                 .disabled(isExporting)
 
-                if hasTrimChanges {
-                    Button(PostRecordingText.saveTrimmed) {
+                Spacer()
+
+                if hasEdits {
+                    Button(PostRecordingText.saveEdited) {
                         startVideoExport(
                             preset: AVAssetExportPresetPassthrough,
-                            suffix: "trimmed"
+                            suffix: "edited"
                         )
                     }
                     .disabled(!canExport)
@@ -332,7 +279,7 @@ struct PostRecordingView: View {
             .padding(.horizontal)
         }
         .padding()
-        .frame(minWidth: 700, minHeight: 550)
+        .frame(minWidth: 780, minHeight: 700)
         .alert(PostRecordingText.deleteConfirmationTitle, isPresented: $showDeleteConfirmation) {
             Button(PostRecordingText.delete, role: .destructive) {
                 onDelete()
@@ -344,6 +291,14 @@ struct PostRecordingView: View {
         .onAppear {
             setupPlayer()
         }
+        .onChange(of: edit) { _, changedEdit in
+            refreshDeletedClipBoundaryObservers()
+            guard let changedEdit else {
+                timelineSelection = .none
+                return
+            }
+            timelineSelection = timelineSelection.validated(for: changedEdit)
+        }
         .onDisappear {
             exportTask?.cancel()
             exportTask = nil
@@ -352,21 +307,19 @@ struct PostRecordingView: View {
         }
     }
 
-    private var hasTrimChanges: Bool {
-        PostRecordingLogic.hasTrimChanges(duration: duration, trimStart: trimStart, trimEnd: trimEnd)
+    private var hasEdits: Bool {
+        edit?.hasMeaningfulChanges == true
     }
 
     private var canExport: Bool {
-        PostRecordingLogic.canExport(
-            duration: duration,
-            trimStart: trimStart,
-            trimEnd: trimEnd,
-            isExporting: isExporting
-        )
+        PostRecordingLogic.canExport(edit: edit, isExporting: isExporting)
     }
 
-    /// Puts the recording file on the pasteboard so it can be pasted into
-    /// Slack, Mail, Finder, etc.
+    private var editedCurrentTime: Double {
+        guard let edit else { return 0 }
+        return PostRecordingTimelineMath.editedTime(forSourceTime: currentTime, edit: edit)
+    }
+
     private func copyToPasteboard() {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
@@ -387,24 +340,25 @@ struct PostRecordingView: View {
         }
     }
 
-    /// Safely tears down the player and time observer.
-    /// Must be called before the view is deallocated to prevent use-after-free crashes.
     private func cleanupPlayer() {
-        // Mark as cleaned up first to prevent time observer callback from updating state
         isCleanedUp = true
+        pausePlayback()
 
-        // Pause first to stop generating new callbacks
-        player?.pause()
-
-        // Remove time observer while player is still valid
         if let player, let timeObserver {
             player.removeTimeObserver(timeObserver)
         }
+        if let player {
+            for observer in deletedClipBoundaryObservers {
+                player.removeTimeObserver(observer)
+            }
+        }
+        deletedClipBoundaryObservers = []
         timeObserver = nil
         player = nil
     }
 
     private func setupPlayer() {
+        isCleanedUp = false
         let asset = AVURLAsset(url: videoURL)
         let playerItem = AVPlayerItem(asset: asset)
         let newPlayer = AVPlayer(playerItem: playerItem)
@@ -415,9 +369,9 @@ struct PostRecordingView: View {
                 let durationTime = try await asset.load(.duration)
                 guard !isCleanedUp else { return }
                 let seconds = CMTimeGetSeconds(durationTime)
-                if seconds.isFinite && seconds > 0 {
-                    duration = seconds
-                    trimEnd = seconds
+                if let loadedEdit = TimelineEdit(sourceDuration: seconds) {
+                    edit = loadedEdit
+                    currentTime = loadedEdit.firstKeptTime ?? 0
                 }
             } catch {
                 guard !isCleanedUp else { return }
@@ -427,20 +381,129 @@ struct PostRecordingView: View {
 
         let interval = CMTime(seconds: 0.1, preferredTimescale: 600)
         timeObserver = newPlayer.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak newPlayer] time in
-            // Bail if player was deallocated (view is being torn down)
             guard newPlayer != nil else { return }
             Task { @MainActor [self] in
                 guard !isCleanedUp else { return }
                 let seconds = CMTimeGetSeconds(time)
-                if seconds.isFinite {
-                    currentTime = seconds
+                guard seconds.isFinite, let edit else { return }
+                guard seconds < edit.sourceDuration else {
+                    newPlayer?.pause()
+                    playbackIntent = .paused
+                    currentTime = edit.lastKeptTime ?? edit.sourceDuration
+                    return
+                }
+                guard let playableTime = edit.playableSourceTime(atOrAfter: seconds) else {
+                    newPlayer?.pause()
+                    playbackIntent = .paused
+                    currentTime = edit.lastKeptTime ?? edit.sourceDuration
+                    return
+                }
+                currentTime = playableTime
+                if playableTime > seconds + 0.001 {
+                    newPlayer?.seek(
+                        to: CMTime(seconds: playableTime, preferredTimescale: 600),
+                        toleranceBefore: .zero,
+                        toleranceAfter: .zero
+                    )
                 }
             }
         }
     }
 
+    private func refreshDeletedClipBoundaryObservers() {
+        guard let player else { return }
+        for observer in deletedClipBoundaryObservers {
+            player.removeTimeObserver(observer)
+        }
+        deletedClipBoundaryObservers = []
+        guard let edit else { return }
+
+        deletedClipBoundaryObservers = edit.deletedClips.map { clip in
+            let boundary = NSValue(time: CMTime(seconds: clip.span.start, preferredTimescale: 600))
+            return player.addBoundaryTimeObserver(forTimes: [boundary], queue: .main) { [weak player] in
+                Task { @MainActor [self] in
+                    guard
+                        !isCleanedUp,
+                        let player,
+                        let deletedClip = self.edit?.deletedClips.first(where: { $0.id == clip.id })
+                    else { return }
+                    let seconds = CMTimeGetSeconds(player.currentTime())
+                    guard
+                        seconds >= deletedClip.span.start - 0.05,
+                        seconds < deletedClip.span.end
+                    else { return }
+                    guard
+                        let nextTime = self.edit?.playableSourceTime(
+                            atOrAfter: deletedClip.span.start
+                        )
+                    else {
+                        player.pause()
+                        playbackIntent = .paused
+                        currentTime = self.edit?.lastKeptTime ?? deletedClip.span.start
+                        return
+                    }
+                    currentTime = nextTime
+                    player.seek(
+                        to: CMTime(seconds: nextTime, preferredTimescale: 600),
+                        toleranceBefore: .zero,
+                        toleranceAfter: .zero
+                    )
+                }
+            }
+        }
+    }
+
+    private func seekPlayer(to time: Double) {
+        guard let edit else { return }
+        let boundedTime = min(max(0, time), edit.sourceDuration)
+        let playableTime =
+            edit.playableSourceTime(atOrAfter: boundedTime)
+            ?? edit.lastKeptTime
+            ?? boundedTime
+        currentTime = playableTime
+        player?.seek(
+            to: CMTime(seconds: playableTime, preferredTimescale: 600),
+            toleranceBefore: .zero,
+            toleranceAfter: .zero
+        )
+    }
+
+    private func togglePlayback() {
+        guard let player, let edit else { return }
+        switch playbackIntent {
+        case .playing:
+            pausePlayback()
+        case .paused:
+            if editedCurrentTime >= edit.editedDuration - 0.01,
+                let firstKeptTime = edit.sourceTime(forEditedTime: 0)
+            {
+                seekPlayer(to: firstKeptTime)
+            }
+            playbackIntent = .playing
+            player.play()
+        }
+    }
+
+    private func pausePlayback() {
+        player?.pause()
+        playbackIntent = .paused
+    }
+
+    private func skipEditedSeconds(_ seconds: Double) {
+        guard
+            let edit,
+            let sourceTime = PostRecordingTimelineMath.sourceTimeBySkipping(
+                fromSourceTime: currentTime,
+                seconds: seconds,
+                edit: edit
+            )
+        else { return }
+        seekPlayer(to: sourceTime)
+    }
+
     private func startVideoExport(preset: String, suffix: String) {
         guard !isExporting else { return }
+        pausePlayback()
         isExporting = true
         exportError = nil
         exportTask = Task { @MainActor in
@@ -452,6 +515,7 @@ struct PostRecordingView: View {
 
     private func startGIFExport() {
         guard !isExporting else { return }
+        pausePlayback()
         isExporting = true
         exportError = nil
         exportTask = Task { @MainActor in
@@ -461,15 +525,14 @@ struct PostRecordingView: View {
         }
     }
 
-    /// Writes a copy of the current trim range using the given export preset:
-    /// passthrough for a lossless trim, a sized preset for a smaller file.
     private func performVideoExport(preset: String, suffix: String) async {
         guard let outputURL = await selectExportURL(suffix: suffix) else {
             return
         }
+        guard let edit else { return }
 
         do {
-            let warning = try await exportVideo(to: outputURL, preset: preset)
+            let warning = try await exportVideo(to: outputURL, preset: preset, edit: edit)
             try Task.checkCancellation()
             if let warning {
                 exportError = warning.localizedDescription
@@ -490,9 +553,10 @@ struct PostRecordingView: View {
         guard let outputURL = await selectExportURL(suffix: "gif", contentType: .gif) else {
             return
         }
+        guard let edit else { return }
 
         do {
-            let warning = try await exportGIF(to: outputURL)
+            let warning = try await exportGIF(to: outputURL, edit: edit)
             try Task.checkCancellation()
             if let warning {
                 exportError = warning.localizedDescription
@@ -509,27 +573,26 @@ struct PostRecordingView: View {
         }
     }
 
-    private func exportGIF(to outputURL: URL) async throws -> FileReplacementWarning? {
+    private func exportGIF(to outputURL: URL, edit: TimelineEdit) async throws -> FileReplacementWarning? {
         let tempURL = ExportFileNaming.temporaryURL(for: outputURL)
         defer {
             removeTemporaryExport(at: tempURL, kind: "GIF")
         }
 
-        try await writeGIF(to: tempURL)
+        try await writeGIF(to: tempURL, edit: edit)
         try Task.checkCancellation()
         return try FileReplacement.commit(tempURL: tempURL, to: outputURL)
     }
 
-    private func writeGIF(to outputURL: URL) async throws {
+    private func writeGIF(to outputURL: URL, edit: TimelineEdit) async throws {
         let asset = AVURLAsset(url: videoURL)
         let generator = AVAssetImageGenerator(asset: asset)
         generator.appliesPreferredTrackTransform = true
         generator.requestedTimeToleranceBefore = .zero
         generator.requestedTimeToleranceAfter = .zero
-        // Scales to fit while preserving aspect ratio.
         generator.maximumSize = CGSize(width: GIFExport.maxWidth, height: GIFExport.maxWidth)
 
-        let sampling = GIFExport.frames(start: trimStart, end: trimEnd)
+        let sampling = GIFExport.frames(edit: edit)
 
         guard
             let destination = CGImageDestinationCreateWithURL(
@@ -585,25 +648,22 @@ struct PostRecordingView: View {
         return panel.url
     }
 
-    private func exportVideo(to outputURL: URL, preset: String) async throws -> FileReplacementWarning? {
-        let asset = AVURLAsset(url: videoURL)
+    private func exportVideo(
+        to outputURL: URL,
+        preset: String,
+        edit: TimelineEdit
+    ) async throws -> FileReplacementWarning? {
         let tempURL = ExportFileNaming.temporaryURL(for: outputURL)
         defer {
             removeTemporaryExport(at: tempURL, kind: "video")
         }
 
-        let startTime = CMTime(seconds: trimStart, preferredTimescale: 600)
-        let endTime = CMTime(seconds: trimEnd, preferredTimescale: 600)
-        let timeRange = CMTimeRange(start: startTime, end: endTime)
-
-        // Passthrough re-muxes without re-encoding: lossless and near-instant
-        // for a pure trim. A sized preset re-encodes, which is the point when
-        // the goal is a smaller file.
-        guard let session = AVAssetExportSession(asset: asset, presetName: preset) else {
-            throw ExportError.presetUnavailable(preset)
-        }
-        session.timeRange = timeRange
-        try await session.export(to: tempURL, as: .mp4)
+        try await VideoEditExporter.export(
+            sourceURL: videoURL,
+            outputURL: tempURL,
+            preset: preset,
+            edit: edit
+        )
         try Task.checkCancellation()
         return try FileReplacement.commit(tempURL: tempURL, to: outputURL)
     }
@@ -621,14 +681,11 @@ struct PostRecordingView: View {
 }
 
 enum ExportError: LocalizedError {
-    case presetUnavailable(String)
     case gifDestinationUnavailable
     case gifWriteFailed
 
     var errorDescription: String? {
         switch self {
-        case .presetUnavailable(let preset):
-            return "This recording cannot be exported with the \(preset) preset."
         case .gifDestinationUnavailable:
             return "Could not create the GIF file."
         case .gifWriteFailed:
@@ -637,188 +694,61 @@ enum ExportError: LocalizedError {
     }
 }
 
-struct TrimSlider: View {
+struct PlaybackTransport: View {
+    let intent: PlaybackIntent
+    let currentTime: Double
     let duration: Double
-    @Binding var trimStart: Double
-    @Binding var trimEnd: Double
-    @Binding var currentTime: Double
-    let onSeek: (Double) -> Void
-
-    private let handleWidth: CGFloat = 12
-    private let trackHeight: CGFloat = 50
-    @State private var startHandleDragOrigin: Double?
-    @State private var endHandleDragOrigin: Double?
-    @State private var playheadDragOrigin: Double?
+    let isEnabled: Bool
+    let onTogglePlayback: () -> Void
+    let onSkip: (Double) -> Void
 
     var body: some View {
-        VStack(spacing: 8) {
-            GeometryReader { geometry in
-                let totalWidth = geometry.size.width
-                let usableWidth = totalWidth - handleWidth * 2
+        HStack(spacing: 12) {
+            Spacer()
 
-                ZStack(alignment: .leading) {
-                    Rectangle()
-                        .fill(Color.gray.opacity(0.3))
-                        .frame(height: trackHeight)
-                        .contentShape(Rectangle())
-                        .gesture(
-                            DragGesture(minimumDistance: 0)
-                                .onChanged { value in
-                                    onSeek(
-                                        TrimSliderMath.seekTime(
-                                            locationX: value.location.x,
-                                            handleWidth: handleWidth,
-                                            usableWidth: usableWidth,
-                                            duration: duration
-                                        ))
-                                }
-                        )
-
-                    Rectangle()
-                        .fill(Color.gray.opacity(0.5))
-                        .frame(width: startPosition(in: usableWidth), height: trackHeight)
-                        .allowsHitTesting(false)
-
-                    Rectangle()
-                        .fill(Color.gray.opacity(0.5))
-                        .frame(width: totalWidth - endPosition(in: usableWidth) - handleWidth, height: trackHeight)
-                        .offset(x: endPosition(in: usableWidth) + handleWidth)
-                        .allowsHitTesting(false)
-
-                    Rectangle()
-                        .fill(Color.accentColor.opacity(0.3))
-                        .frame(
-                            width: endPosition(in: usableWidth) - startPosition(in: usableWidth),
-                            height: trackHeight
-                        )
-                        .offset(x: startPosition(in: usableWidth) + handleWidth)
-                        .allowsHitTesting(false)
-
-                    TrimHandle(color: .accentColor)
-                        .frame(width: handleWidth, height: trackHeight)
-                        .offset(x: startPosition(in: usableWidth))
-                        .gesture(
-                            DragGesture()
-                                .onChanged { value in
-                                    guard usableWidth > 0 else { return }
-                                    if startHandleDragOrigin == nil {
-                                        startHandleDragOrigin = trimStart
-                                    }
-                                    let origin = startHandleDragOrigin ?? trimStart
-                                    trimStart = TrimSliderMath.clampedStart(
-                                        origin: origin,
-                                        translationWidth: value.translation.width,
-                                        usableWidth: usableWidth,
-                                        duration: duration,
-                                        trimEnd: trimEnd
-                                    )
-                                    onSeek(trimStart)
-                                }
-                                .onEnded { _ in
-                                    startHandleDragOrigin = nil
-                                }
-                        )
-
-                    TrimHandle(color: .accentColor)
-                        .frame(width: handleWidth, height: trackHeight)
-                        .offset(x: endPosition(in: usableWidth) + handleWidth)
-                        .gesture(
-                            DragGesture()
-                                .onChanged { value in
-                                    guard usableWidth > 0 else { return }
-                                    if endHandleDragOrigin == nil {
-                                        endHandleDragOrigin = trimEnd
-                                    }
-                                    let origin = endHandleDragOrigin ?? trimEnd
-                                    trimEnd = TrimSliderMath.clampedEnd(
-                                        origin: origin,
-                                        translationWidth: value.translation.width,
-                                        usableWidth: usableWidth,
-                                        duration: duration,
-                                        trimStart: trimStart
-                                    )
-                                    onSeek(trimEnd)
-                                }
-                                .onEnded { _ in
-                                    endHandleDragOrigin = nil
-                                }
-                        )
-
-                    Capsule()
-                        .fill(Color.white)
-                        .frame(width: 8, height: trackHeight + 14)
-                        .shadow(color: .black.opacity(0.3), radius: 2)
-                        .offset(x: playheadPosition(in: usableWidth) + handleWidth - 4)
-                        .gesture(
-                            DragGesture()
-                                .onChanged { value in
-                                    if playheadDragOrigin == nil {
-                                        playheadDragOrigin = currentTime
-                                    }
-                                    let time = TrimSliderMath.translatedSeekTime(
-                                        origin: playheadDragOrigin ?? currentTime,
-                                        translationWidth: value.translation.width,
-                                        usableWidth: usableWidth,
-                                        duration: duration
-                                    )
-                                    currentTime = time
-                                    onSeek(time)
-                                }
-                                .onEnded { _ in
-                                    playheadDragOrigin = nil
-                                }
-                        )
-                }
-                .clipShape(RoundedRectangle(cornerRadius: 4))
+            Button {
+                onSkip(-5)
+            } label: {
+                Label(PostRecordingText.backFiveSeconds, systemImage: "gobackward.5")
+                    .labelStyle(.iconOnly)
             }
-            .frame(height: trackHeight)
+            .help(PostRecordingText.backFiveSeconds)
+            .accessibilityLabel(PostRecordingText.backFiveSeconds)
 
-            HStack {
-                Text(formatTime(trimStart))
-                    .font(.caption.monospacedDigit())
-                    .foregroundColor(.secondary)
-                Spacer()
-                Text(formatTime(currentTime))
-                    .font(.caption.monospacedDigit())
-                Spacer()
-                Text(formatTime(trimEnd))
-                    .font(.caption.monospacedDigit())
-                    .foregroundColor(.secondary)
+            Button(action: onTogglePlayback) {
+                Label(
+                    intent == .playing ? PostRecordingText.pause : PostRecordingText.play,
+                    systemImage: intent == .playing ? "pause.fill" : "play.fill"
+                )
+                .labelStyle(.iconOnly)
+                .frame(width: 18)
             }
-        }
-    }
+            .keyboardShortcut(.space, modifiers: [])
+            .help(intent == .playing ? PostRecordingText.pause : PostRecordingText.play)
+            .accessibilityLabel(intent == .playing ? PostRecordingText.pause : PostRecordingText.play)
 
-    private func startPosition(in width: CGFloat) -> CGFloat {
-        TrimSliderMath.startPosition(trimStart: trimStart, duration: duration, width: width)
-    }
+            Button {
+                onSkip(5)
+            } label: {
+                Label(PostRecordingText.forwardFiveSeconds, systemImage: "goforward.5")
+                    .labelStyle(.iconOnly)
+            }
+            .help(PostRecordingText.forwardFiveSeconds)
+            .accessibilityLabel(PostRecordingText.forwardFiveSeconds)
 
-    private func endPosition(in width: CGFloat) -> CGFloat {
-        TrimSliderMath.endPosition(trimEnd: trimEnd, duration: duration, width: width)
-    }
+            Spacer()
 
-    private func playheadPosition(in width: CGFloat) -> CGFloat {
-        TrimSliderMath.playheadPosition(currentTime: currentTime, duration: duration, width: width)
-    }
-
-    private func formatTime(_ seconds: Double) -> String {
-        TrimSliderMath.formattedTime(seconds)
-    }
-}
-
-struct TrimHandle: View {
-    let color: Color
-
-    var body: some View {
-        RoundedRectangle(cornerRadius: 2)
-            .fill(color)
-            .overlay(
-                VStack(spacing: 3) {
-                    ForEach(0..<3, id: \.self) { _ in
-                        RoundedRectangle(cornerRadius: 1)
-                            .fill(Color.white.opacity(0.8))
-                            .frame(width: 4, height: 2)
-                    }
-                }
+            Text(
+                "\(PostRecordingTimelineMath.formattedTime(currentTime)) / \(PostRecordingTimelineMath.formattedTime(duration))"
             )
+            .font(.body.monospacedDigit())
+            .foregroundStyle(.secondary)
+            .frame(width: 150, alignment: .trailing)
+            .accessibilityLabel(PostRecordingText.editedPlaybackTime)
+            .accessibilityValue(
+                "\(PostRecordingTimelineMath.formattedTime(currentTime)) of \(PostRecordingTimelineMath.formattedTime(duration))"
+            )
+        }
+        .disabled(!isEnabled)
     }
 }

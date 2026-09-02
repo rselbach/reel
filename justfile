@@ -150,6 +150,9 @@ dmg-signed: sign _dmg-only _sign-dmg
 run: build-app
     open "{{ app_dir }}"
 
+run-signed: sign
+    open "{{ app_dir }}"
+
 # Clean build artifacts
 clean:
     rm -rf .build
@@ -209,6 +212,7 @@ help:
     @echo "  record-manual-dry-run Preview manual validation result"
     @echo "  manual-status  Summarize manual validation progress"
     @echo "  run            Build and open the app"
+    @echo "  run-signed     Build, sign, and open the app"
     @echo "  clean          Remove build artifacts"
     @echo "  list-identities Show available signing certs"
     @echo ""

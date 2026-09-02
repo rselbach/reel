@@ -486,7 +486,11 @@ final class AppSettingsTests: XCTestCase {
 
     @MainActor
     func testGIFSamplingHitsTargetFrameRateForShortClips() {
-        let sampling = GIFExport.frames(start: 2, end: 7)
+        let firstID = UUID()
+        var edit = TimelineEdit(sourceDuration: 7, initialClipID: firstID)!
+        XCTAssertNotNil(edit.splitClip(at: 2))
+        XCTAssertTrue(edit.deleteClip(id: firstID))
+        let sampling = GIFExport.frames(edit: edit)
         XCTAssertEqual(sampling.times.count, 60, "5 seconds at 12 fps")
         XCTAssertEqual(sampling.times.first ?? -1, 2, accuracy: 0.0001)
         XCTAssertEqual(sampling.delay, 1.0 / GIFExport.frameRate, accuracy: 0.0001)
@@ -495,20 +499,21 @@ final class AppSettingsTests: XCTestCase {
 
     @MainActor
     func testGIFSamplingThinsLongClipsRatherThanTruncatingThem() {
-        // Ten minutes: far beyond the frame cap.
-        let sampling = GIFExport.frames(start: 0, end: 600)
+        let sampling = GIFExport.frames(edit: TimelineEdit(sourceDuration: 600)!)
         XCTAssertEqual(sampling.times.count, GIFExport.maxFrames)
-        // The whole range is still represented, just sampled more sparsely,
-        // and the delay keeps playback at real speed.
         XCTAssertGreaterThan(sampling.times.last ?? 0, 590)
         XCTAssertEqual(sampling.delay, 600 / Double(GIFExport.maxFrames), accuracy: 0.0001)
     }
 
     @MainActor
-    func testGIFSamplingHandlesAnEmptyRange() {
-        let sampling = GIFExport.frames(start: 4, end: 4)
-        XCTAssertEqual(sampling.times, [4])
-        XCTAssertGreaterThan(sampling.delay, 0)
+    func testGIFSamplingSkipsDeletedClips() {
+        var edit = TimelineEdit(sourceDuration: 10)!
+        let middleID = edit.splitClip(at: 4)!
+        XCTAssertNotNil(edit.splitClip(at: 6))
+        XCTAssertTrue(edit.deleteClip(id: middleID))
+        let sampling = GIFExport.frames(edit: edit)
+        XCTAssertFalse(sampling.times.contains { $0 >= 4 && $0 < 6 })
+        XCTAssertEqual(sampling.delay, edit.editedDuration / Double(sampling.times.count), accuracy: 0.0001)
     }
 
     func testExportsUseHiddenSiblingFilesBeforeAtomicReplacement() {
@@ -1181,7 +1186,16 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(PostRecordingText.loading, "Loading...")
         XCTAssertEqual(PostRecordingText.revealInFinder, "Reveal in Finder")
         XCTAssertEqual(PostRecordingText.delete, "Move to Trash")
-        XCTAssertEqual(PostRecordingText.saveTrimmed, "Save Trimmed...")
+        XCTAssertEqual(PostRecordingText.saveEdited, "Save Edited...")
+        XCTAssertEqual(PostRecordingText.timeline, "Timeline")
+        XCTAssertEqual(PostRecordingText.clearSelection, "Clear Selection")
+        XCTAssertEqual(PostRecordingText.splitClipAtPlayhead, "Split Clip at Playhead")
+        XCTAssertEqual(PostRecordingText.deleteClip, "Delete Clip")
+        XCTAssertEqual(PostRecordingText.restoreClip, "Restore Clip")
+        XCTAssertEqual(PostRecordingText.backFiveSeconds, "Back 5 seconds")
+        XCTAssertEqual(PostRecordingText.forwardFiveSeconds, "Forward 5 seconds")
+        XCTAssertEqual(PostRecordingText.play, "Play")
+        XCTAssertEqual(PostRecordingText.pause, "Pause")
         XCTAssertEqual(PostRecordingText.done, "Done")
         XCTAssertEqual(PostRecordingText.recordAgain, "Record Again")
         XCTAssertEqual(PostRecordingText.changeTarget, "Change Target...")
@@ -2274,127 +2288,11 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(CarbonModifierTranslation.carbonModifiers(fromEventModifiers: 0), 0)
     }
 
-    func testTrimSliderMathCalculatesPositionsAndFormattedTime() {
-        XCTAssertEqual(
-            TrimSliderMath.startPosition(trimStart: 2, duration: 10, width: 100),
-            20
-        )
-        XCTAssertEqual(
-            TrimSliderMath.endPosition(trimEnd: 8, duration: 10, width: 100),
-            80
-        )
-        XCTAssertEqual(
-            TrimSliderMath.playheadPosition(currentTime: 5, duration: 10, width: 100),
-            50
-        )
-        XCTAssertEqual(TrimSliderMath.formattedTime(65.4), "1:05.4")
-        XCTAssertEqual(TrimSliderMath.formattedTime(.nan), "0:00.0")
-        XCTAssertEqual(
-            TrimSliderMath.playheadPosition(currentTime: .nan, duration: 10, width: 100),
-            0
-        )
-        XCTAssertEqual(
-            TrimSliderMath.translatedSeekTime(
-                origin: 5,
-                translationWidth: 20,
-                usableWidth: 100,
-                duration: 10
-            ),
-            7,
-            accuracy: 0.001
-        )
-    }
-
-    func testTrimSliderMathClampsSeekAndMaintainsMinimumRange() {
-        XCTAssertEqual(
-            TrimSliderMath.seekTime(locationX: -100, handleWidth: 12, usableWidth: 100, duration: 10),
-            0
-        )
-        XCTAssertEqual(
-            TrimSliderMath.seekTime(locationX: 500, handleWidth: 12, usableWidth: 100, duration: 10),
-            10
-        )
-        XCTAssertEqual(
-            TrimSliderMath.clampedStart(
-                origin: 4.8,
-                translationWidth: 100,
-                usableWidth: 100,
-                duration: 10,
-                trimEnd: 5
-            ),
-            4.5
-        )
-        XCTAssertEqual(
-            TrimSliderMath.clampedEnd(
-                origin: 5.2,
-                translationWidth: -100,
-                usableWidth: 100,
-                duration: 10,
-                trimStart: 5
-            ),
-            5.5
-        )
-    }
-
-    func testTrimSliderMathKeepsShortRecordingRangeValid() {
-        XCTAssertEqual(
-            TrimSliderMath.clampedStart(
-                origin: 0,
-                translationWidth: 100,
-                usableWidth: 100,
-                duration: 0.2,
-                trimEnd: 0.2
-            ),
-            0
-        )
-        XCTAssertEqual(
-            TrimSliderMath.clampedEnd(
-                origin: 0.2,
-                translationWidth: -100,
-                usableWidth: 100,
-                duration: 0.2,
-                trimStart: 0
-            ),
-            0.2
-        )
-    }
-
-    func testPostRecordingLogicShowsSaveTrimmedOnlyForMeaningfulTrimChanges() {
-        XCTAssertFalse(PostRecordingLogic.hasTrimChanges(duration: 0, trimStart: 1, trimEnd: 5))
-        XCTAssertFalse(PostRecordingLogic.hasTrimChanges(duration: 10, trimStart: 0.05, trimEnd: 9.95))
-        XCTAssertTrue(PostRecordingLogic.hasTrimChanges(duration: 10, trimStart: 0.2, trimEnd: 10))
-        XCTAssertTrue(PostRecordingLogic.hasTrimChanges(duration: 10, trimStart: 0, trimEnd: 9.8))
-    }
-
-    func testPostRecordingLogicExportsOnlyAValidLoadedRange() {
-        XCTAssertTrue(
-            PostRecordingLogic.canExport(
-                duration: 10,
-                trimStart: 0,
-                trimEnd: 10,
-                isExporting: false
-            ))
-        XCTAssertFalse(
-            PostRecordingLogic.canExport(
-                duration: 0,
-                trimStart: 0,
-                trimEnd: 0,
-                isExporting: false
-            ))
-        XCTAssertFalse(
-            PostRecordingLogic.canExport(
-                duration: 10,
-                trimStart: 5,
-                trimEnd: 5,
-                isExporting: false
-            ))
-        XCTAssertFalse(
-            PostRecordingLogic.canExport(
-                duration: 10,
-                trimStart: 0,
-                trimEnd: 10,
-                isExporting: true
-            ))
+    func testPostRecordingLogicExportsOnlyLoadedIdleEdits() {
+        let edit = TimelineEdit(sourceDuration: 10)
+        XCTAssertTrue(PostRecordingLogic.canExport(edit: edit, isExporting: false))
+        XCTAssertFalse(PostRecordingLogic.canExport(edit: nil, isExporting: false))
+        XCTAssertFalse(PostRecordingLogic.canExport(edit: edit, isExporting: true))
     }
 
     @MainActor

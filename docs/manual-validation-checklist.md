@@ -260,39 +260,44 @@ Notes:
 
 ## US-014 - Preview after recording
 
-User story: As a user, I want a preview window after capture so I can inspect, reveal, delete, or finish with the recording.
+User story: As a user, I want a preview window after capture so I can inspect, edit, reveal, delete, or finish with the recording.
 
-Expected behavior: When enabled, a preview window opens after each recording with playback, a trim slider, a draggable file chip, copy, reveal, delete, Record Again, and export actions. Record Again closes the preview and reopens the recording picker, since another take of the same thing is the usual next step.
+Expected behavior: When enabled, a preview window opens after each recording with playback, a draggable playhead, split clips, a draggable file chip, copy, reveal, delete, Record Again, and export actions. Right-clicking the timeline splits at the playhead. Any retained clip can be deleted and any deleted clip can be restored. Record Again closes the preview and starts another take with the remembered target.
 
 Manual steps:
 
 1. Record something with preview enabled
-2. verify the preview opens and plays
-3. press Record Again and verify the preview closes and the picker opens with the previous target preselected
-4. verify Done closes the preview without deleting the file.
+2. drag the playhead and right-click to split three times
+3. delete and restore a middle clip
+4. delete and restore the first and last clips
+5. verify playback skips deleted clips
+6. press Record Again and verify countdown starts for the remembered target
+7. verify Done closes the preview without deleting the file.
 
-Current status: Partial automated evidence passed; manual UI validation still pending. Validate manually using the listed steps.
+Current status: Partial automated evidence passed; manual UI and accessibility interaction validation still pending. Validate manually using the listed steps.
 
 Result: [ ] Pass  [ ] Fail  [ ] Blocked
 
 Notes:
 
-## US-015 - Trim preview export
+## US-015 - Preview timeline editing and export
 
-User story: As a user, I want to trim the start/end of a recording and export a new MP4.
+User story: As a user, I want to trim either end or remove sections from the middle of a recording and export a new MP4.
 
-Expected behavior: The preview offers two exports of the current trim range: Save Trimmed, which re-muxes losslessly with the passthrough preset and appears only when a trim is set, and Smaller Copy, which re-encodes at 720p for sharing. Both write to a temporary file beside the destination and commit it atomically, restoring the original if the replace fails, and report a preset the recording cannot use rather than failing silently. Exports reveal the result in Finder.
+Expected behavior: The preview splits the source into clips at the playhead. Deleting the first or last clip trims an endpoint, while deleting an interior clip removes a middle section. Save Edited appears after a deletion. A single kept range uses the passthrough preset directly; multiple kept ranges are joined in source order with AVMutableComposition before export. Smaller Copy applies the same edit at 720p. Both exports use a temporary sibling file and rollback-safe atomic replacement, report failures, and reveal the result in Finder.
 
 Manual steps:
 
-1. Record something, trim it, and use Save Trimmed
-2. verify the output covers the trimmed range and is lossless
-3. use Smaller Copy on the same recording and verify the output is 720p tall and noticeably smaller
-4. verify both reveal in Finder
-5. verify Smaller Copy is available without a trim set
-6. overwrite an existing file with each and verify the original is not lost if the write fails.
+1. Record at least ten seconds
+2. split the timeline into four clips
+3. delete the first, last, and one middle clip
+4. save with Save Edited
+5. verify the output duration equals the sum of the kept clips and audio/video stay continuous at each join
+6. restore one clip and export again
+7. verify Smaller Copy applies the same edits and remains 720p
+8. overwrite an existing destination and verify rollback protection on failure.
 
-Current status: Partial automated evidence passed; manual UI validation still pending. Validate manually using the listed steps.
+Current status: Partial automated evidence passed; manual UI and audio continuity validation still pending. Validate manually using the listed steps.
 
 Result: [ ] Pass  [ ] Fail  [ ] Blocked
 
@@ -819,14 +824,16 @@ Notes:
 
 User story: As a user putting a demo in a README, an issue, or a pull request, I want a looping GIF without taking the recording into another tool.
 
-Expected behavior: The preview exports the current trim range as an infinitely looping GIF. Frames are sampled at 12 fps and scaled to fit 800 pixels preserving aspect ratio; ranges longer than 300 frames are sampled more sparsely across the whole range rather than truncated, with the per-frame delay set from the actual spacing so playback stays at real speed. Failures to create or finalize the file are reported rather than leaving a partial GIF unexplained.
+Expected behavior: The preview exports the edited timeline as an infinitely looping GIF. Frames are sampled uniformly across edited time and mapped back to retained clips, so deleting endpoint or middle clips is honored. Output is scaled to fit 800 pixels while preserving aspect ratio. Timelines longer than 300 frames are sampled more sparsely across the whole result, with delay based on actual spacing so playback stays at real speed. Creation and finalization failures are reported.
 
 Manual steps:
 
-1. Record a few seconds, export a GIF, and verify it loops, plays at the right speed, and is no wider than 800 pixels
-2. trim the recording and verify the GIF covers only the trimmed range
-3. export a GIF from a recording several minutes long and verify it still spans the whole range and plays at real speed rather than being cut short
-4. verify the GIF opens in Finder preview and a browser.
+1. Record a few seconds
+2. split it into clips and delete an endpoint and a middle clip
+3. export a GIF
+4. verify it loops, omits deleted clips, plays at the right speed, and is no wider than 800 pixels
+5. export a several-minute recording and verify it spans the edited timeline rather than being truncated
+6. verify the GIF opens in Finder preview and a browser.
 
 Current status: Partial automated evidence passed; manual UI validation still pending. Validate manually using the listed steps.
 

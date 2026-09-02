@@ -1,0 +1,507 @@
+#!/usr/bin/env bash
+# Build, launch, inspect, and clean up an isolated Reel verification app.
+
+set -euo pipefail
+
+SCRIPT_DIR="$(
+  cd "$(dirname "${BASH_SOURCE[0]}")"
+  pwd -P
+)"
+readonly SCRIPT_DIR
+REPO_ROOT="$(
+  cd "${SCRIPT_DIR}/../../../.."
+  pwd -P
+)"
+readonly REPO_ROOT
+readonly VERIFY_ROOT="${REPO_ROOT}/.build/verify-reel"
+readonly RUNS_ROOT="${VERIFY_ROOT}/runs"
+readonly CURRENT_RUN_FILE="${VERIFY_ROOT}/current-run"
+readonly APP_PATH="${VERIFY_ROOT}/Reel Verification.app"
+readonly BUNDLE_ID="com.rselbach.reel.verification"
+readonly EVIDENCE_ROOT="${REPO_ROOT}/.build/verification-evidence/reel"
+
+failed_run_dir=""
+failed_run_id=""
+failed_pid=""
+failed_executable=""
+
+usage() {
+  cat >&2 <<'EOF'
+Usage:
+  verify-reel launch <run-id>
+  verify-reel relaunch <run-id>
+  verify-reel doctor <run-id>
+  verify-reel describe <run-id>
+  verify-reel preference <run-id> <key>
+  verify-reel cleanup <run-id>
+EOF
+}
+
+die() {
+  printf 'verify-reel: %s\n' "$*" >&2
+  exit 1
+}
+
+validate_run_id() {
+  local run_id="$1"
+
+  [[ "${run_id}" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]] ||
+    die "invalid run ID: ${run_id}"
+}
+
+run_dir_for() {
+  local run_id="$1"
+
+  printf '%s/%s\n' "${RUNS_ROOT}" "${run_id}"
+}
+
+read_value() {
+  local run_dir="$1"
+  local name="$2"
+  local path="${run_dir}/${name}"
+
+  [[ -f "${path}" ]] || die "missing run metadata: ${path}"
+  sed -n '1p' "${path}"
+}
+
+write_value() {
+  local run_dir="$1"
+  local name="$2"
+  local value="$3"
+
+  printf '%s\n' "${value}" >"${run_dir}/${name}"
+}
+
+process_command() {
+  local pid="$1"
+
+  ps -p "${pid}" -o command= 2>/dev/null || true
+}
+
+assert_expected_process() {
+  local pid="$1"
+  local executable="$2"
+  local command
+
+  command="$(process_command "${pid}")"
+  [[ -n "${command}" ]] || die "PID ${pid} is not running"
+  [[ "${command}" == "${executable}" ]] ||
+    die "PID ${pid} belongs to '${command}', not '${executable}'"
+}
+
+stop_expected_process() {
+  local pid="$1"
+  local executable="$2"
+  local command
+  local attempt
+
+  command="$(process_command "${pid}")"
+  [[ -n "${command}" ]] || return 0
+  [[ "${command}" == "${executable}" ]] ||
+    die "refusing to signal PID ${pid}, which now runs '${command}'"
+
+  kill "${pid}"
+  for ((attempt = 0; attempt < 50; attempt++)); do
+    if [[ -z "$(process_command "${pid}")" ]]; then
+      return
+    fi
+    sleep 0.1
+  done
+
+  command="$(process_command "${pid}")"
+  [[ -n "${command}" ]] || return 0
+  [[ "${command}" == "${executable}" ]] ||
+    die "refusing to force-kill PID ${pid}, which now runs '${command}'"
+  kill -KILL "${pid}"
+}
+
+list_reel_processes() {
+  local pid
+  local command
+
+  while IFS= read -r pid; do
+    [[ -n "${pid}" ]] || continue
+    command="$(process_command "${pid}")"
+    [[ -n "${command}" ]] || continue
+    printf '%s %s\n' "${pid}" "${command}"
+  done < <(
+    {
+      pgrep -x Reel 2>/dev/null || true
+      pgrep -f '/Contents/MacOS/Reel$' 2>/dev/null || true
+    } | sort -u
+  )
+  return 0
+}
+
+pid_for_executable() {
+  local executable="$1"
+  local pid
+  local command
+
+  while IFS= read -r pid; do
+    [[ -n "${pid}" ]] || continue
+    command="$(process_command "${pid}")"
+    if [[ "${command}" == "${executable}" ]]; then
+      printf '%s\n' "${pid}"
+      return
+    fi
+  done < <(pgrep -f -x "${executable}" 2>/dev/null || true)
+  return 0
+}
+
+assert_no_reel_processes() {
+  local processes
+
+  processes="$(list_reel_processes)"
+  if [[ -n "${processes}" ]]; then
+    printf '%s\n' \
+      'verify-reel: another Reel process is running:' \
+      "${processes}" \
+      'Quit it yourself before verification; this helper will not kill it.' \
+      >&2
+    exit 1
+  fi
+}
+
+cleanup_failed_launch() {
+  local status="$?"
+  local command=""
+
+  if ((status == 0)) || [[ -z "${failed_run_dir}" ]]; then
+    return
+  fi
+
+  if [[ -n "${failed_pid}" && -n "${failed_executable}" ]]; then
+    command="$(process_command "${failed_pid}")"
+    if [[ "${command}" == "${failed_executable}" ]]; then
+      kill "${failed_pid}" 2>/dev/null || true
+    fi
+  fi
+
+  rm -rf -- "${failed_run_dir}"
+  if [[ -d "${APP_PATH}" ]]; then
+    rm -rf -- "${APP_PATH}"
+  fi
+  if [[ -n "${failed_run_id}" && -f "${CURRENT_RUN_FILE}" ]] &&
+    [[ "$(sed -n '1p' "${CURRENT_RUN_FILE}")" == "${failed_run_id}" ]]
+  then
+    rm -f -- "${CURRENT_RUN_FILE}"
+  fi
+}
+
+sign_verification_app() {
+  local evidence_dir="$1"
+  local identity="${SIGNING_IDENTITY:-}"
+
+  [[ -n "${identity}" ]] || return
+
+  codesign --force --options runtime --deep \
+    --sign "${identity}" \
+    "${APP_PATH}/Contents/Frameworks/Sparkle.framework"
+  codesign --force --options runtime \
+    --entitlements "${REPO_ROOT}/Reel.entitlements" \
+    --sign "${identity}" \
+    "${APP_PATH}/Contents/MacOS/Reel"
+  codesign --force --options runtime \
+    --entitlements "${REPO_ROOT}/Reel.entitlements" \
+    --sign "${identity}" \
+    "${APP_PATH}"
+  codesign --verify --deep --strict --verbose=2 "${APP_PATH}"
+  codesign -dv --verbose=4 "${APP_PATH}" \
+    >"${evidence_dir}/codesign.txt" 2>&1
+  codesign -dr - "${APP_PATH}" \
+    >>"${evidence_dir}/codesign.txt" 2>&1
+  codesign --verify --deep --strict --verbose=2 "${APP_PATH}" \
+    >>"${evidence_dir}/codesign.txt" 2>&1
+}
+
+launch_run() {
+  local run_id="$1"
+  local run_dir
+  local evidence_dir
+  local user_home
+  local executable
+  local plist
+  local pid
+  local attempt
+
+  validate_run_id "${run_id}"
+  assert_no_reel_processes
+
+  run_dir="$(run_dir_for "${run_id}")"
+  evidence_dir="${EVIDENCE_ROOT}/${run_id}"
+  user_home="${run_dir}/user-home"
+  executable="${APP_PATH}/Contents/MacOS/Reel"
+  plist="${APP_PATH}/Contents/Info.plist"
+
+  [[ ! -e "${run_dir}" ]] || die "run already exists: ${run_id}"
+  [[ ! -e "${APP_PATH}" ]] ||
+    die "verification app already exists; clean its recorded run first"
+
+  failed_run_dir="${run_dir}"
+  failed_run_id="${run_id}"
+  trap cleanup_failed_launch EXIT
+
+  mkdir -p \
+    "${run_dir}" \
+    "${user_home}/Library/Preferences" \
+    "${user_home}/Movies" \
+    "${evidence_dir}"
+
+  if ! (cd "${REPO_ROOT}" && just build-app); then
+    die "just build-app failed"
+  fi
+
+  cp -R "${REPO_ROOT}/.build/Reel.app" "${APP_PATH}"
+  plutil -replace CFBundleIdentifier -string "${BUNDLE_ID}" "${plist}"
+  plutil -replace CFBundleName -string "Reel Verification" "${plist}"
+  plutil -replace CFBundleDisplayName -string "Reel Verification" "${plist}"
+  sign_verification_app "${evidence_dir}"
+
+  write_value "${run_dir}" app-path "${APP_PATH}"
+  write_value "${run_dir}" bundle-id "${BUNDLE_ID}"
+  write_value "${run_dir}" evidence-dir "${evidence_dir}"
+  write_value "${run_dir}" executable "${executable}"
+  write_value "${run_dir}" user-home-path "${user_home}"
+
+  open -n -a "${APP_PATH}" \
+    --env "CFFIXED_USER_HOME=${user_home}" \
+    --stdout "${evidence_dir}/app.stdout.log" \
+    --stderr "${evidence_dir}/app.stderr.log"
+
+  for ((attempt = 0; attempt < 30; attempt++)); do
+    pid="$(pid_for_executable "${executable}")"
+    if [[ -n "${pid}" ]]; then
+      break
+    fi
+    sleep 0.1
+  done
+
+  [[ -n "${pid}" ]] || die "launched app did not register a process"
+  failed_pid="${pid}"
+  failed_executable="${executable}"
+  write_value "${run_dir}" pid "${pid}"
+  assert_expected_process "${pid}" "${executable}"
+  printf '%s\n' "${run_id}" >"${CURRENT_RUN_FILE}"
+  doctor_run "${run_id}"
+
+  failed_run_dir=""
+  failed_run_id=""
+  failed_pid=""
+  failed_executable=""
+  trap - EXIT
+  printf 'ready run_id=%s\n' "${run_id}"
+}
+
+relaunch_run() {
+  local run_id="$1"
+  local run_dir
+  local app_path
+  local evidence_dir
+  local executable
+  local user_home
+  local recorded_pid
+  local pid
+  local attempt
+
+  validate_run_id "${run_id}"
+  run_dir="$(run_dir_for "${run_id}")"
+  [[ -d "${run_dir}" ]] || die "unknown run: ${run_id}"
+
+  app_path="$(read_value "${run_dir}" app-path)"
+  evidence_dir="$(read_value "${run_dir}" evidence-dir)"
+  executable="$(read_value "${run_dir}" executable)"
+  user_home="$(read_value "${run_dir}" user-home-path)"
+  recorded_pid="$(read_value "${run_dir}" pid)"
+  [[ "${app_path}" == "${APP_PATH}" ]] ||
+    die "run metadata names an unexpected app path: ${app_path}"
+  [[ -d "${app_path}" ]] || die "verification app is missing: ${app_path}"
+
+  stop_expected_process "${recorded_pid}" "${executable}"
+  pid="$(pid_for_executable "${executable}")"
+
+  if [[ -z "${pid}" ]]; then
+    open -n -a "${app_path}" \
+      --env "CFFIXED_USER_HOME=${user_home}" \
+      --stdout "${evidence_dir}/app.stdout.log" \
+      --stderr "${evidence_dir}/app.stderr.log"
+
+    for ((attempt = 0; attempt < 30; attempt++)); do
+      pid="$(pid_for_executable "${executable}")"
+      if [[ -n "${pid}" ]]; then
+        break
+      fi
+      sleep 0.1
+    done
+  fi
+
+  [[ -n "${pid}" ]] || die "relaunched app did not register a process"
+  write_value "${run_dir}" pid "${pid}"
+  doctor_run "${run_id}"
+  printf 'relaunched run_id=%s old_pid=%s new_pid=%s\n' \
+    "${run_id}" "${recorded_pid}" "${pid}"
+}
+
+doctor_run() {
+  local run_id="$1"
+  local run_dir
+  local app_path
+  local bundle_id
+  local evidence_dir
+  local executable
+  local pid
+  local plist
+  local actual_bundle_id
+  local embedded_commit
+  local head_commit
+  local network_connections
+
+  validate_run_id "${run_id}"
+  run_dir="$(run_dir_for "${run_id}")"
+  [[ -d "${run_dir}" ]] || die "unknown run: ${run_id}"
+
+  app_path="$(read_value "${run_dir}" app-path)"
+  bundle_id="$(read_value "${run_dir}" bundle-id)"
+  evidence_dir="$(read_value "${run_dir}" evidence-dir)"
+  executable="$(read_value "${run_dir}" executable)"
+  pid="$(read_value "${run_dir}" pid)"
+  plist="${app_path}/Contents/Info.plist"
+
+  [[ "${app_path}" == "${APP_PATH}" ]] ||
+    die "run metadata names an unexpected app path: ${app_path}"
+  [[ "${bundle_id}" == "${BUNDLE_ID}" ]] ||
+    die "run metadata names an unexpected bundle ID: ${bundle_id}"
+  [[ -f "${plist}" ]] || die "copied app is missing Info.plist"
+  assert_expected_process "${pid}" "${executable}"
+
+  actual_bundle_id="$(plutil -extract CFBundleIdentifier raw -o - "${plist}")"
+  [[ "${actual_bundle_id}" == "${bundle_id}" ]] ||
+    die "copied bundle ID is ${actual_bundle_id}, want ${bundle_id}"
+
+  embedded_commit="$(plutil -extract GitCommit raw -o - "${plist}")"
+  head_commit="$(git -C "${REPO_ROOT}" rev-parse --short HEAD)"
+  [[ "${embedded_commit}" == "${head_commit}" ]] ||
+    die "copied build is ${embedded_commit}, want HEAD ${head_commit}"
+
+  network_connections="$(
+    { lsof -nP -a -p "${pid}" -i 2>/dev/null || true; } \
+      | sed '1d' \
+      | wc -l \
+      | tr -d ' '
+  )"
+
+  {
+    printf '%s\n' \
+      "healthy run_id=${run_id}" \
+      "pid=${pid}" \
+      "app_path=${app_path}" \
+      "bundle_id=${bundle_id}" \
+      "commit=${embedded_commit}" \
+      "evidence_dir=${evidence_dir}" \
+      "network_connections=${network_connections}"
+  } | tee "${evidence_dir}/doctor.txt"
+}
+
+describe_run() {
+  local run_id="$1"
+  local run_dir
+  local name
+
+  validate_run_id "${run_id}"
+  run_dir="$(run_dir_for "${run_id}")"
+  [[ -d "${run_dir}" ]] || die "unknown run: ${run_id}"
+
+  for name in pid app-path bundle-id executable user-home-path evidence-dir; do
+    printf '%s=%s\n' "${name}" "$(read_value "${run_dir}" "${name}")"
+  done
+}
+
+read_preference() {
+  local run_id="$1"
+  local key="$2"
+  local run_dir
+  local bundle_id
+  local user_home
+
+  validate_run_id "${run_id}"
+  run_dir="$(run_dir_for "${run_id}")"
+  [[ -d "${run_dir}" ]] || die "unknown run: ${run_id}"
+  bundle_id="$(read_value "${run_dir}" bundle-id)"
+  user_home="$(read_value "${run_dir}" user-home-path)"
+
+  CFFIXED_USER_HOME="${user_home}" defaults read "${bundle_id}" "${key}"
+}
+
+cleanup_run() {
+  local run_id="$1"
+  local run_dir
+  local app_path
+  local evidence_dir
+  local executable
+  local pid
+  local attempt
+
+  validate_run_id "${run_id}"
+  run_dir="$(run_dir_for "${run_id}")"
+  [[ -d "${run_dir}" ]] || die "unknown run: ${run_id}"
+
+  app_path="$(read_value "${run_dir}" app-path)"
+  evidence_dir="$(read_value "${run_dir}" evidence-dir)"
+  executable="$(read_value "${run_dir}" executable)"
+  pid="$(read_value "${run_dir}" pid)"
+  [[ "${app_path}" == "${APP_PATH}" ]] ||
+    die "refusing to remove unexpected app path: ${app_path}"
+
+  stop_expected_process "${pid}" "${executable}"
+  for ((attempt = 0; attempt < 5; attempt++)); do
+    pid="$(pid_for_executable "${executable}")"
+    [[ -n "${pid}" ]] || break
+    stop_expected_process "${pid}" "${executable}"
+  done
+  [[ -z "$(pid_for_executable "${executable}")" ]] ||
+    die "verification app is still running after cleanup attempts"
+
+  rm -rf -- "${app_path}" "${run_dir}"
+  if [[ -f "${CURRENT_RUN_FILE}" ]] &&
+    [[ "$(sed -n '1p' "${CURRENT_RUN_FILE}")" == "${run_id}" ]]
+  then
+    rm -f -- "${CURRENT_RUN_FILE}"
+  fi
+
+  printf 'cleaned run_id=%s\n' "${run_id}"
+  printf 'evidence_preserved=%s\n' "${evidence_dir}"
+}
+
+main() {
+  local command="${1:-}"
+
+  case "${command}" in
+  launch | relaunch | doctor | describe | cleanup)
+    [[ "$#" == 2 ]] || {
+      usage
+      exit 2
+    }
+    ;;
+  preference)
+    [[ "$#" == 3 ]] || {
+      usage
+      exit 2
+    }
+    ;;
+  *)
+    usage
+    exit 2
+    ;;
+  esac
+
+  case "${command}" in
+  launch) launch_run "$2" ;;
+  relaunch) relaunch_run "$2" ;;
+  doctor) doctor_run "$2" ;;
+  describe) describe_run "$2" ;;
+  preference) read_preference "$2" "$3" ;;
+  cleanup) cleanup_run "$2" ;;
+  esac
+}
+
+main "$@"
