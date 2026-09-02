@@ -1,6 +1,11 @@
 import AVFoundation
 import Foundation
 
+enum VideoExportQuality: Sendable {
+    case source
+    case p720
+}
+
 enum VideoEditExporter {
     enum ExportError: LocalizedError {
         case presetUnavailable(String)
@@ -16,42 +21,29 @@ enum VideoEditExporter {
     static func export(
         sourceURL: URL,
         outputURL: URL,
-        preset: String,
+        quality: VideoExportQuality,
         edit: TimelineEdit
     ) async throws {
         let sourceAsset = AVURLAsset(url: sourceURL)
-        let exportAsset: AVAsset
-        let directTimeRange: CMTimeRange?
-
-        if edit.keptRanges.count == 1, let range = edit.keptRanges.first {
-            exportAsset = sourceAsset
-            directTimeRange = cmTimeRange(for: range)
-        } else {
-            let composition = AVMutableComposition()
-            var cursor = CMTime.zero
-            for range in edit.keptRanges {
-                try Task.checkCancellation()
-                let timeRange = cmTimeRange(for: range)
-                try await composition.insertTimeRange(timeRange, of: sourceAsset, at: cursor, isolation: nil)
-                cursor = CMTimeAdd(cursor, timeRange.duration)
-            }
-            exportAsset = composition
-            directTimeRange = nil
+        let plan = try await ZoomVideoComposition.exportPlan(asset: sourceAsset, edit: edit)
+        let preset: String
+        switch quality {
+        case .source:
+            preset =
+                plan.videoComposition == nil
+                ? AVAssetExportPresetPassthrough
+                : AVAssetExportPresetHighestQuality
+        case .p720:
+            preset = AVAssetExportPreset1280x720
         }
 
-        guard let session = AVAssetExportSession(asset: exportAsset, presetName: preset) else {
+        guard let session = AVAssetExportSession(asset: plan.asset, presetName: preset) else {
             throw ExportError.presetUnavailable(preset)
         }
-        if let directTimeRange {
-            session.timeRange = directTimeRange
+        if let timeRange = plan.timeRange {
+            session.timeRange = timeRange
         }
+        session.videoComposition = plan.videoComposition
         try await session.export(to: outputURL, as: .mp4)
-    }
-
-    private static func cmTimeRange(for span: TimelineSpan) -> CMTimeRange {
-        CMTimeRange(
-            start: CMTime(seconds: span.start, preferredTimescale: 600),
-            end: CMTime(seconds: span.end, preferredTimescale: 600)
-        )
     }
 }

@@ -13,12 +13,61 @@ struct TimelineClip: Identifiable, Equatable, Sendable {
     var isDeleted: Bool
 }
 
+struct UnitPoint2D: Equatable, Hashable, Sendable {
+    static let center = UnitPoint2D(uncheckedX: 0.5, y: 0.5)
+
+    let x: Double
+    let y: Double
+
+    init?(x: Double, y: Double) {
+        guard x.isFinite, y.isFinite, (0...1).contains(x), (0...1).contains(y) else {
+            return nil
+        }
+        self.init(uncheckedX: x, y: y)
+    }
+
+    private init(uncheckedX x: Double, y: Double) {
+        self.x = x
+        self.y = y
+    }
+}
+
+struct ZoomScene: Identifiable, Equatable, Sendable {
+    static let scale = 1.5
+
+    let id: UUID
+    let span: TimelineSpan
+    var focalPoint: UnitPoint2D
+}
+
+enum ZoomSceneEditError: LocalizedError, Equatable {
+    case duplicateID
+    case invalidSpan
+    case overlapsExistingScene
+    case sceneNotFound
+
+    var errorDescription: String? {
+        switch self {
+        case .duplicateID:
+            return "A zoom scene with this identity already exists."
+        case .invalidSpan:
+            return "Zoom scenes must be at least 0.25 seconds and stay within the recording."
+        case .overlapsExistingScene:
+            return "Zoom scenes cannot overlap."
+        case .sceneNotFound:
+            return "The selected zoom scene no longer exists."
+        }
+    }
+}
+
 struct TimelineEdit: Equatable, Sendable {
     static let minimumDuration: Double = 0.5
     static let minimumClipDuration: Double = 0.05
+    static let minimumZoomSceneDuration: Double = 0.25
 
     let sourceDuration: Double
     private(set) var clips: [TimelineClip]
+    private(set) var zoomScenes: [ZoomScene]
 
     init?(sourceDuration: Double, initialClipID: UUID = UUID()) {
         guard sourceDuration.isFinite, sourceDuration > 0 else { return nil }
@@ -30,6 +79,7 @@ struct TimelineEdit: Equatable, Sendable {
                 isDeleted: false
             )
         ]
+        zoomScenes = []
     }
 
     var keptRanges: [TimelineSpan] {
@@ -62,7 +112,7 @@ struct TimelineEdit: Equatable, Sendable {
     }
 
     var hasMeaningfulChanges: Bool {
-        !deletedClips.isEmpty
+        !deletedClips.isEmpty || !zoomScenes.isEmpty
     }
 
     func clip(id: TimelineClip.ID) -> TimelineClip? {
@@ -78,6 +128,101 @@ struct TimelineEdit: Equatable, Sendable {
             }
         }
         return nil
+    }
+
+    func zoomScene(id: ZoomScene.ID) -> ZoomScene? {
+        zoomScenes.first { $0.id == id }
+    }
+
+    func zoomScene(atSourceTime time: Double) -> ZoomScene? {
+        guard time.isFinite else { return nil }
+        return zoomScenes.first { time >= $0.span.start && time < $0.span.end }
+    }
+
+    func availableZoomSpan(containing time: Double) -> TimelineSpan? {
+        guard time.isFinite, time >= 0, time <= sourceDuration else { return nil }
+        guard zoomScene(atSourceTime: time) == nil else { return nil }
+
+        let start = zoomScenes.last { $0.span.end <= time }?.span.end ?? 0
+        let end = zoomScenes.first { $0.span.start >= time }?.span.start ?? sourceDuration
+        guard end - start >= Self.minimumZoomSceneDuration else { return nil }
+        return TimelineSpan(start: start, end: end)
+    }
+
+    @discardableResult
+    mutating func addZoomScene(
+        span: TimelineSpan,
+        focalPoint: UnitPoint2D = .center,
+        id: UUID = UUID()
+    ) throws -> ZoomScene.ID {
+        guard zoomScene(id: id) == nil else {
+            throw ZoomSceneEditError.duplicateID
+        }
+        try validateZoomSceneSpan(span)
+
+        let scene = ZoomScene(id: id, span: span, focalPoint: focalPoint)
+        let index = zoomScenes.firstIndex { $0.span.start > span.start } ?? zoomScenes.endIndex
+        zoomScenes.insert(scene, at: index)
+        return id
+    }
+
+    mutating func setZoomFocalPoint(_ point: UnitPoint2D, for id: ZoomScene.ID) throws {
+        guard let index = zoomScenes.firstIndex(where: { $0.id == id }) else {
+            throw ZoomSceneEditError.sceneNotFound
+        }
+        zoomScenes[index].focalPoint = point
+    }
+
+    func zoomSceneResizeBounds(id: ZoomScene.ID) -> TimelineSpan? {
+        guard let index = zoomScenes.firstIndex(where: { $0.id == id }) else { return nil }
+        let start = index == zoomScenes.startIndex ? 0 : zoomScenes[index - 1].span.end
+        let end =
+            index == zoomScenes.index(before: zoomScenes.endIndex)
+            ? sourceDuration
+            : zoomScenes[index + 1].span.start
+        return TimelineSpan(start: start, end: end)
+    }
+
+    mutating func resizeZoomScene(id: ZoomScene.ID, to span: TimelineSpan) throws {
+        guard let index = zoomScenes.firstIndex(where: { $0.id == id }) else {
+            throw ZoomSceneEditError.sceneNotFound
+        }
+        try validateZoomSceneSpan(span, excluding: id)
+        let scene = zoomScenes[index]
+        zoomScenes[index] = ZoomScene(
+            id: scene.id,
+            span: span,
+            focalPoint: scene.focalPoint
+        )
+        zoomScenes.sort { $0.span.start < $1.span.start }
+    }
+
+    mutating func removeZoomScene(id: ZoomScene.ID) {
+        zoomScenes.removeAll { $0.id == id }
+    }
+
+    private func validateZoomSceneSpan(
+        _ span: TimelineSpan,
+        excluding excludedID: ZoomScene.ID? = nil
+    ) throws {
+        guard
+            span.start.isFinite,
+            span.end.isFinite,
+            span.start >= 0,
+            span.end <= sourceDuration,
+            span.duration >= Self.minimumZoomSceneDuration
+        else {
+            throw ZoomSceneEditError.invalidSpan
+        }
+        guard
+            !zoomScenes.contains(where: { scene in
+                scene.id != excludedID
+                    && span.start < scene.span.end
+                    && scene.span.start < span.end
+            })
+        else {
+            throw ZoomSceneEditError.overlapsExistingScene
+        }
     }
 
     func canSplit(at time: Double) -> Bool {

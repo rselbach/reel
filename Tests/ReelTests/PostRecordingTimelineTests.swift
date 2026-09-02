@@ -273,15 +273,15 @@ final class PostRecordingTimelineTests: XCTestCase {
         XCTAssertTrue(edit.deleteClip(id: middleID))
 
         let cases = [
-            "passthrough": AVAssetExportPresetPassthrough,
-            "720p": AVAssetExportPreset1280x720,
+            "passthrough": VideoExportQuality.source,
+            "720p": VideoExportQuality.p720,
         ]
-        for (name, preset) in cases {
+        for (name, quality) in cases {
             let outputURL = directory.appendingPathComponent("Greendale-edited-\(name).mp4")
             try await VideoEditExporter.export(
                 sourceURL: sourceURL,
                 outputURL: outputURL,
-                preset: preset,
+                quality: quality,
                 edit: edit
             )
 

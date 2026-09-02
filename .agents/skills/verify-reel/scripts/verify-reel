@@ -193,7 +193,7 @@ sign_verification_app() {
   local evidence_dir="$1"
   local identity="${SIGNING_IDENTITY:-}"
 
-  [[ -n "${identity}" ]] || return
+  [[ -n "${identity}" ]] || return 0
 
   codesign --force --options runtime --deep \
     --sign "${identity}" \

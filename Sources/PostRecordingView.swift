@@ -1,5 +1,6 @@
 import AVKit
 import AppKit
+import CoreImage
 import SwiftUI
 import UniformTypeIdentifiers
 import os.log
@@ -52,7 +53,14 @@ enum PostRecordingText {
     static let deletedClip = "Deleted clip"
     static let deleted = "Deleted"
     static let clipHint = "Select this clip to delete or restore it."
-    static let editClipFailedTitle = "Could Not Edit Clip"
+    static let zoomLane = "Zoom lane"
+    static let zoomLaneEmpty = "Drag to add a 150% zoom"
+    static let zoomLaneHint = "Drag empty space to create a zoom scene lasting at least 0.25 seconds."
+    static let zoomScene = "Zoom scene"
+    static let zoomSceneHint = "Select this scene to set its focal point."
+    static let addZoomSceneAtPlayhead = "Add Zoom Scene at Playhead"
+    static let deleteZoomScene = "Delete Zoom Scene"
+    static let editClipFailedTitle = "Could Not Edit Timeline"
     static let splitClipFailedMessage =
         "Move the playhead at least 0.05 seconds from either edge of a clip, then split again."
     static let deleteClipFailedMessage =
@@ -69,7 +77,7 @@ enum PostRecordingText {
     static let exportGIFHelp = "Silent, looping, capped in size and frame count for README and issue embeds."
     static let exportSmallerHelp = "Re-encodes at 720p for sharing in chat, issues, and pull requests."
     static let editNote =
-        "Deleted clips are skipped during playback and when saving an edited copy."
+        "Deleted clips are skipped, and zoom scenes are applied during playback and export."
     static let done = "Done"
     static let recordAgain = "Record Again"
     static let changeTarget = "Change Target..."
@@ -125,8 +133,12 @@ struct PostRecordingView: View {
     let onDelete: () -> Void
 
     @State private var player: AVPlayer?
+    /// Loaded with the preview so future cursor-aware effects can use the
+    /// recording's source-time positions without reopening the asset.
+    @State private var cursorTimeline = CursorTimeline.empty
     @State private var timeObserver: Any?
     @State private var deletedClipBoundaryObservers: [Any] = []
+    @State private var zoomCompositionTask: Task<Void, Never>?
     @State private var isCleanedUp = false
     @State private var edit: TimelineEdit?
     @State private var currentTime: Double = 0
@@ -140,7 +152,20 @@ struct PostRecordingView: View {
 
     var body: some View {
         VStack(spacing: 14) {
-            if let player {
+            if case .zoomScene(let sceneID) = timelineSelection,
+                let scene = edit?.zoomScene(id: sceneID)
+            {
+                ZoomFocusEditor(
+                    videoURL: videoURL,
+                    sourceTime: scene.span.start + scene.span.duration / 2,
+                    focalPoint: scene.focalPoint,
+                    onChange: { point in
+                        updateZoomFocalPoint(point, sceneID: sceneID)
+                    }
+                )
+                .frame(minWidth: 700, minHeight: 300, maxHeight: .infinity)
+                .layoutPriority(1)
+            } else if let player {
                 VideoPlayerView(player: player)
                     .frame(minWidth: 700, minHeight: 300, maxHeight: .infinity)
                     .layoutPriority(1)
@@ -154,7 +179,7 @@ struct PostRecordingView: View {
                 intent: playbackIntent,
                 currentTime: editedCurrentTime,
                 duration: edit?.editedDuration ?? 0,
-                isEnabled: player != nil && edit != nil && !isExporting,
+                isEnabled: player != nil && edit != nil && !isExporting && !isEditingZoomFocus,
                 onTogglePlayback: togglePlayback,
                 onSkip: skipEditedSeconds
             )
@@ -169,7 +194,8 @@ struct PostRecordingView: View {
                     ),
                     currentSourceTime: currentTime,
                     selection: $timelineSelection,
-                    onSeek: seekPlayer
+                    onSeek: seekPlayer,
+                    onSelectZoomScene: selectZoomScene
                 )
                 .padding(.horizontal)
                 .disabled(isExporting)
@@ -243,7 +269,7 @@ struct PostRecordingView: View {
                 if hasEdits {
                     Button(PostRecordingText.saveEdited) {
                         startVideoExport(
-                            preset: AVAssetExportPresetPassthrough,
+                            quality: .source,
                             suffix: "edited"
                         )
                     }
@@ -252,7 +278,7 @@ struct PostRecordingView: View {
 
                 Button(PostRecordingText.exportSmaller) {
                     startVideoExport(
-                        preset: AVAssetExportPreset1280x720,
+                        quality: .p720,
                         suffix: "720p"
                     )
                 }
@@ -291,13 +317,26 @@ struct PostRecordingView: View {
         .onAppear {
             setupPlayer()
         }
-        .onChange(of: edit) { _, changedEdit in
-            refreshDeletedClipBoundaryObservers()
+        .onChange(of: edit) { previousEdit, changedEdit in
             guard let changedEdit else {
                 timelineSelection = .none
+                player?.currentItem?.videoComposition = nil
                 return
             }
             timelineSelection = timelineSelection.validated(for: changedEdit)
+            if previousEdit?.clips != changedEdit.clips {
+                refreshDeletedClipBoundaryObservers()
+            }
+            if previousEdit?.zoomScenes != changedEdit.zoomScenes {
+                refreshZoomPreviewComposition(scenes: changedEdit.zoomScenes)
+            }
+        }
+        .onChange(of: timelineSelection) { previousSelection, changedSelection in
+            if case .zoomScene = previousSelection, case .zoomScene = changedSelection {
+                return
+            }
+            guard case .zoomScene = previousSelection else { return }
+            seekPlayer(to: currentTime)
         }
         .onDisappear {
             exportTask?.cancel()
@@ -313,6 +352,11 @@ struct PostRecordingView: View {
 
     private var canExport: Bool {
         PostRecordingLogic.canExport(edit: edit, isExporting: isExporting)
+    }
+
+    private var isEditingZoomFocus: Bool {
+        guard case .zoomScene(let id) = timelineSelection else { return false }
+        return edit?.zoomScene(id: id) != nil
     }
 
     private var editedCurrentTime: Double {
@@ -353,6 +397,8 @@ struct PostRecordingView: View {
             }
         }
         deletedClipBoundaryObservers = []
+        zoomCompositionTask?.cancel()
+        zoomCompositionTask = nil
         timeObserver = nil
         player = nil
     }
@@ -376,6 +422,17 @@ struct PostRecordingView: View {
             } catch {
                 guard !isCleanedUp else { return }
                 exportError = "Unable to load recording duration: \(error.localizedDescription)"
+            }
+        }
+
+        Task { @MainActor [self] in
+            do {
+                let loadedTimeline = try await CursorMetadataTrack.load(from: videoURL)
+                guard !isCleanedUp else { return }
+                cursorTimeline = loadedTimeline
+            } catch {
+                guard !isCleanedUp else { return }
+                logger.warning("Unable to load cursor positions: \(error.localizedDescription)")
             }
         }
 
@@ -453,6 +510,31 @@ struct PostRecordingView: View {
         }
     }
 
+    private func refreshZoomPreviewComposition(scenes: [ZoomScene]) {
+        guard let item = player?.currentItem else { return }
+        zoomCompositionTask?.cancel()
+        guard !scenes.isEmpty else {
+            item.videoComposition = nil
+            zoomCompositionTask = nil
+            return
+        }
+        zoomCompositionTask = Task { @MainActor in
+            do {
+                let composition = try await ZoomVideoComposition.preview(
+                    asset: item.asset,
+                    scenes: scenes
+                )
+                try Task.checkCancellation()
+                guard item === player?.currentItem else { return }
+                item.videoComposition = composition
+            } catch is CancellationError {
+                return
+            } catch {
+                logger.error("Could not build zoom preview: \(error.localizedDescription)")
+            }
+        }
+    }
+
     private func seekPlayer(to time: Double) {
         guard let edit else { return }
         let boundedTime = min(max(0, time), edit.sourceDuration)
@@ -466,6 +548,26 @@ struct PostRecordingView: View {
             toleranceBefore: .zero,
             toleranceAfter: .zero
         )
+    }
+
+    private func selectZoomScene(id: ZoomScene.ID) {
+        guard let scene = edit?.zoomScene(id: id) else { return }
+        pausePlayback()
+        let midpoint = scene.span.start + scene.span.duration / 2
+        currentTime = midpoint
+        player?.seek(
+            to: CMTime(seconds: midpoint, preferredTimescale: 600),
+            toleranceBefore: .zero,
+            toleranceAfter: .zero
+        )
+    }
+
+    private func updateZoomFocalPoint(_ point: UnitPoint2D, sceneID: ZoomScene.ID) {
+        do {
+            try edit?.setZoomFocalPoint(point, for: sceneID)
+        } catch {
+            exportError = error.localizedDescription
+        }
     }
 
     private func togglePlayback() {
@@ -501,13 +603,13 @@ struct PostRecordingView: View {
         seekPlayer(to: sourceTime)
     }
 
-    private func startVideoExport(preset: String, suffix: String) {
+    private func startVideoExport(quality: VideoExportQuality, suffix: String) {
         guard !isExporting else { return }
         pausePlayback()
         isExporting = true
         exportError = nil
         exportTask = Task { @MainActor in
-            await performVideoExport(preset: preset, suffix: suffix)
+            await performVideoExport(quality: quality, suffix: suffix)
             isExporting = false
             exportTask = nil
         }
@@ -525,14 +627,14 @@ struct PostRecordingView: View {
         }
     }
 
-    private func performVideoExport(preset: String, suffix: String) async {
+    private func performVideoExport(quality: VideoExportQuality, suffix: String) async {
         guard let outputURL = await selectExportURL(suffix: suffix) else {
             return
         }
         guard let edit else { return }
 
         do {
-            let warning = try await exportVideo(to: outputURL, preset: preset, edit: edit)
+            let warning = try await exportVideo(to: outputURL, quality: quality, edit: edit)
             try Task.checkCancellation()
             if let warning {
                 exportError = warning.localizedDescription
@@ -593,6 +695,7 @@ struct PostRecordingView: View {
         generator.maximumSize = CGSize(width: GIFExport.maxWidth, height: GIFExport.maxWidth)
 
         let sampling = GIFExport.frames(edit: edit)
+        let imageContext = CIContext(options: [.cacheIntermediates: false])
 
         guard
             let destination = CGImageDestinationCreateWithURL(
@@ -621,7 +724,15 @@ struct PostRecordingView: View {
             let time = CMTime(seconds: seconds, preferredTimescale: 600)
             let frame = try await generator.image(at: time)
             try Task.checkCancellation()
-            CGImageDestinationAddImage(destination, frame.image, frameProperties)
+            let rendered = ZoomImageRenderer.render(
+                CIImage(cgImage: frame.image),
+                sourceTime: seconds,
+                scenes: edit.zoomScenes
+            )
+            guard let renderedFrame = imageContext.createCGImage(rendered, from: rendered.extent) else {
+                throw ExportError.gifFrameRenderFailed
+            }
+            CGImageDestinationAddImage(destination, renderedFrame, frameProperties)
         }
 
         guard CGImageDestinationFinalize(destination) else {
@@ -650,7 +761,7 @@ struct PostRecordingView: View {
 
     private func exportVideo(
         to outputURL: URL,
-        preset: String,
+        quality: VideoExportQuality,
         edit: TimelineEdit
     ) async throws -> FileReplacementWarning? {
         let tempURL = ExportFileNaming.temporaryURL(for: outputURL)
@@ -661,7 +772,7 @@ struct PostRecordingView: View {
         try await VideoEditExporter.export(
             sourceURL: videoURL,
             outputURL: tempURL,
-            preset: preset,
+            quality: quality,
             edit: edit
         )
         try Task.checkCancellation()
@@ -682,12 +793,15 @@ struct PostRecordingView: View {
 
 enum ExportError: LocalizedError {
     case gifDestinationUnavailable
+    case gifFrameRenderFailed
     case gifWriteFailed
 
     var errorDescription: String? {
         switch self {
         case .gifDestinationUnavailable:
             return "Could not create the GIF file."
+        case .gifFrameRenderFailed:
+            return "A GIF frame could not be rendered."
         case .gifWriteFailed:
             return "The GIF could not be written."
         }

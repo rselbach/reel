@@ -195,6 +195,7 @@ private struct FrameWriter {
     let adaptor: AVAssetWriterInputPixelBufferAdaptor
     let videoInput: AVAssetWriterInput
     let audioInput: AVAssetWriterInput?
+    let cursorMetadataWriter: CursorMetadataTrack.Writer
     let assetWriter: AVAssetWriter
     let bufferPool: CVPixelBufferPool?
     var startTime: CMTime?
@@ -223,10 +224,8 @@ private final class FrameCaptureState {
     var currentCameraY: CGFloat = 0.0
     var currentCameraSizeFraction: CGFloat = 0.2
     var isPaused = false
-    /// Pointer position in captured-frame pixel coordinates, sampled on the
-    /// main actor; nil when the pointer is outside the captured bounds or no
-    /// button is down.
-    var pressedCursorPoint: CGPoint?
+    /// Pointer state over the captured content, sampled on the main actor.
+    var cursorState = CursorMetadataTrack.CapturedState.outside
 }
 
 @MainActor
@@ -827,6 +826,10 @@ class ScreenRecorder: NSObject, ObservableObject {
                 options: options,
                 windowFrame: windowFrame
             )
+            let initialCursorState = currentCursorState()
+            withFrameLock {
+                frameState.cursorState = initialCursorState
+            }
 
             stream = SCStream(filter: filter, configuration: config, delegate: self)
 
@@ -841,9 +844,7 @@ class ScreenRecorder: NSObject, ObservableObject {
             isRecording = true
             rememberCurrentTarget()
             startLowSpaceMonitor()
-            if options.highlightClicks {
-                startCursorSampling(frameRate: options.frameRate)
-            }
+            startCursorSampling(frameRate: options.frameRate)
 
             errorMessage = nil
             return true
@@ -915,7 +916,11 @@ class ScreenRecorder: NSObject, ObservableObject {
 
     func resumeRecording() {
         guard isRecording, isPaused else { return }
-        withFrameLock { frameState.isPaused = false }
+        let resumedCursorState = currentCursorState()
+        withFrameLock {
+            frameState.cursorState = resumedCursorState
+            frameState.isPaused = false
+        }
         isPaused = false
     }
 
@@ -1081,11 +1086,16 @@ class ScreenRecorder: NSObject, ObservableObject {
             options.recordAudio
             ? try makeAudioInput(assetWriter: assetWriter)
             : nil
+        let cursorMetadataWriter = try CursorMetadataTrack.Writer(
+            assetWriter: assetWriter,
+            frameRate: options.frameRate
+        )
 
         updateFrameWriter(
             adaptor: adaptor,
             videoInput: videoInput,
             audioInput: audioInput,
+            cursorMetadataWriter: cursorMetadataWriter,
             assetWriter: assetWriter,
             bufferPool: bufferPool,
             options: options,
@@ -1231,6 +1241,7 @@ class ScreenRecorder: NSObject, ObservableObject {
         adaptor: AVAssetWriterInputPixelBufferAdaptor,
         videoInput: AVAssetWriterInput,
         audioInput: AVAssetWriterInput?,
+        cursorMetadataWriter: CursorMetadataTrack.Writer,
         assetWriter: AVAssetWriter,
         bufferPool: CVPixelBufferPool?,
         options: RecordingOptions,
@@ -1245,6 +1256,7 @@ class ScreenRecorder: NSObject, ObservableObject {
                 adaptor: adaptor,
                 videoInput: videoInput,
                 audioInput: audioInput,
+                cursorMetadataWriter: cursorMetadataWriter,
                 assetWriter: assetWriter,
                 bufferPool: bufferPool,
                 startTime: nil,
@@ -1417,6 +1429,9 @@ class ScreenRecorder: NSObject, ObservableObject {
 
         videoInput?.markAsFinished()
         audioInput?.markAsFinished()
+        withFrameLock {
+            frameState.frameWriter?.cursorMetadataWriter.input.markAsFinished()
+        }
         await assetWriter?.finishWriting()
 
         guard let tempURL = outputURL else { return }
@@ -1526,6 +1541,7 @@ class ScreenRecorder: NSObject, ObservableObject {
             frameState.latestCameraPixelBuffer = nil
             frameState.frameWriter = nil
             frameState.isPaused = false
+            frameState.cursorState = .outside
         }
     }
 
@@ -1607,15 +1623,16 @@ class ScreenRecorder: NSObject, ObservableObject {
         lowSpaceTimer = nil
     }
 
-    /// Samples the pointer on the main actor and hands the compositor a
-    /// frame-space position. NSEvent.mouseLocation and pressedMouseButtons are
-    /// both free of the Accessibility permission a global event tap needs.
+    /// Samples the pointer on the main actor for both the cursor metadata track
+    /// and the optional live click highlight. NSEvent.mouseLocation and
+    /// pressedMouseButtons are both free of the Accessibility permission a
+    /// global event tap needs.
     private func startCursorSampling(frameRate: Int) {
         stopCursorSampling()
         let interval = 1.0 / Double(max(1, frameRate))
         let timer = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
             Task { @MainActor in
-                self?.samplePressedCursor()
+                self?.sampleCursor()
             }
         }
         RunLoop.main.add(timer, forMode: .common)
@@ -1625,18 +1642,26 @@ class ScreenRecorder: NSObject, ObservableObject {
     private func stopCursorSampling() {
         cursorTimer?.invalidate()
         cursorTimer = nil
-        withFrameLock { frameState.pressedCursorPoint = nil }
+        withFrameLock { frameState.cursorState = .outside }
     }
 
-    private func samplePressedCursor() {
-        guard isRecording, !isPaused, NSEvent.pressedMouseButtons != 0 else {
-            withFrameLock { frameState.pressedCursorPoint = nil }
+    private func sampleCursor() {
+        guard isRecording, !isPaused else {
+            withFrameLock { frameState.cursorState = .outside }
             return
         }
 
+        let cursorState = currentCursorState()
+        withFrameLock { frameState.cursorState = cursorState }
+    }
+
+    private func currentCursorState() -> CursorMetadataTrack.CapturedState {
+        let pressedButtons = UInt64(NSEvent.pressedMouseButtons)
         guard let bounds = liveRecordingBounds else {
-            withFrameLock { frameState.pressedCursorPoint = nil }
-            return
+            return CursorMetadataTrack.CapturedState(
+                contentPosition: nil,
+                pressedButtons: pressedButtons
+            )
         }
 
         // Normalized here; the compositor scales to whatever the frame size is.
@@ -1647,7 +1672,10 @@ class ScreenRecorder: NSObject, ObservableObject {
             frameWidth: 1,
             frameHeight: 1
         )
-        withFrameLock { frameState.pressedCursorPoint = point }
+        return CursorMetadataTrack.CapturedState(
+            contentPosition: point,
+            pressedButtons: pressedButtons
+        )
     }
 
     /// Recording bounds that follow a window as it is moved, unlike the
@@ -1902,6 +1930,7 @@ extension ScreenRecorder: SCStreamOutput {
             var cameraY: CGFloat = 0
             var cameraSizeFraction: CGFloat = 0.2
             var pressedCursorPoint: CGPoint?
+            var cursorState = CursorMetadataTrack.CapturedState.outside
 
             var adjustedTime = presentationTime
 
@@ -1945,11 +1974,24 @@ extension ScreenRecorder: SCStreamOutput {
                 cameraX = frameState.currentCameraX
                 cameraY = frameState.currentCameraY
                 cameraSizeFraction = frameState.currentCameraSizeFraction
-                pressedCursorPoint = writer.highlightClicks ? frameState.pressedCursorPoint : nil
+                cursorState = frameState.cursorState
+                pressedCursorPoint =
+                    writer.highlightClicks && cursorState.pressedButtons != 0
+                    ? cursorState.contentPosition
+                    : nil
                 writerSnapshot = writer
             }
 
             guard let snapshot = writerSnapshot else { return }
+
+            let cursorPosition = CursorTimelineLayout.outputPosition(
+                contentPosition: cursorState.contentPosition,
+                contentSize: CGSize(
+                    width: CVPixelBufferGetWidth(screenBuffer),
+                    height: CVPixelBufferGetHeight(screenBuffer)
+                ),
+                windowFrame: snapshot.windowFrame
+            )
 
             var frameToWrite = screenBuffer
             var usedCompositedBuffer = false
@@ -2013,6 +2055,19 @@ extension ScreenRecorder: SCStreamOutput {
                         ? "Failed to append composited video frame"
                         : "Failed to append video frame"
                     handleAppendFailure(&writer, context: context)
+                    frameState.frameWriter = writer
+                    frameState.isCaptureStopped = true
+                    return
+                }
+
+                guard
+                    writer.cursorMetadataWriter.append(
+                        position: cursorPosition,
+                        pressedButtons: cursorState.pressedButtons,
+                        at: adjustedTime
+                    )
+                else {
+                    handleAppendFailure(&writer, context: "Failed to append cursor metadata")
                     frameState.frameWriter = writer
                     frameState.isCaptureStopped = true
                     return

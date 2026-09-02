@@ -11,6 +11,7 @@ private let timelineLogger = Logger(
 enum TimelineSelection: Equatable, Sendable {
     case none
     case clip(TimelineClip.ID)
+    case zoomScene(ZoomScene.ID)
 
     func validated(for edit: TimelineEdit) -> TimelineSelection {
         switch self {
@@ -18,6 +19,8 @@ enum TimelineSelection: Equatable, Sendable {
             return .none
         case .clip(let id):
             return edit.clip(id: id) == nil ? .none : .clip(id)
+        case .zoomScene(let id):
+            return edit.zoomScene(id: id) == nil ? .none : .zoomScene(id)
         }
     }
 }
@@ -113,20 +116,43 @@ enum PostRecordingTimelineMath {
     }
 }
 
+private enum ZoomResizeEdge: Equatable {
+    case leading
+    case trailing
+}
+
+private struct ZoomResizeState {
+    let sceneID: ZoomScene.ID
+    let edge: ZoomResizeEdge
+    let originalSpan: TimelineSpan
+    var currentSpan: TimelineSpan
+}
+
 struct PostRecordingTimelineView: View {
     let videoURL: URL
     @Binding var edit: TimelineEdit
     let currentSourceTime: Double
     @Binding var selection: TimelineSelection
     let onSeek: (Double) -> Void
+    let onSelectZoomScene: (ZoomScene.ID) -> Void
 
     @State private var playheadDragOrigin: Double?
+    @State private var zoomDraftStart: Double?
+    @State private var zoomDraftSpan: TimelineSpan?
+    @State private var zoomResizeState: ZoomResizeState?
     @State private var showsEditError = false
     @State private var editErrorMessage = ""
     @AccessibilityFocusState private var focusedClipID: TimelineClip.ID?
+    @AccessibilityFocusState private var focusedZoomSceneID: ZoomScene.ID?
 
     private let timelineGutter: CGFloat = 8
+    private let zoomLaneHeight: CGFloat = 30
+    private let laneSpacing: CGFloat = 6
     private let filmstripHeight: CGFloat = 104
+
+    private var timelineContentHeight: CGFloat {
+        zoomLaneHeight + laneSpacing + filmstripHeight
+    }
 
     var body: some View {
         VStack(spacing: 10) {
@@ -136,13 +162,16 @@ struct PostRecordingTimelineView: View {
                 let timelineWidth = max(1, geometry.size.width - timelineGutter * 2)
 
                 ZStack(alignment: .topLeading) {
+                    zoomLane(width: timelineWidth)
+                        .offset(x: timelineGutter)
+
                     ThumbnailFilmstrip(
                         videoURL: videoURL,
                         duration: edit.sourceDuration,
                         count: PostRecordingTimelineMath.thumbnailCount(forWidth: timelineWidth)
                     )
                     .frame(width: timelineWidth, height: filmstripHeight)
-                    .offset(x: timelineGutter)
+                    .offset(x: timelineGutter, y: zoomLaneHeight + laneSpacing)
                     .accessibilityHidden(true)
 
                     ForEach(edit.clips) { clip in
@@ -151,10 +180,11 @@ struct PostRecordingTimelineView: View {
                             timelineWidth: timelineWidth,
                             gutter: timelineGutter
                         )
+                        .offset(y: zoomLaneHeight + laneSpacing)
                     }
 
                     timelineGestureTarget(width: timelineWidth)
-                        .offset(x: timelineGutter)
+                        .offset(x: timelineGutter, y: zoomLaneHeight + laneSpacing)
 
                     playhead(timelineWidth: timelineWidth, gutter: timelineGutter)
                 }
@@ -162,7 +192,7 @@ struct PostRecordingTimelineView: View {
                     timelineContextMenu
                 }
             }
-            .frame(height: filmstripHeight + 14)
+            .frame(height: timelineContentHeight + 14)
 
             HStack {
                 Text(PostRecordingTimelineMath.formattedTime(0))
@@ -178,6 +208,9 @@ struct PostRecordingTimelineView: View {
             Button("OK") {}
         } message: {
             Text(editErrorMessage)
+        }
+        .onDeleteCommand {
+            deleteSelection()
         }
     }
 
@@ -211,11 +244,24 @@ struct PostRecordingTimelineView: View {
                     .keyboardShortcut(.delete, modifiers: [])
                     .disabled(!edit.canDeleteClip(id: id))
                 }
+            } else if case .zoomScene(let id) = selection, edit.zoomScene(id: id) != nil {
+                Button(PostRecordingText.clearSelection) {
+                    selection = .none
+                }
+                .keyboardShortcut(.cancelAction)
+
+                Button(PostRecordingText.deleteZoomScene, role: .destructive) {
+                    removeZoomScene(id: id)
+                }
+                .keyboardShortcut(.delete, modifiers: [])
             }
         }
     }
 
     private var selectionDescription: String {
+        if case .zoomScene(let id) = selection, let scene = edit.zoomScene(id: id) {
+            return "Selected 150% zoom scene, source \(formattedRange(scene.span))."
+        }
         guard case .clip(let id) = selection, let clip = edit.clip(id: id) else {
             return PostRecordingText.timelineHelp
         }
@@ -276,6 +322,360 @@ struct PostRecordingTimelineView: View {
             .accessibilityAction(named: Text(PostRecordingText.splitClipAtPlayhead)) {
                 splitClipAtPlayhead()
             }
+    }
+
+    private func zoomLane(width: CGFloat) -> some View {
+        ZStack(alignment: .leading) {
+            RoundedRectangle(cornerRadius: 6)
+                .fill(Color(nsColor: .controlBackgroundColor))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
+                )
+                .contentShape(Rectangle())
+                .gesture(zoomLaneGesture(width: width))
+
+            if let zoomDraftSpan {
+                zoomBlock(span: zoomDraftSpan, width: width, isSelected: false)
+                    .offset(x: position(zoomDraftSpan.start, in: width))
+                    .opacity(0.65)
+                    .allowsHitTesting(false)
+            }
+
+            ForEach(edit.zoomScenes) { scene in
+                zoomSceneBlock(scene, width: width)
+            }
+
+            if edit.zoomScenes.isEmpty, zoomDraftSpan == nil {
+                Text(PostRecordingText.zoomLaneEmpty)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 8)
+                    .allowsHitTesting(false)
+            }
+        }
+        .frame(width: width, height: zoomLaneHeight)
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(PostRecordingText.zoomLane)
+        .accessibilityValue("\(edit.zoomScenes.count) zoom scenes")
+        .accessibilityHint(PostRecordingText.zoomLaneHint)
+        .accessibilityAction(named: Text(PostRecordingText.addZoomSceneAtPlayhead)) {
+            addZoomSceneAtPlayhead()
+        }
+    }
+
+    private func zoomSceneBlock(_ scene: ZoomScene, width: CGFloat) -> some View {
+        let isSelected = selection == .zoomScene(scene.id)
+        let span = displayedZoomSpan(for: scene)
+        let blockWidth = PostRecordingTimelineMath.width(
+            for: span,
+            duration: edit.sourceDuration,
+            width: width
+        )
+
+        return zoomBlock(span: span, width: width, isSelected: isSelected)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                selection = .zoomScene(scene.id)
+                focusedZoomSceneID = scene.id
+                onSelectZoomScene(scene.id)
+            }
+            .overlay(alignment: .trailing) {
+                if isSelected, blockWidth >= 88 {
+                    Button {
+                        removeZoomScene(id: scene.id)
+                    } label: {
+                        Image(systemName: "trash")
+                            .font(.caption2.weight(.semibold))
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(.white)
+                    .padding(.trailing, 12)
+                    .accessibilityLabel(PostRecordingText.deleteZoomScene)
+                }
+            }
+            .overlay(alignment: .leading) {
+                if isSelected {
+                    zoomResizeHandle(
+                        scene: scene,
+                        span: span,
+                        edge: .leading,
+                        width: width
+                    )
+                    .offset(x: -8)
+                }
+            }
+            .overlay(alignment: .trailing) {
+                if isSelected {
+                    zoomResizeHandle(
+                        scene: scene,
+                        span: span,
+                        edge: .trailing,
+                        width: width
+                    )
+                    .offset(x: 8)
+                }
+            }
+            .contextMenu {
+                Button(PostRecordingText.deleteZoomScene, role: .destructive) {
+                    removeZoomScene(id: scene.id)
+                }
+            }
+            .offset(x: position(span.start, in: width))
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel(PostRecordingText.zoomScene)
+            .accessibilityValue("150 percent, source \(formattedRange(span))")
+            .accessibilityHint("Select to set the focal point. Drag either edge to resize.")
+            .accessibilityFocused($focusedZoomSceneID, equals: scene.id)
+            .accessibilityAction {
+                selection = .zoomScene(scene.id)
+                onSelectZoomScene(scene.id)
+            }
+            .accessibilityAction(named: Text(PostRecordingText.deleteZoomScene)) {
+                removeZoomScene(id: scene.id)
+            }
+    }
+
+    private func displayedZoomSpan(for scene: ZoomScene) -> TimelineSpan {
+        guard zoomResizeState?.sceneID == scene.id else { return scene.span }
+        return zoomResizeState?.currentSpan ?? scene.span
+    }
+
+    private func zoomResizeHandle(
+        scene: ZoomScene,
+        span: TimelineSpan,
+        edge: ZoomResizeEdge,
+        width: CGFloat
+    ) -> some View {
+        ZStack {
+            Color.clear
+            Capsule()
+                .fill(.white)
+                .frame(width: 4, height: 18)
+                .shadow(color: .black.opacity(0.45), radius: 1)
+        }
+        .frame(width: 16, height: zoomLaneHeight)
+        .contentShape(Rectangle())
+        .gesture(zoomResizeGesture(scene: scene, edge: edge, width: width))
+        .accessibilityElement()
+        .accessibilityLabel(edge == .leading ? "Zoom start" : "Zoom end")
+        .accessibilityValue(
+            PostRecordingTimelineMath.formattedTime(
+                edge == .leading ? span.start : span.end
+            )
+        )
+        .accessibilityHint("Drag horizontally to resize the zoom scene.")
+        .accessibilityAdjustableAction { direction in
+            adjustZoomEdge(scene: scene, edge: edge, direction: direction)
+        }
+    }
+
+    private func zoomResizeGesture(
+        scene: ZoomScene,
+        edge: ZoomResizeEdge,
+        width: CGFloat
+    ) -> some Gesture {
+        DragGesture(minimumDistance: 0)
+            .onChanged { value in
+                let state: ZoomResizeState
+                if let current = zoomResizeState,
+                    current.sceneID == scene.id,
+                    current.edge == edge
+                {
+                    state = current
+                } else {
+                    state = ZoomResizeState(
+                        sceneID: scene.id,
+                        edge: edge,
+                        originalSpan: scene.span,
+                        currentSpan: scene.span
+                    )
+                }
+                let seconds = Double(value.translation.width / width) * edit.sourceDuration
+                guard
+                    let span = resizedZoomSpan(
+                        sceneID: scene.id,
+                        span: state.originalSpan,
+                        edge: edge,
+                        offset: seconds
+                    )
+                else { return }
+                zoomResizeState = ZoomResizeState(
+                    sceneID: state.sceneID,
+                    edge: state.edge,
+                    originalSpan: state.originalSpan,
+                    currentSpan: span
+                )
+            }
+            .onEnded { _ in
+                finishZoomResize(sceneID: scene.id)
+            }
+    }
+
+    private func adjustZoomEdge(
+        scene: ZoomScene,
+        edge: ZoomResizeEdge,
+        direction: AccessibilityAdjustmentDirection
+    ) {
+        let offset = adjustment(for: direction, amount: 0.1)
+        guard
+            offset != 0,
+            let span = resizedZoomSpan(
+                sceneID: scene.id,
+                span: scene.span,
+                edge: edge,
+                offset: offset
+            )
+        else { return }
+        do {
+            try edit.resizeZoomScene(id: scene.id, to: span)
+        } catch {
+            showEditError(error.localizedDescription)
+        }
+    }
+
+    private func resizedZoomSpan(
+        sceneID: ZoomScene.ID,
+        span: TimelineSpan,
+        edge: ZoomResizeEdge,
+        offset: Double
+    ) -> TimelineSpan? {
+        guard let bounds = edit.zoomSceneResizeBounds(id: sceneID) else { return nil }
+        switch edge {
+        case .leading:
+            return TimelineSpan(
+                start: min(
+                    max(bounds.start, span.start + offset),
+                    span.end - TimelineEdit.minimumZoomSceneDuration
+                ),
+                end: span.end
+            )
+        case .trailing:
+            return TimelineSpan(
+                start: span.start,
+                end: max(
+                    min(bounds.end, span.end + offset),
+                    span.start + TimelineEdit.minimumZoomSceneDuration
+                )
+            )
+        }
+    }
+
+    private func finishZoomResize(sceneID: ZoomScene.ID) {
+        guard let state = zoomResizeState, state.sceneID == sceneID else { return }
+        zoomResizeState = nil
+        guard state.currentSpan != state.originalSpan else { return }
+        do {
+            try edit.resizeZoomScene(id: sceneID, to: state.currentSpan)
+        } catch {
+            showEditError(error.localizedDescription)
+        }
+    }
+
+    private func zoomBlock(span: TimelineSpan, width: CGFloat, isSelected: Bool) -> some View {
+        let blockWidth = PostRecordingTimelineMath.width(
+            for: span,
+            duration: edit.sourceDuration,
+            width: width
+        )
+        return ZStack {
+            RoundedRectangle(cornerRadius: 5)
+                .fill(Color.accentColor.opacity(isSelected ? 0.85 : 0.62))
+            if blockWidth >= 60 {
+                Text("Zoom 150%")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.white)
+                    .lineLimit(1)
+            }
+            RoundedRectangle(cornerRadius: 5)
+                .stroke(.white.opacity(isSelected ? 1 : 0.75), lineWidth: isSelected ? 2 : 1)
+        }
+        .frame(width: max(3, blockWidth), height: zoomLaneHeight)
+    }
+
+    private func zoomLaneGesture(width: CGFloat) -> some Gesture {
+        DragGesture(minimumDistance: 0)
+            .onChanged { value in
+                let time = PostRecordingTimelineMath.sourceTime(
+                    at: value.location.x,
+                    duration: edit.sourceDuration,
+                    width: width
+                )
+                if zoomDraftStart == nil {
+                    guard edit.availableZoomSpan(containing: time) != nil else { return }
+                    zoomDraftStart = time
+                }
+                guard
+                    let start = zoomDraftStart,
+                    let gap = edit.availableZoomSpan(containing: start)
+                else { return }
+                zoomDraftSpan = TimelineSpan(
+                    start: max(gap.start, min(start, time)),
+                    end: min(gap.end, max(start, time))
+                )
+            }
+            .onEnded { value in
+                defer {
+                    zoomDraftStart = nil
+                    zoomDraftSpan = nil
+                }
+                guard let span = zoomDraftSpan else { return }
+                if span.duration < TimelineEdit.minimumZoomSceneDuration {
+                    let time = PostRecordingTimelineMath.sourceTime(
+                        at: value.location.x,
+                        duration: edit.sourceDuration,
+                        width: width
+                    )
+                    onSeek(time)
+                    return
+                }
+                addZoomScene(span: span)
+            }
+    }
+
+    private func addZoomScene(span: TimelineSpan) {
+        do {
+            let id = try edit.addZoomScene(span: span)
+            selection = .zoomScene(id)
+            focusedZoomSceneID = id
+            onSelectZoomScene(id)
+        } catch {
+            showEditError(error.localizedDescription)
+        }
+    }
+
+    private func addZoomSceneAtPlayhead() {
+        guard let gap = edit.availableZoomSpan(containing: currentSourceTime) else {
+            showEditError(ZoomSceneEditError.overlapsExistingScene.localizedDescription)
+            return
+        }
+        let duration = min(1, gap.duration)
+        guard duration >= TimelineEdit.minimumZoomSceneDuration else {
+            showEditError(ZoomSceneEditError.invalidSpan.localizedDescription)
+            return
+        }
+        let start = min(max(gap.start, currentSourceTime), gap.end - duration)
+        addZoomScene(span: TimelineSpan(start: start, end: start + duration))
+    }
+
+    private func deleteSelection() {
+        switch selection {
+        case .clip(let id):
+            guard edit.clip(id: id)?.isDeleted == false else { return }
+            deleteClip(id: id)
+        case .zoomScene(let id):
+            removeZoomScene(id: id)
+        case .none:
+            return
+        }
+    }
+
+    private func removeZoomScene(id: ZoomScene.ID) {
+        if zoomResizeState?.sceneID == id {
+            zoomResizeState = nil
+        }
+        edit.removeZoomScene(id: id)
+        selection = .none
     }
 
     private func clipSegment(
@@ -343,7 +743,7 @@ struct PostRecordingTimelineView: View {
                 .frame(width: 12, height: 12)
             Rectangle()
                 .fill(Color.accentColor)
-                .frame(width: 3, height: filmstripHeight + 2)
+                .frame(width: 3, height: timelineContentHeight + 2)
                 .shadow(color: .black.opacity(0.7), radius: 1)
         }
         .frame(width: 18)

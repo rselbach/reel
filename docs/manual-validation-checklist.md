@@ -4,7 +4,7 @@ Source of truth: `docs/feature-status.csv`.
 
 Generated from the canonical tracker. This checklist is a companion artifact for executing the remaining manual validation pass; update the CSV after validation.
 
-Manual validation required: 44 stories.
+Manual validation required: 45 stories.
 No further manual validation required: 2 stories.
 
 ## Recommended Order
@@ -859,6 +859,24 @@ Manual steps:
 8. press Escape and verify nothing is recorded.
 
 Current status: Partial automated evidence passed; manual UI validation still pending. Validate manually using the listed steps.
+
+Result: [ ] Pass  [ ] Fail  [ ] Blocked
+
+Notes:
+
+## US-047 - Cursor position timeline
+
+User story: As a user editing a recording, I want Reel to retain where the cursor was so future effects can highlight or zoom around it.
+
+Expected behavior: Reel keeps the existing system cursor rendering unchanged. During every recording it samples the cursor at the configured frame rate, maps positions into normalized final-video coordinates, and writes a versioned timed metadata track into the same MP4 on the video's pause-adjusted clock. Samples include whether the cursor is outside the recording and the pressed mouse-button mask. The post-recording preview loads this timeline in the background; no cursor effect or editing control is shown yet.
+
+Manual steps:
+
+1. Record a short display, window, and area take with preview enabled
+2. move the cursor throughout each take and pause once
+3. verify the native cursor appearance is unchanged, each MP4 is playable, and Recording Preview opens without an error. Inspect each MP4 with CursorMetadataTrack.load and verify positions exist only during unpaused video time and stay within normalized final-frame coordinates.
+
+Current status: Partial automated evidence and packaged launch checks passed; Computer Use accessibility was blocked, so live recording validation remains pending.
 
 Result: [ ] Pass  [ ] Fail  [ ] Blocked
 
