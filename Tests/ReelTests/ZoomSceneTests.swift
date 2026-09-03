@@ -9,7 +9,6 @@ final class ZoomSceneTests: XCTestCase {
     func testSettingsDefaultsMatchExistingZoomBehavior() throws {
         let settings = ZoomSceneSettings.standard
 
-        XCTAssertEqual(settings.level, .percent150)
         XCTAssertEqual(settings.level.scale, 1.5, accuracy: 0.0001)
         XCTAssertEqual(settings.transitionSpeed, .normal)
         XCTAssertEqual(settings.transitionSpeed.duration, 0.25, accuracy: 0.0001)
@@ -17,6 +16,21 @@ final class ZoomSceneTests: XCTestCase {
         var edit = try XCTUnwrap(TimelineEdit(sourceDuration: 3))
         let id = try edit.addZoomScene(span: TimelineSpan(start: 1, end: 2))
         XCTAssertEqual(edit.zoomScene(id: id)?.settings, .standard)
+    }
+
+    func testZoomLevelClampsToSliderRange() {
+        XCTAssertEqual(
+            ZoomSceneSettings.Level(scale: 1).scale,
+            ZoomSceneSettings.Level.minimumScale,
+            accuracy: 0.0001
+        )
+        XCTAssertEqual(ZoomSceneSettings.Level(scale: 3).label, "300%")
+        XCTAssertEqual(
+            ZoomSceneSettings.Level(scale: 4).scale,
+            ZoomSceneSettings.Level.maximumScale,
+            accuracy: 0.0001
+        )
+        XCTAssertEqual(ZoomSceneSettings.Level(scale: .nan).scale, 1.5, accuracy: 0.0001)
     }
 
     func testUnitPointRejectsValuesOutsideTheUnitSquare() {
@@ -100,7 +114,10 @@ final class ZoomSceneTests: XCTestCase {
     func testSettingsUpdateAndMissingScene() throws {
         var edit = try XCTUnwrap(TimelineEdit(sourceDuration: 10))
         let id = try edit.addZoomScene(span: TimelineSpan(start: 2, end: 4))
-        let settings = ZoomSceneSettings(level: .percent200, transitionSpeed: .slow)
+        let settings = ZoomSceneSettings(
+            level: ZoomSceneSettings.Level(scale: 2),
+            transitionSpeed: .slow
+        )
 
         try edit.setZoomSettings(settings, for: id)
         XCTAssertEqual(edit.zoomScene(id: id)?.settings, settings)
@@ -112,7 +129,10 @@ final class ZoomSceneTests: XCTestCase {
     func testResizeKeepsIdentityFocalPointAndSettings() throws {
         var edit = try XCTUnwrap(TimelineEdit(sourceDuration: 10))
         let point = try XCTUnwrap(UnitPoint2D(x: 0.2, y: 0.8))
-        let settings = ZoomSceneSettings(level: .percent175, transitionSpeed: .fast)
+        let settings = ZoomSceneSettings(
+            level: ZoomSceneSettings.Level(scale: 1.75),
+            transitionSpeed: .fast
+        )
         let id = try edit.addZoomScene(
             span: TimelineSpan(start: 2, end: 4),
             focalPoint: point,
@@ -305,7 +325,10 @@ final class ZoomSceneTests: XCTestCase {
         XCTAssertNotNil(edit.splitClip(at: 4))
         XCTAssertTrue(edit.deleteClip(id: middleClipID))
         let focalPoint = try XCTUnwrap(UnitPoint2D(x: 0.2, y: 0.8))
-        let settings = ZoomSceneSettings(level: .percent175, transitionSpeed: .slow)
+        let settings = ZoomSceneSettings(
+            level: ZoomSceneSettings.Level(scale: 1.75),
+            transitionSpeed: .slow
+        )
         try edit.addZoomScene(
             span: TimelineSpan(start: 1, end: 5),
             focalPoint: focalPoint,
@@ -408,7 +431,10 @@ final class ZoomSceneTests: XCTestCase {
     func testCustomLevelAndSpeedChangeTransition() throws {
         let point = try XCTUnwrap(UnitPoint2D(x: 0.2, y: 0.8))
         let span = TimelineSpan(start: 1, end: 2)
-        let settings = ZoomSceneSettings(level: .percent200, transitionSpeed: .fast)
+        let settings = ZoomSceneSettings(
+            level: ZoomSceneSettings.Level(scale: 2),
+            transitionSpeed: .fast
+        )
 
         XCTAssertEqual(
             try XCTUnwrap(
@@ -446,7 +472,10 @@ final class ZoomSceneTests: XCTestCase {
                     at: 1.0625,
                     sceneSpan: span,
                     focalPoint: point,
-                    settings: ZoomSceneSettings(level: .percent150, transitionSpeed: .slow)
+                    settings: ZoomSceneSettings(
+                        level: ZoomSceneSettings.Level(scale: 1.5),
+                        transitionSpeed: .slow
+                    )
                 )
             ).scale,
             1.25,
@@ -458,7 +487,10 @@ final class ZoomSceneTests: XCTestCase {
                     at: 1.125,
                     sceneSpan: span,
                     focalPoint: point,
-                    settings: ZoomSceneSettings(level: .percent150, transitionSpeed: .slow)
+                    settings: ZoomSceneSettings(
+                        level: ZoomSceneSettings.Level(scale: 1.5),
+                        transitionSpeed: .slow
+                    )
                 )
             ).scale,
             1.5,
@@ -470,7 +502,10 @@ final class ZoomSceneTests: XCTestCase {
                     at: 1.1875,
                     sceneSpan: span,
                     focalPoint: point,
-                    settings: ZoomSceneSettings(level: .percent150, transitionSpeed: .slow)
+                    settings: ZoomSceneSettings(
+                        level: ZoomSceneSettings.Level(scale: 1.5),
+                        transitionSpeed: .slow
+                    )
                 )
             ).scale,
             1.25,
@@ -484,7 +519,10 @@ final class ZoomSceneTests: XCTestCase {
         try edit.addZoomScene(
             span: TimelineSpan(start: 1, end: 2),
             focalPoint: try XCTUnwrap(UnitPoint2D(x: 0, y: 0.5)),
-            settings: ZoomSceneSettings(level: .percent200, transitionSpeed: .fast)
+            settings: ZoomSceneSettings(
+                level: ZoomSceneSettings.Level(scale: 2),
+                transitionSpeed: .fast
+            )
         )
 
         let rendered = ZoomImageRenderer.render(image, sourceTime: 1.5, scenes: edit.zoomScenes)

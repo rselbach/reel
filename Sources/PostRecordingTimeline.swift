@@ -33,13 +33,20 @@ struct UnitPoint2D: Equatable, Hashable, Sendable {
 }
 
 struct ZoomSceneSettings: Equatable, Sendable {
-    enum Level: Double, CaseIterable, Hashable, Sendable {
-        case percent125 = 1.25
-        case percent150 = 1.5
-        case percent175 = 1.75
-        case percent200 = 2
+    struct Level: Equatable, Hashable, Sendable {
+        static let minimumScale = 1.25
+        static let maximumScale = 3.0
+        static let sliderStep = 0.05
 
-        var scale: Double { rawValue }
+        let scale: Double
+
+        init(scale: Double) {
+            guard scale.isFinite else {
+                self.scale = 1.5
+                return
+            }
+            self.scale = min(max(scale, Self.minimumScale), Self.maximumScale)
+        }
 
         private var percentage: Int { Int((scale * 100).rounded()) }
 
@@ -71,7 +78,7 @@ struct ZoomSceneSettings: Equatable, Sendable {
         }
     }
 
-    static let standard = ZoomSceneSettings(level: .percent150, transitionSpeed: .normal)
+    static let standard = ZoomSceneSettings(level: Level(scale: 1.5), transitionSpeed: .normal)
 
     var level: Level
     var transitionSpeed: TransitionSpeed

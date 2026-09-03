@@ -134,16 +134,21 @@ private struct ZoomSceneSettingsPopover: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
-            Text("Zoom level")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Picker("Zoom level", selection: $settings.level) {
-                ForEach(ZoomSceneSettings.Level.allCases, id: \.self) { level in
-                    Text(level.label).tag(level)
-                }
+            HStack {
+                Text("Zoom level")
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text(settings.level.label)
+                    .monospacedDigit()
             }
-            .labelsHidden()
-            .pickerStyle(.segmented)
+            .font(.caption)
+            Slider(
+                value: zoomScale,
+                in: ZoomSceneSettings.Level.minimumScale...ZoomSceneSettings.Level.maximumScale,
+                step: ZoomSceneSettings.Level.sliderStep
+            )
+            .accessibilityLabel("Zoom level")
+            .accessibilityValue(settings.level.accessibilityLabel)
 
             Text("Transition speed")
                 .font(.caption)
@@ -164,6 +169,13 @@ private struct ZoomSceneSettingsPopover: View {
         .controlSize(.small)
         .padding()
         .frame(width: 280)
+    }
+
+    private var zoomScale: Binding<Double> {
+        Binding(
+            get: { settings.level.scale },
+            set: { settings.level = ZoomSceneSettings.Level(scale: $0) }
+        )
     }
 }
 
@@ -378,7 +390,7 @@ struct PostRecordingTimelineView: View {
             if let zoomDraftSpan {
                 zoomBlock(
                     span: zoomDraftSpan,
-                    level: .percent150,
+                    level: ZoomSceneSettings.standard.level,
                     width: width,
                     isSelected: false
                 )
