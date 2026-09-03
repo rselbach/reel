@@ -240,6 +240,19 @@ final class ZoomSceneTests: XCTestCase {
         )
     }
 
+    func testFocalPointMappingRemovesAspectFitOrigin() throws {
+        let contentRect = CGRect(x: 100, y: 40, width: 400, height: 200)
+        let point = try XCTUnwrap(
+            ZoomFocusGeometry.focalPoint(
+                at: CGPoint(x: 300, y: 90),
+                in: contentRect
+            )
+        )
+
+        XCTAssertEqual(point.x, 0.5, accuracy: 0.0001)
+        XCTAssertEqual(point.y, 0.75, accuracy: 0.0001)
+    }
+
     func testCompactedScheduleIntersectsScenesWithKeptRanges() throws {
         let firstClipID = UUID()
         var edit = try XCTUnwrap(TimelineEdit(sourceDuration: 6, initialClipID: firstClipID))

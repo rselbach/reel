@@ -7,7 +7,24 @@ private let zoomFocusLogger = Logger(
     category: "ZoomFocusEditor"
 )
 
+enum ZoomFocusGeometry {
+    static func focalPoint(at location: CGPoint, in contentRect: CGRect) -> UnitPoint2D? {
+        guard
+            contentRect.width.isFinite,
+            contentRect.height.isFinite,
+            contentRect.width > 0,
+            contentRect.height > 0
+        else { return nil }
+
+        let x = min(max(0, (location.x - contentRect.minX) / contentRect.width), 1)
+        let y = min(max(0, 1 - (location.y - contentRect.minY) / contentRect.height), 1)
+        return UnitPoint2D(x: x, y: y)
+    }
+}
+
 struct ZoomFocusEditor: View {
+    private static let coordinateSpaceName = "ZoomFocusEditor"
+
     let videoURL: URL
     let sourceTime: Double
     let focalPoint: UnitPoint2D
@@ -46,8 +63,9 @@ struct ZoomFocusEditor: View {
                         .contentShape(Rectangle())
                         .frame(width: contentRect.width, height: contentRect.height)
                         .position(x: contentRect.midX, y: contentRect.midY)
-                        .gesture(focalPointGesture(size: contentRect.size))
+                        .gesture(focalPointGesture(contentRect: contentRect))
                 }
+                .coordinateSpace(name: Self.coordinateSpaceName)
             } else if loadFailed {
                 ContentUnavailableView(
                     "Could Not Load Zoom Frame",
@@ -123,14 +141,20 @@ struct ZoomFocusEditor: View {
         }
     }
 
-    private func focalPointGesture(size: CGSize) -> some Gesture {
-        DragGesture(minimumDistance: 0)
-            .onChanged { value in
-                let x = min(max(0, value.location.x / size.width), 1)
-                let y = min(max(0, 1 - value.location.y / size.height), 1)
-                guard let point = UnitPoint2D(x: x, y: y) else { return }
-                onChange(point)
-            }
+    private func focalPointGesture(contentRect: CGRect) -> some Gesture {
+        DragGesture(
+            minimumDistance: 0,
+            coordinateSpace: .named(Self.coordinateSpaceName)
+        )
+        .onChanged { value in
+            guard
+                let point = ZoomFocusGeometry.focalPoint(
+                    at: value.location,
+                    in: contentRect
+                )
+            else { return }
+            onChange(point)
+        }
     }
 
     private func loadFrame() async {
