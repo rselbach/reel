@@ -159,6 +159,7 @@ struct PostRecordingView: View {
                     videoURL: videoURL,
                     sourceTime: scene.span.start + scene.span.duration / 2,
                     focalPoint: scene.focalPoint,
+                    scale: scene.settings.level.scale,
                     onChange: { point in
                         updateZoomFocalPoint(point, sceneID: sceneID)
                     }

@@ -32,12 +32,56 @@ struct UnitPoint2D: Equatable, Hashable, Sendable {
     }
 }
 
-struct ZoomScene: Identifiable, Equatable, Sendable {
-    static let scale = 1.5
+struct ZoomSceneSettings: Equatable, Sendable {
+    enum Level: Double, CaseIterable, Hashable, Sendable {
+        case percent125 = 1.25
+        case percent150 = 1.5
+        case percent175 = 1.75
+        case percent200 = 2
 
+        var scale: Double { rawValue }
+
+        private var percentage: Int { Int((scale * 100).rounded()) }
+
+        var label: String {
+            "\(percentage)%"
+        }
+
+        var accessibilityLabel: String {
+            "\(percentage) percent"
+        }
+    }
+
+    enum TransitionSpeed: Double, CaseIterable, Hashable, Sendable {
+        case fast = 0.15
+        case normal = 0.25
+        case slow = 0.4
+
+        var duration: Double { rawValue }
+
+        var label: String {
+            switch self {
+            case .fast:
+                return "Fast"
+            case .normal:
+                return "Normal"
+            case .slow:
+                return "Slow"
+            }
+        }
+    }
+
+    static let standard = ZoomSceneSettings(level: .percent150, transitionSpeed: .normal)
+
+    var level: Level
+    var transitionSpeed: TransitionSpeed
+}
+
+struct ZoomScene: Identifiable, Equatable, Sendable {
     let id: UUID
     let span: TimelineSpan
     var focalPoint: UnitPoint2D
+    fileprivate(set) var settings: ZoomSceneSettings
 }
 
 enum ZoomSceneEditError: LocalizedError, Equatable {
@@ -153,6 +197,7 @@ struct TimelineEdit: Equatable, Sendable {
     mutating func addZoomScene(
         span: TimelineSpan,
         focalPoint: UnitPoint2D = .center,
+        settings: ZoomSceneSettings = .standard,
         id: UUID = UUID()
     ) throws -> ZoomScene.ID {
         guard zoomScene(id: id) == nil else {
@@ -160,7 +205,12 @@ struct TimelineEdit: Equatable, Sendable {
         }
         try validateZoomSceneSpan(span)
 
-        let scene = ZoomScene(id: id, span: span, focalPoint: focalPoint)
+        let scene = ZoomScene(
+            id: id,
+            span: span,
+            focalPoint: focalPoint,
+            settings: settings
+        )
         let index = zoomScenes.firstIndex { $0.span.start > span.start } ?? zoomScenes.endIndex
         zoomScenes.insert(scene, at: index)
         return id
@@ -171,6 +221,16 @@ struct TimelineEdit: Equatable, Sendable {
             throw ZoomSceneEditError.sceneNotFound
         }
         zoomScenes[index].focalPoint = point
+    }
+
+    mutating func setZoomSettings(
+        _ settings: ZoomSceneSettings,
+        for id: ZoomScene.ID
+    ) throws {
+        guard let index = zoomScenes.firstIndex(where: { $0.id == id }) else {
+            throw ZoomSceneEditError.sceneNotFound
+        }
+        zoomScenes[index].settings = settings
     }
 
     func zoomSceneResizeBounds(id: ZoomScene.ID) -> TimelineSpan? {
@@ -192,7 +252,8 @@ struct TimelineEdit: Equatable, Sendable {
         zoomScenes[index] = ZoomScene(
             id: scene.id,
             span: span,
-            focalPoint: scene.focalPoint
+            focalPoint: scene.focalPoint,
+            settings: scene.settings
         )
         zoomScenes.sort { $0.span.start < $1.span.start }
     }

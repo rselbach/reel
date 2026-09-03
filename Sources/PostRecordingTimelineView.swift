@@ -128,6 +128,45 @@ private struct ZoomResizeState {
     var currentSpan: TimelineSpan
 }
 
+private struct ZoomSceneSettingsPopover: View {
+    @Binding var settings: ZoomSceneSettings
+    let onDelete: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Zoom level")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Picker("Zoom level", selection: $settings.level) {
+                ForEach(ZoomSceneSettings.Level.allCases, id: \.self) { level in
+                    Text(level.label).tag(level)
+                }
+            }
+            .labelsHidden()
+            .pickerStyle(.segmented)
+
+            Text("Transition speed")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Picker("Transition speed", selection: $settings.transitionSpeed) {
+                ForEach(ZoomSceneSettings.TransitionSpeed.allCases, id: \.self) { speed in
+                    Text(speed.label).tag(speed)
+                }
+            }
+            .labelsHidden()
+            .pickerStyle(.segmented)
+
+            Divider()
+
+            Button(PostRecordingText.deleteZoomScene, role: .destructive, action: onDelete)
+                .frame(maxWidth: .infinity, alignment: .trailing)
+        }
+        .controlSize(.small)
+        .padding()
+        .frame(width: 280)
+    }
+}
+
 struct PostRecordingTimelineView: View {
     let videoURL: URL
     @Binding var edit: TimelineEdit
@@ -140,6 +179,7 @@ struct PostRecordingTimelineView: View {
     @State private var zoomDraftStart: Double?
     @State private var zoomDraftSpan: TimelineSpan?
     @State private var zoomResizeState: ZoomResizeState?
+    @State private var zoomSettingsPopoverSceneID: ZoomScene.ID?
     @State private var showsEditError = false
     @State private var editErrorMessage = ""
     @AccessibilityFocusState private var focusedClipID: TimelineClip.ID?
@@ -260,7 +300,7 @@ struct PostRecordingTimelineView: View {
 
     private var selectionDescription: String {
         if case .zoomScene(let id) = selection, let scene = edit.zoomScene(id: id) {
-            return "Selected 150% zoom scene, source \(formattedRange(scene.span))."
+            return "Selected \(scene.settings.level.label) zoom scene, source \(formattedRange(scene.span))."
         }
         guard case .clip(let id) = selection, let clip = edit.clip(id: id) else {
             return PostRecordingText.timelineHelp
@@ -336,10 +376,15 @@ struct PostRecordingTimelineView: View {
                 .gesture(zoomLaneGesture(width: width))
 
             if let zoomDraftSpan {
-                zoomBlock(span: zoomDraftSpan, width: width, isSelected: false)
-                    .offset(x: position(zoomDraftSpan.start, in: width))
-                    .opacity(0.65)
-                    .allowsHitTesting(false)
+                zoomBlock(
+                    span: zoomDraftSpan,
+                    level: .percent150,
+                    width: width,
+                    isSelected: false
+                )
+                .offset(x: position(zoomDraftSpan.start, in: width))
+                .opacity(0.65)
+                .allowsHitTesting(false)
             }
 
             ForEach(edit.zoomScenes) { scene in
@@ -373,67 +418,118 @@ struct PostRecordingTimelineView: View {
             width: width
         )
 
-        return zoomBlock(span: span, width: width, isSelected: isSelected)
-            .contentShape(Rectangle())
-            .onTapGesture {
-                selection = .zoomScene(scene.id)
-                focusedZoomSceneID = scene.id
-                onSelectZoomScene(scene.id)
-            }
-            .overlay(alignment: .trailing) {
-                if isSelected, blockWidth >= 88 {
-                    Button {
-                        removeZoomScene(id: scene.id)
-                    } label: {
-                        Image(systemName: "trash")
-                            .font(.caption2.weight(.semibold))
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(.white)
-                    .padding(.trailing, 12)
-                    .accessibilityLabel(PostRecordingText.deleteZoomScene)
-                }
-            }
-            .overlay(alignment: .leading) {
-                if isSelected {
-                    zoomResizeHandle(
-                        scene: scene,
-                        span: span,
-                        edge: .leading,
-                        width: width
-                    )
-                    .offset(x: -8)
-                }
-            }
-            .overlay(alignment: .trailing) {
-                if isSelected {
-                    zoomResizeHandle(
-                        scene: scene,
-                        span: span,
-                        edge: .trailing,
-                        width: width
-                    )
-                    .offset(x: 8)
-                }
-            }
-            .contextMenu {
-                Button(PostRecordingText.deleteZoomScene, role: .destructive) {
+        return zoomBlock(
+            span: span,
+            level: scene.settings.level,
+            width: width,
+            isSelected: isSelected
+        )
+        .contentShape(Rectangle())
+        .onTapGesture {
+            selectZoomScene(scene.id)
+        }
+        .popover(
+            isPresented: zoomSettingsPopoverPresented(for: scene.id),
+            attachmentAnchor: .rect(.bounds),
+            arrowEdge: .bottom
+        ) {
+            ZoomSceneSettingsPopover(
+                settings: zoomSettingsBinding(for: scene.id),
+                onDelete: { removeZoomScene(id: scene.id) }
+            )
+        }
+        .overlay(alignment: .trailing) {
+            if isSelected, blockWidth >= 88 {
+                Button {
                     removeZoomScene(id: scene.id)
+                } label: {
+                    Image(systemName: "trash")
+                        .font(.caption2.weight(.semibold))
                 }
+                .buttonStyle(.plain)
+                .foregroundStyle(.white)
+                .padding(.trailing, 12)
+                .accessibilityLabel(PostRecordingText.deleteZoomScene)
             }
-            .offset(x: position(span.start, in: width))
-            .accessibilityElement(children: .contain)
-            .accessibilityLabel(PostRecordingText.zoomScene)
-            .accessibilityValue("150 percent, source \(formattedRange(span))")
-            .accessibilityHint("Select to set the focal point. Drag either edge to resize.")
-            .accessibilityFocused($focusedZoomSceneID, equals: scene.id)
-            .accessibilityAction {
-                selection = .zoomScene(scene.id)
-                onSelectZoomScene(scene.id)
+        }
+        .overlay(alignment: .leading) {
+            if isSelected {
+                zoomResizeHandle(
+                    scene: scene,
+                    span: span,
+                    edge: .leading,
+                    width: width
+                )
+                .offset(x: -8)
             }
-            .accessibilityAction(named: Text(PostRecordingText.deleteZoomScene)) {
+        }
+        .overlay(alignment: .trailing) {
+            if isSelected {
+                zoomResizeHandle(
+                    scene: scene,
+                    span: span,
+                    edge: .trailing,
+                    width: width
+                )
+                .offset(x: 8)
+            }
+        }
+        .contextMenu {
+            Button(PostRecordingText.deleteZoomScene, role: .destructive) {
                 removeZoomScene(id: scene.id)
             }
+        }
+        .offset(x: position(span.start, in: width))
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel(PostRecordingText.zoomScene)
+        .accessibilityValue(
+            "\(scene.settings.level.accessibilityLabel), source \(formattedRange(span))"
+        )
+        .accessibilityHint("Select to adjust zoom and focal point. Drag either edge to resize.")
+        .accessibilityFocused($focusedZoomSceneID, equals: scene.id)
+        .accessibilityAction {
+            selectZoomScene(scene.id)
+        }
+        .accessibilityAction(named: Text(PostRecordingText.deleteZoomScene)) {
+            removeZoomScene(id: scene.id)
+        }
+    }
+
+    private func zoomSettingsPopoverPresented(for sceneID: ZoomScene.ID) -> Binding<Bool> {
+        Binding(
+            get: {
+                zoomSettingsPopoverSceneID == sceneID
+                    && selection == .zoomScene(sceneID)
+                    && edit.zoomScene(id: sceneID) != nil
+            },
+            set: { isPresented in
+                guard !isPresented, zoomSettingsPopoverSceneID == sceneID else { return }
+                zoomSettingsPopoverSceneID = nil
+            }
+        )
+    }
+
+    private func selectZoomScene(_ sceneID: ZoomScene.ID) {
+        guard edit.zoomScene(id: sceneID) != nil else { return }
+        selection = .zoomScene(sceneID)
+        zoomSettingsPopoverSceneID = sceneID
+        focusedZoomSceneID = sceneID
+        onSelectZoomScene(sceneID)
+    }
+
+    private func zoomSettingsBinding(for sceneID: ZoomScene.ID) -> Binding<ZoomSceneSettings> {
+        Binding(
+            get: {
+                edit.zoomScene(id: sceneID)?.settings ?? .standard
+            },
+            set: { settings in
+                do {
+                    try edit.setZoomSettings(settings, for: sceneID)
+                } catch {
+                    showEditError(error.localizedDescription)
+                }
+            }
+        )
     }
 
     private func displayedZoomSpan(for scene: ZoomScene) -> TimelineSpan {
@@ -572,7 +668,12 @@ struct PostRecordingTimelineView: View {
         }
     }
 
-    private func zoomBlock(span: TimelineSpan, width: CGFloat, isSelected: Bool) -> some View {
+    private func zoomBlock(
+        span: TimelineSpan,
+        level: ZoomSceneSettings.Level,
+        width: CGFloat,
+        isSelected: Bool
+    ) -> some View {
         let blockWidth = PostRecordingTimelineMath.width(
             for: span,
             duration: edit.sourceDuration,
@@ -582,7 +683,7 @@ struct PostRecordingTimelineView: View {
             RoundedRectangle(cornerRadius: 5)
                 .fill(Color.accentColor.opacity(isSelected ? 0.85 : 0.62))
             if blockWidth >= 60 {
-                Text("Zoom 150%")
+                Text("Zoom \(level.label)")
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(.white)
                     .lineLimit(1)
@@ -636,9 +737,7 @@ struct PostRecordingTimelineView: View {
     private func addZoomScene(span: TimelineSpan) {
         do {
             let id = try edit.addZoomScene(span: span)
-            selection = .zoomScene(id)
-            focusedZoomSceneID = id
-            onSelectZoomScene(id)
+            selectZoomScene(id)
         } catch {
             showEditError(error.localizedDescription)
         }
@@ -673,6 +772,9 @@ struct PostRecordingTimelineView: View {
     private func removeZoomScene(id: ZoomScene.ID) {
         if zoomResizeState?.sceneID == id {
             zoomResizeState = nil
+        }
+        if zoomSettingsPopoverSceneID == id {
+            zoomSettingsPopoverSceneID = nil
         }
         edit.removeZoomScene(id: id)
         selection = .none

@@ -28,6 +28,7 @@ struct ZoomFocusEditor: View {
     let videoURL: URL
     let sourceTime: Double
     let focalPoint: UnitPoint2D
+    let scale: Double
     let onChange: (UnitPoint2D) -> Void
 
     @State private var frame: CGImage?
@@ -50,7 +51,8 @@ struct ZoomFocusEditor: View {
 
                     if let layout = ZoomLayout.resolve(
                         sourceSize: sourceSize,
-                        focalPoint: focalPoint
+                        focalPoint: focalPoint,
+                        scale: scale
                     ) {
                         cropOverlay(
                             layout: layout,

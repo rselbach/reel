@@ -6,6 +6,19 @@ import XCTest
 @testable import Reel
 
 final class ZoomSceneTests: XCTestCase {
+    func testSettingsDefaultsMatchExistingZoomBehavior() throws {
+        let settings = ZoomSceneSettings.standard
+
+        XCTAssertEqual(settings.level, .percent150)
+        XCTAssertEqual(settings.level.scale, 1.5, accuracy: 0.0001)
+        XCTAssertEqual(settings.transitionSpeed, .normal)
+        XCTAssertEqual(settings.transitionSpeed.duration, 0.25, accuracy: 0.0001)
+
+        var edit = try XCTUnwrap(TimelineEdit(sourceDuration: 3))
+        let id = try edit.addZoomScene(span: TimelineSpan(start: 1, end: 2))
+        XCTAssertEqual(edit.zoomScene(id: id)?.settings, .standard)
+    }
+
     func testUnitPointRejectsValuesOutsideTheUnitSquare() {
         for tc in [Double.nan, -.infinity, -0.01, 1.01, .infinity] {
             XCTAssertNil(UnitPoint2D(x: tc, y: 0.5), "x \(tc)")
@@ -84,19 +97,38 @@ final class ZoomSceneTests: XCTestCase {
         XCTAssertTrue(edit.zoomScenes.isEmpty)
     }
 
-    func testResizeKeepsIdentityAndFocalPoint() throws {
+    func testSettingsUpdateAndMissingScene() throws {
+        var edit = try XCTUnwrap(TimelineEdit(sourceDuration: 10))
+        let id = try edit.addZoomScene(span: TimelineSpan(start: 2, end: 4))
+        let settings = ZoomSceneSettings(level: .percent200, transitionSpeed: .slow)
+
+        try edit.setZoomSettings(settings, for: id)
+        XCTAssertEqual(edit.zoomScene(id: id)?.settings, settings)
+        XCTAssertThrowsError(try edit.setZoomSettings(settings, for: UUID())) { error in
+            XCTAssertEqual(error as? ZoomSceneEditError, .sceneNotFound)
+        }
+    }
+
+    func testResizeKeepsIdentityFocalPointAndSettings() throws {
         var edit = try XCTUnwrap(TimelineEdit(sourceDuration: 10))
         let point = try XCTUnwrap(UnitPoint2D(x: 0.2, y: 0.8))
+        let settings = ZoomSceneSettings(level: .percent175, transitionSpeed: .fast)
         let id = try edit.addZoomScene(
             span: TimelineSpan(start: 2, end: 4),
-            focalPoint: point
+            focalPoint: point,
+            settings: settings
         )
 
         try edit.resizeZoomScene(id: id, to: TimelineSpan(start: 1, end: 6))
 
         XCTAssertEqual(
             edit.zoomScene(id: id),
-            ZoomScene(id: id, span: TimelineSpan(start: 1, end: 6), focalPoint: point)
+            ZoomScene(
+                id: id,
+                span: TimelineSpan(start: 1, end: 6),
+                focalPoint: point,
+                settings: settings
+            )
         )
     }
 
@@ -217,18 +249,31 @@ final class ZoomSceneTests: XCTestCase {
         ]
 
         for (tc, want) in cases {
-            let layout = try XCTUnwrap(ZoomLayout.resolve(sourceSize: sourceSize, focalPoint: tc))
+            let layout = try XCTUnwrap(
+                ZoomLayout.resolve(
+                    sourceSize: sourceSize,
+                    focalPoint: tc,
+                    scale: ZoomSceneSettings.standard.level.scale
+                )
+            )
             XCTAssertEqual(layout.sourceCropRect, want)
             XCTAssertEqual(layout.requestedFocalPoint, CGPoint(x: sourceSize.width * tc.x, y: sourceSize.height * tc.y))
         }
     }
 
     func testLayoutRejectsInvalidSizesAndScales() {
-        XCTAssertNil(ZoomLayout.resolve(sourceSize: .zero, focalPoint: .center))
+        XCTAssertNil(
+            ZoomLayout.resolve(
+                sourceSize: .zero,
+                focalPoint: .center,
+                scale: ZoomSceneSettings.standard.level.scale
+            )
+        )
         XCTAssertNil(
             ZoomLayout.resolve(
                 sourceSize: CGSize(width: CGFloat.infinity, height: 100),
-                focalPoint: .center
+                focalPoint: .center,
+                scale: ZoomSceneSettings.standard.level.scale
             )
         )
         XCTAssertNil(
@@ -260,9 +305,11 @@ final class ZoomSceneTests: XCTestCase {
         XCTAssertNotNil(edit.splitClip(at: 4))
         XCTAssertTrue(edit.deleteClip(id: middleClipID))
         let focalPoint = try XCTUnwrap(UnitPoint2D(x: 0.2, y: 0.8))
+        let settings = ZoomSceneSettings(level: .percent175, transitionSpeed: .slow)
         try edit.addZoomScene(
             span: TimelineSpan(start: 1, end: 5),
-            focalPoint: focalPoint
+            focalPoint: focalPoint,
+            settings: settings
         )
 
         let schedule = ZoomVideoComposition.compactedSchedule(edit: edit)
@@ -273,13 +320,15 @@ final class ZoomSceneTests: XCTestCase {
                     span: TimelineSpan(start: 1, end: 2),
                     sourceSceneSpan: TimelineSpan(start: 1, end: 5),
                     sourceTimeAtStart: 1,
-                    focalPoint: focalPoint
+                    focalPoint: focalPoint,
+                    settings: settings
                 ),
                 ZoomRenderScene(
                     span: TimelineSpan(start: 2, end: 3),
                     sourceSceneSpan: TimelineSpan(start: 1, end: 5),
                     sourceTimeAtStart: 4,
-                    focalPoint: focalPoint
+                    focalPoint: focalPoint,
+                    settings: settings
                 ),
             ]
         )
@@ -290,28 +339,101 @@ final class ZoomSceneTests: XCTestCase {
         let point = try XCTUnwrap(UnitPoint2D(x: 0.2, y: 0.8))
         let span = TimelineSpan(start: 1, end: 2)
 
-        XCTAssertNil(ZoomTransition.state(at: 0.999, sceneSpan: span, focalPoint: point))
+        XCTAssertNil(
+            ZoomTransition.state(
+                at: 0.999,
+                sceneSpan: span,
+                focalPoint: point,
+                settings: .standard
+            )
+        )
         XCTAssertEqual(
-            try XCTUnwrap(ZoomTransition.state(at: 1, sceneSpan: span, focalPoint: point)).scale,
+            try XCTUnwrap(
+                ZoomTransition.state(
+                    at: 1,
+                    sceneSpan: span,
+                    focalPoint: point,
+                    settings: .standard
+                )
+            ).scale,
             1,
             accuracy: 0.0001
         )
         XCTAssertEqual(
-            try XCTUnwrap(ZoomTransition.state(at: 1.125, sceneSpan: span, focalPoint: point)).scale,
+            try XCTUnwrap(
+                ZoomTransition.state(
+                    at: 1.125,
+                    sceneSpan: span,
+                    focalPoint: point,
+                    settings: .standard
+                )
+            ).scale,
             1.25,
             accuracy: 0.0001
         )
         XCTAssertEqual(
-            try XCTUnwrap(ZoomTransition.state(at: 1.25, sceneSpan: span, focalPoint: point)).scale,
+            try XCTUnwrap(
+                ZoomTransition.state(
+                    at: 1.25,
+                    sceneSpan: span,
+                    focalPoint: point,
+                    settings: .standard
+                )
+            ).scale,
             1.5,
             accuracy: 0.0001
         )
         XCTAssertEqual(
-            try XCTUnwrap(ZoomTransition.state(at: 1.875, sceneSpan: span, focalPoint: point)).scale,
+            try XCTUnwrap(
+                ZoomTransition.state(
+                    at: 1.875,
+                    sceneSpan: span,
+                    focalPoint: point,
+                    settings: .standard
+                )
+            ).scale,
             1.25,
             accuracy: 0.0001
         )
-        XCTAssertNil(ZoomTransition.state(at: 2, sceneSpan: span, focalPoint: point))
+        XCTAssertNil(
+            ZoomTransition.state(
+                at: 2,
+                sceneSpan: span,
+                focalPoint: point,
+                settings: .standard
+            )
+        )
+    }
+
+    func testCustomLevelAndSpeedChangeTransition() throws {
+        let point = try XCTUnwrap(UnitPoint2D(x: 0.2, y: 0.8))
+        let span = TimelineSpan(start: 1, end: 2)
+        let settings = ZoomSceneSettings(level: .percent200, transitionSpeed: .fast)
+
+        XCTAssertEqual(
+            try XCTUnwrap(
+                ZoomTransition.state(
+                    at: 1.075,
+                    sceneSpan: span,
+                    focalPoint: point,
+                    settings: settings
+                )
+            ).scale,
+            1.5,
+            accuracy: 0.0001
+        )
+        XCTAssertEqual(
+            try XCTUnwrap(
+                ZoomTransition.state(
+                    at: 1.15,
+                    sceneSpan: span,
+                    focalPoint: point,
+                    settings: settings
+                )
+            ).scale,
+            2,
+            accuracy: 0.0001
+        )
     }
 
     func testShortTransitionReachesFullZoomAtItsMidpoint() throws {
@@ -319,20 +441,55 @@ final class ZoomSceneTests: XCTestCase {
         let span = TimelineSpan(start: 1, end: 1.25)
 
         XCTAssertEqual(
-            try XCTUnwrap(ZoomTransition.state(at: 1.0625, sceneSpan: span, focalPoint: point)).scale,
+            try XCTUnwrap(
+                ZoomTransition.state(
+                    at: 1.0625,
+                    sceneSpan: span,
+                    focalPoint: point,
+                    settings: ZoomSceneSettings(level: .percent150, transitionSpeed: .slow)
+                )
+            ).scale,
             1.25,
             accuracy: 0.0001
         )
         XCTAssertEqual(
-            try XCTUnwrap(ZoomTransition.state(at: 1.125, sceneSpan: span, focalPoint: point)).scale,
+            try XCTUnwrap(
+                ZoomTransition.state(
+                    at: 1.125,
+                    sceneSpan: span,
+                    focalPoint: point,
+                    settings: ZoomSceneSettings(level: .percent150, transitionSpeed: .slow)
+                )
+            ).scale,
             1.5,
             accuracy: 0.0001
         )
         XCTAssertEqual(
-            try XCTUnwrap(ZoomTransition.state(at: 1.1875, sceneSpan: span, focalPoint: point)).scale,
+            try XCTUnwrap(
+                ZoomTransition.state(
+                    at: 1.1875,
+                    sceneSpan: span,
+                    focalPoint: point,
+                    settings: ZoomSceneSettings(level: .percent150, transitionSpeed: .slow)
+                )
+            ).scale,
             1.25,
             accuracy: 0.0001
         )
+    }
+
+    func testSourceTimeRendererUsesCustomZoomLevel() throws {
+        let image = Self.stripedImage(width: 300, height: 180)
+        var edit = try XCTUnwrap(TimelineEdit(sourceDuration: 3))
+        try edit.addZoomScene(
+            span: TimelineSpan(start: 1, end: 2),
+            focalPoint: try XCTUnwrap(UnitPoint2D(x: 0, y: 0.5)),
+            settings: ZoomSceneSettings(level: .percent200, transitionSpeed: .fast)
+        )
+
+        let rendered = ZoomImageRenderer.render(image, sourceTime: 1.5, scenes: edit.zoomScenes)
+
+        XCTAssertEqual(try Self.sampledColor(from: rendered, normalizedX: 0.6), .red)
     }
 
     func testSharedImageRendererAnimatesAtHalfOpenSceneBoundaries() throws {

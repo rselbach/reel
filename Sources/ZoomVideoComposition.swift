@@ -6,6 +6,7 @@ struct ZoomRenderScene: Equatable, Sendable {
     let sourceSceneSpan: TimelineSpan
     let sourceTimeAtStart: Double
     let focalPoint: UnitPoint2D
+    let settings: ZoomSceneSettings
 
     func sourceTime(at renderTime: Double) -> Double {
         sourceTimeAtStart + renderTime - span.start
@@ -18,12 +19,11 @@ struct ZoomFrameState: Equatable, Sendable {
 }
 
 enum ZoomTransition {
-    static let duration = 0.25
-
     static func state(
         at time: Double,
         sceneSpan: TimelineSpan,
-        focalPoint: UnitPoint2D
+        focalPoint: UnitPoint2D,
+        settings: ZoomSceneSettings
     ) -> ZoomFrameState? {
         guard
             time.isFinite,
@@ -34,14 +34,14 @@ enum ZoomTransition {
             sceneSpan.duration > 0
         else { return nil }
 
-        let rampDuration = min(duration, sceneSpan.duration / 2)
+        let rampDuration = min(settings.transitionSpeed.duration, sceneSpan.duration / 2)
         let entering = min(1, (time - sceneSpan.start) / rampDuration)
         let exiting = min(1, (sceneSpan.end - time) / rampDuration)
         let progress = max(0, min(entering, exiting))
         let easedProgress = progress * progress * (3 - 2 * progress)
         return ZoomFrameState(
             focalPoint: focalPoint,
-            scale: 1 + (ZoomScene.scale - 1) * easedProgress
+            scale: 1 + (settings.level.scale - 1) * easedProgress
         )
     }
 }
@@ -62,7 +62,8 @@ enum ZoomImageRenderer {
         let state = ZoomTransition.state(
             at: sourceTime,
             sceneSpan: scene.span,
-            focalPoint: scene.focalPoint
+            focalPoint: scene.focalPoint,
+            settings: scene.settings
         )
         return render(image, state: state)
     }
@@ -83,7 +84,8 @@ enum ZoomImageRenderer {
         let state = ZoomTransition.state(
             at: sourceTime,
             sceneSpan: scene.sourceSceneSpan,
-            focalPoint: scene.focalPoint
+            focalPoint: scene.focalPoint,
+            settings: scene.settings
         )
         return render(image, state: state)
     }
@@ -190,7 +192,8 @@ enum ZoomVideoComposition {
                         ),
                         sourceSceneSpan: scene.span,
                         sourceTimeAtStart: start,
-                        focalPoint: scene.focalPoint
+                        focalPoint: scene.focalPoint,
+                        settings: scene.settings
                     )
                 )
             }

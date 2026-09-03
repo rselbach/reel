@@ -7,7 +7,7 @@ struct ZoomLayout: Equatable, Sendable {
     static func resolve(
         sourceSize: CGSize,
         focalPoint: UnitPoint2D,
-        scale: Double = ZoomScene.scale
+        scale: Double
     ) -> ZoomLayout? {
         guard
             sourceSize.width.isFinite,
