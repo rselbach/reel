@@ -3,7 +3,47 @@ import CoreImage
 
 struct ZoomRenderScene: Equatable, Sendable {
     let span: TimelineSpan
+    let sourceSceneSpan: TimelineSpan
+    let sourceTimeAtStart: Double
     let focalPoint: UnitPoint2D
+
+    func sourceTime(at renderTime: Double) -> Double {
+        sourceTimeAtStart + renderTime - span.start
+    }
+}
+
+struct ZoomFrameState: Equatable, Sendable {
+    let focalPoint: UnitPoint2D
+    let scale: Double
+}
+
+enum ZoomTransition {
+    static let duration = 0.25
+
+    static func state(
+        at time: Double,
+        sceneSpan: TimelineSpan,
+        focalPoint: UnitPoint2D
+    ) -> ZoomFrameState? {
+        guard
+            time.isFinite,
+            sceneSpan.start.isFinite,
+            sceneSpan.end.isFinite,
+            time >= sceneSpan.start,
+            time < sceneSpan.end,
+            sceneSpan.duration > 0
+        else { return nil }
+
+        let rampDuration = min(duration, sceneSpan.duration / 2)
+        let entering = min(1, (time - sceneSpan.start) / rampDuration)
+        let exiting = min(1, (sceneSpan.end - time) / rampDuration)
+        let progress = max(0, min(entering, exiting))
+        let easedProgress = progress * progress * (3 - 2 * progress)
+        return ZoomFrameState(
+            focalPoint: focalPoint,
+            scale: 1 + (ZoomScene.scale - 1) * easedProgress
+        )
+    }
 }
 
 enum ZoomImageRenderer {
@@ -12,10 +52,19 @@ enum ZoomImageRenderer {
         sourceTime: Double,
         scenes: [ZoomScene]
     ) -> CIImage {
-        let focalPoint = scenes.first {
-            sourceTime >= $0.span.start && sourceTime < $0.span.end
-        }?.focalPoint
-        return render(image, focalPoint: focalPoint)
+        guard
+            let scene = scenes.first(where: {
+                sourceTime >= $0.span.start && sourceTime < $0.span.end
+            })
+        else {
+            return render(image, state: nil)
+        }
+        let state = ZoomTransition.state(
+            at: sourceTime,
+            sceneSpan: scene.span,
+            focalPoint: scene.focalPoint
+        )
+        return render(image, state: state)
     }
 
     static func render(
@@ -23,13 +72,23 @@ enum ZoomImageRenderer {
         time: Double,
         schedule: [ZoomRenderScene]
     ) -> CIImage {
-        let focalPoint = schedule.first {
-            time >= $0.span.start && time < $0.span.end
-        }?.focalPoint
-        return render(image, focalPoint: focalPoint)
+        guard
+            let scene = schedule.first(where: {
+                time >= $0.span.start && time < $0.span.end
+            })
+        else {
+            return render(image, state: nil)
+        }
+        let sourceTime = scene.sourceTime(at: time)
+        let state = ZoomTransition.state(
+            at: sourceTime,
+            sceneSpan: scene.sourceSceneSpan,
+            focalPoint: scene.focalPoint
+        )
+        return render(image, state: state)
     }
 
-    static func render(_ image: CIImage, focalPoint: UnitPoint2D?) -> CIImage {
+    static func render(_ image: CIImage, state: ZoomFrameState?) -> CIImage {
         let sourceExtent = image.extent
         let outputExtent = CGRect(origin: .zero, size: sourceExtent.size)
         let normalized = image.transformed(
@@ -39,10 +98,11 @@ enum ZoomImageRenderer {
             )
         )
         guard
-            let focalPoint,
+            let state,
             let layout = ZoomLayout.resolve(
                 sourceSize: outputExtent.size,
-                focalPoint: focalPoint
+                focalPoint: state.focalPoint,
+                scale: state.scale
             ),
             let transform = layout.sourceToOutputTransform(outputSize: outputExtent.size)
         else {
@@ -128,6 +188,8 @@ enum ZoomVideoComposition {
                             start: outputCursor + start - keptRange.start,
                             end: outputCursor + end - keptRange.start
                         ),
+                        sourceSceneSpan: scene.span,
+                        sourceTimeAtStart: start,
                         focalPoint: scene.focalPoint
                     )
                 )

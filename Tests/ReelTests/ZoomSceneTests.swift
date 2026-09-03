@@ -252,22 +252,77 @@ final class ZoomSceneTests: XCTestCase {
             focalPoint: focalPoint
         )
 
+        let schedule = ZoomVideoComposition.compactedSchedule(edit: edit)
         XCTAssertEqual(
-            ZoomVideoComposition.compactedSchedule(edit: edit),
+            schedule,
             [
                 ZoomRenderScene(
                     span: TimelineSpan(start: 1, end: 2),
+                    sourceSceneSpan: TimelineSpan(start: 1, end: 5),
+                    sourceTimeAtStart: 1,
                     focalPoint: focalPoint
                 ),
                 ZoomRenderScene(
                     span: TimelineSpan(start: 2, end: 3),
+                    sourceSceneSpan: TimelineSpan(start: 1, end: 5),
+                    sourceTimeAtStart: 4,
                     focalPoint: focalPoint
                 ),
             ]
         )
+        XCTAssertEqual(schedule[1].sourceTime(at: 2.875), 4.875, accuracy: 0.0001)
     }
 
-    func testSharedImageRendererUsesHalfOpenSceneBoundaries() throws {
+    func testTransitionEasesInAndOut() throws {
+        let point = try XCTUnwrap(UnitPoint2D(x: 0.2, y: 0.8))
+        let span = TimelineSpan(start: 1, end: 2)
+
+        XCTAssertNil(ZoomTransition.state(at: 0.999, sceneSpan: span, focalPoint: point))
+        XCTAssertEqual(
+            try XCTUnwrap(ZoomTransition.state(at: 1, sceneSpan: span, focalPoint: point)).scale,
+            1,
+            accuracy: 0.0001
+        )
+        XCTAssertEqual(
+            try XCTUnwrap(ZoomTransition.state(at: 1.125, sceneSpan: span, focalPoint: point)).scale,
+            1.25,
+            accuracy: 0.0001
+        )
+        XCTAssertEqual(
+            try XCTUnwrap(ZoomTransition.state(at: 1.25, sceneSpan: span, focalPoint: point)).scale,
+            1.5,
+            accuracy: 0.0001
+        )
+        XCTAssertEqual(
+            try XCTUnwrap(ZoomTransition.state(at: 1.875, sceneSpan: span, focalPoint: point)).scale,
+            1.25,
+            accuracy: 0.0001
+        )
+        XCTAssertNil(ZoomTransition.state(at: 2, sceneSpan: span, focalPoint: point))
+    }
+
+    func testShortTransitionReachesFullZoomAtItsMidpoint() throws {
+        let point = try XCTUnwrap(UnitPoint2D(x: 0.2, y: 0.8))
+        let span = TimelineSpan(start: 1, end: 1.25)
+
+        XCTAssertEqual(
+            try XCTUnwrap(ZoomTransition.state(at: 1.0625, sceneSpan: span, focalPoint: point)).scale,
+            1.25,
+            accuracy: 0.0001
+        )
+        XCTAssertEqual(
+            try XCTUnwrap(ZoomTransition.state(at: 1.125, sceneSpan: span, focalPoint: point)).scale,
+            1.5,
+            accuracy: 0.0001
+        )
+        XCTAssertEqual(
+            try XCTUnwrap(ZoomTransition.state(at: 1.1875, sceneSpan: span, focalPoint: point)).scale,
+            1.25,
+            accuracy: 0.0001
+        )
+    }
+
+    func testSharedImageRendererAnimatesAtHalfOpenSceneBoundaries() throws {
         let image = Self.stripedImage(width: 300, height: 180)
         var edit = try XCTUnwrap(TimelineEdit(sourceDuration: 3))
         try edit.addZoomScene(
@@ -276,11 +331,15 @@ final class ZoomSceneTests: XCTestCase {
         )
 
         let before = ZoomImageRenderer.render(image, sourceTime: 0.999, scenes: edit.zoomScenes)
-        let inside = ZoomImageRenderer.render(image, sourceTime: 1, scenes: edit.zoomScenes)
+        let entering = ZoomImageRenderer.render(image, sourceTime: 1, scenes: edit.zoomScenes)
+        let inside = ZoomImageRenderer.render(image, sourceTime: 1.25, scenes: edit.zoomScenes)
+        let exiting = ZoomImageRenderer.render(image, sourceTime: 1.875, scenes: edit.zoomScenes)
         let after = ZoomImageRenderer.render(image, sourceTime: 2, scenes: edit.zoomScenes)
 
         XCTAssertEqual(try Self.sampledColor(from: before, normalizedX: 0.8), .blue)
+        XCTAssertEqual(try Self.sampledColor(from: entering, normalizedX: 0.8), .blue)
         XCTAssertEqual(try Self.sampledColor(from: inside, normalizedX: 0.8), .green)
+        XCTAssertEqual(try Self.sampledColor(from: exiting, normalizedX: 0.8), .green)
         XCTAssertEqual(try Self.sampledColor(from: after, normalizedX: 0.8), .blue)
     }
 
@@ -322,10 +381,24 @@ final class ZoomSceneTests: XCTestCase {
             generator.requestedTimeToleranceBefore = .zero
             generator.requestedTimeToleranceAfter = .zero
             let before = try await Self.sampledColor(from: generator, at: 0.5, normalizedX: 0.8)
+            let enteringStart = try await Self.sampledColor(from: generator, at: 1, normalizedX: 0.8)
+            let entering = try await Self.sampledColor(
+                from: generator,
+                at: 34.0 / 30.0,
+                normalizedX: 0.8
+            )
             let inside = try await Self.sampledColor(from: generator, at: 1.5, normalizedX: 0.8)
+            let exiting = try await Self.sampledColor(
+                from: generator,
+                at: 56.0 / 30.0,
+                normalizedX: 0.8
+            )
             let after = try await Self.sampledColor(from: generator, at: 2.5, normalizedX: 0.8)
             XCTAssertTrue(before.isBlue, "\(name): \(before)")
+            XCTAssertTrue(enteringStart.isBlue, "\(name): \(enteringStart)")
+            XCTAssertTrue(entering.isGreen, "\(name): \(entering)")
             XCTAssertTrue(inside.isGreen, "\(name): \(inside)")
+            XCTAssertTrue(exiting.isGreen, "\(name): \(exiting)")
             XCTAssertTrue(after.isBlue, "\(name): \(after)")
         }
     }
