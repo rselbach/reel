@@ -103,6 +103,26 @@ enum CaptureExclusionLogic {
     }
 }
 
+enum RecordableWindowFilter {
+    /// Only ordinary app windows on the normal window layer are offered.
+    /// Finder's desktop, the wallpaper, Notification Centre widgets, and
+    /// other system surfaces live on other layers and are large enough to
+    /// pass the size check, but they are not windows anyone means to record.
+    static func isRecordable(
+        layer: Int,
+        size: CGSize,
+        isOnScreen: Bool,
+        bundleID: String?,
+        currentBundleID: String?
+    ) -> Bool {
+        isOnScreen
+            && layer == 0
+            && size.width > RecordingConstants.minimumWindowSize
+            && size.height > RecordingConstants.minimumWindowSize
+            && bundleID != currentBundleID
+    }
+}
+
 enum WindowOrdering {
     static func precedes(
         appName lhsAppName: String?,
@@ -536,9 +556,13 @@ class ScreenRecorder: NSObject, ObservableObject {
         )
         let windows = content.windows
             .filter { window in
-                window.isOnScreen && window.frame.width > RecordingConstants.minimumWindowSize
-                    && window.frame.height > RecordingConstants.minimumWindowSize
-                    && window.owningApplication?.bundleIdentifier != Bundle.main.bundleIdentifier
+                RecordableWindowFilter.isRecordable(
+                    layer: window.windowLayer,
+                    size: window.frame.size,
+                    isOnScreen: window.isOnScreen,
+                    bundleID: window.owningApplication?.bundleIdentifier,
+                    currentBundleID: Bundle.main.bundleIdentifier
+                )
             }
             .sorted { lhs, rhs in
                 WindowOrdering.precedes(

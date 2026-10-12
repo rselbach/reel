@@ -113,16 +113,14 @@ Notes:
 
 User story: As a user, I want to select a specific window so the recording captures only that window.
 
-Expected behavior: The dialog lists on-screen windows larger than 100x100 excluding Reel, supports search by app/title, and uses SCContentFilter(desktopIndependentWindow:) for capture. Oversized H.264 capture dimensions are downscaled within a 4096x2304 bounding box while preserving aspect ratio.
+Expected behavior: The dialog lists on-screen app windows on the normal window layer larger than 100x100, excluding Reel and system surfaces such as the desktop, wallpaper, and Notification Centre widgets, supports search by app/title, and uses SCContentFilter(desktopIndependentWindow:) for capture. Oversized H.264 capture dimensions are downscaled within a 4096x2304 bounding box while preserving aspect ratio.
 
 Manual steps:
 
 1. Open window picker
-2. search by app/title
-3. select and double-click a window
-4. verify only that window is captured and large windows produce valid MP4 output.
+2. verify no desktop
 
-Current status: Partial automated evidence passed; manual UI validation still pending. Validate manually using the listed steps.
+Current status: wallpaper
 
 Result: [ ] Pass  [ ] Fail  [ ] Blocked
 

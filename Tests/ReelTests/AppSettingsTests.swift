@@ -2063,6 +2063,32 @@ final class AppSettingsTests: XCTestCase {
             ))
     }
 
+    func testRecordableWindowFilterKeepsOnlyOrdinaryAppWindows() {
+        let size = CGSize(width: 800, height: 600)
+        func isRecordable(
+            layer: Int = 0,
+            size: CGSize = size,
+            isOnScreen: Bool = true,
+            bundleID: String? = "com.greendale.study"
+        ) -> Bool {
+            RecordableWindowFilter.isRecordable(
+                layer: layer,
+                size: size,
+                isOnScreen: isOnScreen,
+                bundleID: bundleID,
+                currentBundleID: "com.rselbach.reel"
+            )
+        }
+
+        XCTAssertTrue(isRecordable())
+        XCTAssertFalse(isRecordable(layer: -2_147_483_603), "Finder's desktop")
+        XCTAssertFalse(isRecordable(layer: -2_147_483_601), "Notification Centre widgets")
+        XCTAssertFalse(isRecordable(layer: 25), "status bar surfaces")
+        XCTAssertFalse(isRecordable(size: CGSize(width: 100, height: 600)))
+        XCTAssertFalse(isRecordable(isOnScreen: false))
+        XCTAssertFalse(isRecordable(bundleID: "com.rselbach.reel"))
+    }
+
     func testCaptureExcludesOnlyReelsOwnApplication() {
         XCTAssertTrue(
             CaptureExclusionLogic.isCurrentApplication(
