@@ -1467,10 +1467,25 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(AboutLinks.githubRepository?.absoluteString, "https://github.com/rselbach/reel")
     }
 
-    func testRecordingDialogDisplayTitles() {
-        XCTAssertEqual(RecordingDialogLogic.displayTitle(index: 0, displayCount: 1), "Display")
-        XCTAssertEqual(RecordingDialogLogic.displayTitle(index: 0, displayCount: 2), "Display 1")
-        XCTAssertEqual(RecordingDialogLogic.displayTitle(index: 1, displayCount: 2), "Display 2")
+    func testRecordingDialogNamesDisplaysTheWayMacOSDoes() {
+        XCTAssertEqual(
+            RecordingDialogLogic.displayTitles(names: ["Built-in Retina Display", "Studio Display"]),
+            ["Built-in Retina Display", "Studio Display"]
+        )
+        XCTAssertEqual(
+            RecordingDialogLogic.displayTitles(names: ["DELL U2720Q", "Built-in Retina Display", "DELL U2720Q"]),
+            ["DELL U2720Q 1", "Built-in Retina Display", "DELL U2720Q 2"]
+        )
+        XCTAssertEqual(RecordingDialogLogic.displayTitles(names: [nil]), ["Display"])
+        XCTAssertEqual(RecordingDialogLogic.displayTitles(names: [nil, ""]), ["Display 1", "Display 2"])
+    }
+
+    func testQuickRecordCallsTheOnlyDisplayTheEntireScreen() {
+        let one = ["Built-in Retina Display"]
+        let two = ["Built-in Retina Display", "Studio Display"]
+        XCTAssertEqual(RecordingDialogLogic.quickRecordDisplayLabel(titles: one, index: 0), "Entire Screen")
+        XCTAssertEqual(RecordingDialogLogic.quickRecordDisplayLabel(titles: two, index: 1), "Studio Display")
+        XCTAssertNil(RecordingDialogLogic.quickRecordDisplayLabel(titles: two, index: 2))
     }
 
     func testRecordingSelectionUsesStableDisplayID() {

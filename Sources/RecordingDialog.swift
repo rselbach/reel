@@ -38,8 +38,36 @@ enum RecordingDialogText {
 }
 
 enum RecordingDialogLogic {
-    static func displayTitle(index: Int, displayCount: Int) -> String {
-        displayCount == 1 ? "Display" : "Display \(index + 1)"
+    /// Each display's own name, as System Settings shows it, numbered only
+    /// when two displays share one. A display macOS does not name falls
+    /// back to "Display" and its position.
+    static func displayTitles(names: [String?]) -> [String] {
+        let titles = names.enumerated().map { index, name in
+            guard let name, !name.isEmpty else {
+                return names.count == 1 ? "Display" : "Display \(index + 1)"
+            }
+            return name
+        }
+        return titles.enumerated().map { index, title in
+            guard titles.filter({ $0 == title }).count > 1 else { return title }
+            let ordinal = titles[..<index].filter { $0 == title }.count + 1
+            return "\(title) \(ordinal)"
+        }
+    }
+
+    /// The names macOS gives the displays, in the order listed.
+    @MainActor
+    static func screenNames(for displayIDs: [CGDirectDisplayID]) -> [String?] {
+        displayIDs.map { displayID in
+            NSScreen.screens.first { $0.displayID == displayID }?.localizedName
+        }
+    }
+
+    /// What the menu's quick-record item calls a display. With only one,
+    /// "Record Entire Screen" says more than its model name.
+    static func quickRecordDisplayLabel(titles: [String], index: Int) -> String? {
+        guard titles.indices.contains(index) else { return nil }
+        return titles.count == 1 ? "Entire Screen" : titles[index]
     }
 
     static func windowTitle(appName: String?, windowTitle: String?) -> String {
@@ -216,6 +244,10 @@ struct RecordingDialog: View {
             ))
     }
 
+    private var displayTitles: [String] {
+        RecordingDialogLogic.displayTitles(names: RecordingDialogLogic.screenNames(for: displays.map(\.displayID)))
+    }
+
     private var filteredWindows: [SCWindow] {
         guard !searchText.isEmpty else { return windows }
         return windows.filter { window in
@@ -324,10 +356,7 @@ struct RecordingDialog: View {
                             let displayID = displays[index].displayID
                             ThumbnailCard(
                                 image: displayThumbnails[index],
-                                title: RecordingDialogLogic.displayTitle(
-                                    index: index,
-                                    displayCount: displays.count
-                                ),
+                                title: displayTitles[index],
                                 isSelected: selection == .display(displayID),
                                 isLoading: isLoading,
                                 action: { selection = .display(displayID) },

@@ -1102,14 +1102,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     private var selectedDisplayLabel: String? {
+        let displayIDs = screenRecorder.availableDisplays.map(\.displayID)
         guard let displayID = screenRecorder.selectedDisplayID,
-            let index = screenRecorder.availableDisplays.firstIndex(where: { $0.displayID == displayID })
+            let index = displayIDs.firstIndex(of: displayID)
         else {
             return nil
         }
-        return RecordingDialogLogic.displayTitle(
-            index: index,
-            displayCount: screenRecorder.availableDisplays.count
+        return RecordingDialogLogic.quickRecordDisplayLabel(
+            titles: RecordingDialogLogic.displayTitles(names: RecordingDialogLogic.screenNames(for: displayIDs)),
+            index: index
         )
     }
 
