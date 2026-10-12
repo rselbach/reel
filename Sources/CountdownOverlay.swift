@@ -1,11 +1,12 @@
 import AppKit
+import SwiftUI
 import os.log
 
 private let logger = Logger(
     subsystem: Bundle.main.bundleIdentifier ?? "com.rselbach.reel", category: "CountdownOverlay")
 
 enum CountdownLayout {
-    static let hudSize: CGFloat = 160
+    static let hudSize: CGFloat = 184
 
     static func sequence(duration: Int) -> [Int] {
         guard duration > 0 else { return [] }
@@ -27,12 +28,80 @@ enum CountdownLayout {
     static func cancelHint(shortcut: String?) -> String {
         shortcut.map { "Click or press \($0) to cancel" } ?? "Click to cancel"
     }
+
+    /// How much of the ring is left this second: full when a number
+    /// appears, empty as the next one is due.
+    static func ringRemaining(secondsIntoTick: TimeInterval) -> Double {
+        min(1, max(0, 1 - secondsIntoTick))
+    }
+}
+
+/// What the countdown HUD shows. Updated by the countdown loop.
+@MainActor
+final class CountdownModel: ObservableObject {
+    @Published var count: Int
+    @Published var isCancelled = false
+    @Published var tickStart = Date()
+    let hint: String
+
+    init(count: Int, hint: String) {
+        self.count = count
+        self.hint = hint
+    }
+}
+
+/// A system-style HUD: the number rolls down while a ring empties over each
+/// second, so it is clear when recording will start.
+struct CountdownHUDView: View {
+    @ObservedObject var model: CountdownModel
+
+    private let ringWidth: CGFloat = 6
+
+    var body: some View {
+        VStack(spacing: 10) {
+            ZStack {
+                Circle()
+                    .stroke(.white.opacity(0.18), lineWidth: ringWidth)
+                TimelineView(.animation(paused: model.isCancelled)) { context in
+                    Circle()
+                        .trim(
+                            from: 0,
+                            to: model.isCancelled
+                                ? 0
+                                : CountdownLayout.ringRemaining(
+                                    secondsIntoTick: context.date.timeIntervalSince(model.tickStart)
+                                )
+                        )
+                        .stroke(.white, style: StrokeStyle(lineWidth: ringWidth, lineCap: .round))
+                        .rotationEffect(.degrees(-90))
+                }
+                if model.isCancelled {
+                    Image(systemName: "xmark")
+                        .font(.system(size: 40, weight: .semibold))
+                } else {
+                    Text("\(model.count)")
+                        .font(.system(size: 56, weight: .semibold, design: .rounded))
+                        .monospacedDigit()
+                        .contentTransition(.numericText(countsDown: true))
+                }
+            }
+            .frame(width: 100, height: 100)
+
+            Text(model.hint)
+                .font(.system(size: 11))
+                .foregroundStyle(.white.opacity(0.7))
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+        }
+        .foregroundStyle(.white)
+        .padding(.top, 6)
+        .frame(width: CountdownLayout.hudSize, height: CountdownLayout.hudSize)
+    }
 }
 
 @MainActor
 class CountdownOverlay {
     private var window: CountdownWindow?
-    private var label: NSTextField?
     private var cancelled = false
 
     /// Cancels a countdown in progress (e.g. the hotkey was pressed again).
@@ -80,34 +149,40 @@ class CountdownOverlay {
         window.hidesOnDeactivate = false
         window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
 
+        let model = CountdownModel(
+            count: duration,
+            hint: CountdownLayout.cancelHint(shortcut: AppSettings.shared.recordingHotkey?.displayString)
+        )
         let content = CountdownContentView(frame: NSRect(origin: .zero, size: hudFrame.size))
         content.onClick = { [weak self] in
             self?.cancelled = true
         }
-        content.wantsLayer = true
-        content.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.7).cgColor
-        content.layer?.cornerRadius = 28
+
+        // The blur system HUDs use, rather than a flat black box, darkened
+        // so white text stays legible over a white document.
+        let background = NSVisualEffectView(frame: content.bounds)
+        background.material = .hudWindow
+        background.blendingMode = .behindWindow
+        background.state = .active
+        background.appearance = NSAppearance(named: .darkAqua)
+        background.wantsLayer = true
+        background.layer?.cornerRadius = 36
+        background.layer?.masksToBounds = true
+        background.autoresizingMask = [.width, .height]
+        content.addSubview(background)
+
+        let tint = NSView(frame: content.bounds)
+        tint.wantsLayer = true
+        tint.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.45).cgColor
+        tint.layer?.cornerRadius = 36
+        tint.autoresizingMask = [.width, .height]
+        content.addSubview(tint)
+
+        let hud = NSHostingView(rootView: CountdownHUDView(model: model))
+        hud.frame = content.bounds
+        hud.autoresizingMask = [.width, .height]
+        content.addSubview(hud)
         window.contentView = content
-
-        let label = NSTextField(labelWithString: "\(duration)")
-        label.font = NSFont.monospacedDigitSystemFont(ofSize: 72, weight: .bold)
-        label.textColor = .white
-        label.alignment = .center
-        label.frame = NSRect(x: 0, y: 40, width: CountdownLayout.hudSize, height: 90)
-        label.autoresizingMask = [.width]
-        content.addSubview(label)
-
-        let hint = NSTextField(
-            labelWithString: CountdownLayout.cancelHint(
-                shortcut: AppSettings.shared.recordingHotkey?.displayString
-            )
-        )
-        hint.font = NSFont.systemFont(ofSize: 11)
-        hint.textColor = NSColor.white.withAlphaComponent(0.7)
-        hint.alignment = .center
-        hint.frame = NSRect(x: 0, y: 16, width: CountdownLayout.hudSize, height: 16)
-        hint.autoresizingMask = [.width]
-        content.addSubview(hint)
 
         // Deliberately not makeKeyAndOrderFront/activate: the whole point of
         // the countdown is to give the user time to leave the app they are
@@ -116,18 +191,19 @@ class CountdownOverlay {
         window.orderFrontRegardless()
 
         self.window = window
-        self.label = label
 
         defer {
             window.orderOut(nil)
             self.window = nil
-            self.label = nil
         }
 
         var interrupted = false
         countdown: for count in CountdownLayout.sequence(duration: duration) {
             if cancelled { break }
-            label.stringValue = "\(count)"
+            withAnimation(.snappy) {
+                model.count = count
+            }
+            model.tickStart = Date()
             // Sleep in short slices so cancellation reacts promptly.
             for _ in 0..<10 {
                 if cancelled { break countdown }
@@ -142,7 +218,7 @@ class CountdownOverlay {
         }
 
         if cancelled {
-            label.stringValue = "✕"
+            model.isCancelled = true
             do {
                 try await Task.sleep(for: .milliseconds(500))
             } catch {
@@ -167,6 +243,12 @@ final class CountdownContentView: NSView {
     var onClick: (() -> Void)?
 
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    /// Keeps clicks here rather than in the hosted HUD, which would not get
+    /// the first click of a panel that never becomes key.
+    override func hitTest(_ point: NSPoint) -> NSView? {
+        frame.contains(point) ? self : nil
+    }
 
     override func mouseDown(with event: NSEvent) {
         onClick?()

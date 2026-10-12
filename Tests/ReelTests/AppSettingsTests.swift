@@ -1809,6 +1809,13 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(CountdownLayout.cancelHint(shortcut: nil), "Click to cancel")
     }
 
+    func testCountdownRingEmptiesOverEachSecond() {
+        let cases: [TimeInterval: Double] = [-0.2: 1, 0: 1, 0.25: 0.75, 0.5: 0.5, 1: 0, 1.4: 0]
+        for (tc, want) in cases {
+            XCTAssertEqual(CountdownLayout.ringRemaining(secondsIntoTick: tc), want, accuracy: 0.0001, "\(tc)")
+        }
+    }
+
     @MainActor
     func testCountdownDurationSanitizationAllowsOnlySupportedValues() {
         XCTAssertEqual(AppSettings.sanitizedCountdownDuration(0), 0)
