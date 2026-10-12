@@ -343,9 +343,8 @@ struct RecordingDialog: View {
             let ids = displays.map(\.displayID)
             guard !ids.isEmpty else { return }
             let current = selectedDisplayID.flatMap { ids.firstIndex(of: $0) }
-            selectedDisplayID = ids[
-                PickerNavigation.nextIndex(from: current, direction: direction, count: ids.count, columns: 2)
-            ]
+            let next = PickerNavigation.nextIndex(from: current, direction: direction, count: ids.count, columns: 2)
+            selectedDisplayID = ids[next]
         case .window:
             let candidates = filteredWindows
             guard !candidates.isEmpty else { return }
@@ -357,14 +356,13 @@ struct RecordingDialog: View {
                 minimum: Self.gridMinimum,
                 spacing: Self.gridSpacing
             )
-            selectedWindow = candidates[
-                PickerNavigation.nextIndex(
-                    from: current,
-                    direction: direction,
-                    count: candidates.count,
-                    columns: columns
-                )
-            ]
+            let next = PickerNavigation.nextIndex(
+                from: current,
+                direction: direction,
+                count: candidates.count,
+                columns: columns
+            )
+            selectedWindow = candidates[next]
         case .area:
             guard lastRegionOutputSize != nil else { return }
             switch direction {
