@@ -426,14 +426,16 @@ Notes:
 
 User story: As a user, I want a global shortcut to start or stop recording.
 
-Expected behavior: A Carbon-registered global shortcut toggles recording from anywhere without Accessibility permission. Starting this way skips the picker, so the status item menu and tooltip name the target the shortcut will capture — a display, a window, or an area with its pixel size — and say nothing when no target is selected and the shortcut would open the picker instead. The remembered selection is re-validated before each shortcut start, falling back to the picker when it no longer exists.
+Expected behavior: A Carbon-registered global shortcut toggles recording from anywhere without Accessibility permission. Starting this way skips the picker, so the status item menu offers a Record item that names the target the shortcut will capture, a display, a window, or an area with its pixel size, and is labeled with the toggle shortcut; the tooltip names the same target. With no target selected the shortcut opens the picker, so Start Recording carries the shortcut instead. While recording, Pause, Stop, and Discard are labeled with their global shortcuts rather than menu-only ones. The remembered selection is re-validated before each shortcut start, falling back to the picker when it no longer exists.
 
 Manual steps:
 
-1. Record a window, then open the status item menu and verify it names that window under Start Recording
-2. hover the status item and verify the tooltip names the same target
-3. switch to an area recording and verify both show the area and its size
-4. clear the selection by closing the recorded window and verify the summary disappears and the shortcut opens the picker.
+1. Record a window, then open the status item menu and verify a Record item names that window under Start Recording and shows the toggle shortcut
+2. choose it and verify the same window starts recording
+3. open the menu with a right-click while recording and verify Pause, Stop, and Discard show their global shortcuts
+4. hover the status item and verify the tooltip names the same target
+5. switch to an area recording and verify both show the area and its size
+6. clear the selection by closing the recorded window and verify the Record item disappears, Start Recording shows the toggle shortcut, and the shortcut opens the picker.
 
 Current status: Partial automated evidence passed; manual UI validation still pending. Validate manually using the listed steps.
 

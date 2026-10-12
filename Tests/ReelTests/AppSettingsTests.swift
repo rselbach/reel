@@ -1407,42 +1407,60 @@ final class AppSettingsTests: XCTestCase {
     }
 
     @MainActor
-    func testQuickRecordSummaryNamesEachTargetKind() {
+    func testQuickRecordTitleNamesEachTargetKind() {
         XCTAssertEqual(
-            QuickRecordSummary.text(
+            QuickRecordTitle.text(
                 mode: .display,
                 displayLabel: "Display 2",
                 windowLabel: nil,
                 regionOutputSize: nil
             ),
-            "Shortcut records: Display 2"
+            "Record Display 2"
         )
         XCTAssertEqual(
-            QuickRecordSummary.text(
+            QuickRecordTitle.text(
                 mode: .window,
                 displayLabel: nil,
                 windowLabel: "Spanish 101",
                 regionOutputSize: nil
             ),
-            "Shortcut records: Spanish 101"
+            "Record Spanish 101"
         )
         XCTAssertEqual(
-            QuickRecordSummary.text(
+            QuickRecordTitle.text(
                 mode: .region,
                 displayLabel: nil,
                 windowLabel: nil,
                 regionOutputSize: CGSize(width: 1280, height: 720)
             ),
-            "Shortcut records: Area (1280 × 720 px)"
+            "Record Area (1280 × 720 px)"
         )
     }
 
+    func testMenuShortcutShowsTheGlobalCombination() throws {
+        let toggle = try XCTUnwrap(MenuShortcut(.default))
+        XCTAssertEqual(toggle.key, "r")
+        XCTAssertEqual(toggle.modifiers, [.command, .shift])
+
+        let discard = try XCTUnwrap(MenuShortcut(.discardDefault))
+        XCTAssertEqual(discard.key, "r")
+        XCTAssertEqual(discard.modifiers, [.command, .option, .shift])
+
+        let functionKey = try XCTUnwrap(MenuShortcut(.init(keyCode: KeyCode.f5, modifiers: 0x40000)))
+        XCTAssertEqual(functionKey.key.unicodeScalars.first?.value, UInt32(NSF5FunctionKey))
+        XCTAssertEqual(functionKey.modifiers, [.control])
+
+        XCTAssertEqual(MenuShortcut(.init(keyCode: KeyCode.space, modifiers: 0x100000))?.key, " ")
+        XCTAssertEqual(MenuShortcut(.init(keyCode: KeyCode.seven, modifiers: 0x100000))?.key, "7")
+        XCTAssertNil(MenuShortcut(.init(keyCode: 200, modifiers: 0x100000)))
+    }
+
     @MainActor
-    func testQuickRecordSummaryIsAbsentWithoutATarget() {
+    func testQuickRecordTitleIsAbsentWithoutATarget() {
         // Nothing selected means the shortcut opens the picker, so promising
         // a target would be a lie.
         XCTAssertNil(
-            QuickRecordSummary.text(
+            QuickRecordTitle.text(
                 mode: .display,
                 displayLabel: nil,
                 windowLabel: nil,
@@ -1450,7 +1468,7 @@ final class AppSettingsTests: XCTestCase {
             )
         )
         XCTAssertNil(
-            QuickRecordSummary.text(
+            QuickRecordTitle.text(
                 mode: .window,
                 displayLabel: "Display 1",
                 windowLabel: nil,
@@ -1458,7 +1476,7 @@ final class AppSettingsTests: XCTestCase {
             )
         )
         XCTAssertNil(
-            QuickRecordSummary.text(
+            QuickRecordTitle.text(
                 mode: .region,
                 displayLabel: nil,
                 windowLabel: nil,

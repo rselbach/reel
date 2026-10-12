@@ -834,7 +834,7 @@ class AppSettings: ObservableObject {
             return parts.joined()
         }
 
-        private static let keyCodeNames: [UInt16: String] = [
+        static let keyCodeNames: [UInt16: String] = [
             // Letters
             KeyCode.a: "A", KeyCode.b: "B", KeyCode.c: "C", KeyCode.d: "D",
             KeyCode.e: "E", KeyCode.f: "F", KeyCode.g: "G", KeyCode.h: "H",

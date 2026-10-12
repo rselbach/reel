@@ -86,12 +86,56 @@ enum RecordingToggleLogic {
     }
 }
 
-enum QuickRecordSummary {
-    static let prefix = "Shortcut records: "
+/// A global shortcut as a menu key equivalent, so the status menu shows the
+/// combination that works from anywhere instead of one that works only
+/// while the menu is open.
+struct MenuShortcut: Equatable {
+    let key: String
+    let modifiers: NSEvent.ModifierFlags
 
-    /// One line naming what the recording shortcut would capture right now.
-    /// Returns nil when nothing is selected yet, in which case the shortcut
-    /// opens the picker instead and there is nothing to promise.
+    private static let functionKeys: [UInt16] = [
+        KeyCode.f1, KeyCode.f2, KeyCode.f3, KeyCode.f4, KeyCode.f5, KeyCode.f6,
+        KeyCode.f7, KeyCode.f8, KeyCode.f9, KeyCode.f10, KeyCode.f11, KeyCode.f12,
+    ]
+
+    private static let specialKeys: [UInt16: Int] = [
+        KeyCode.space: 0x20,
+        KeyCode.return: 0x0D,
+        KeyCode.tab: 0x09,
+        KeyCode.delete: NSBackspaceCharacter,
+        KeyCode.forwardDelete: NSDeleteFunctionKey,
+        KeyCode.escape: 0x1B,
+    ]
+
+    init?(_ combo: AppSettings.HotkeyCombo) {
+        guard let key = Self.key(for: combo.keyCode) else { return nil }
+        self.key = key
+        modifiers = NSEvent.ModifierFlags(rawValue: UInt(combo.modifiers))
+            .intersection([.command, .option, .control, .shift])
+    }
+
+    private static func key(for keyCode: UInt16) -> String? {
+        if let index = functionKeys.firstIndex(of: keyCode) {
+            return character(NSF1FunctionKey + index)
+        }
+        if let code = specialKeys[keyCode] {
+            return character(code)
+        }
+        // Menus take the unshifted character and draw it uppercase.
+        return AppSettings.HotkeyCombo.keyCodeNames[keyCode]?.lowercased()
+    }
+
+    private static func character(_ code: Int) -> String? {
+        UnicodeScalar(code).map { String(Character($0)) }
+    }
+}
+
+enum QuickRecordTitle {
+    static let prefix = "Record "
+
+    /// The menu item that records what the toggle shortcut is pointed at,
+    /// without the picker. Returns nil when nothing is selected yet, in which
+    /// case the shortcut opens the picker instead.
     static func text(
         mode: RecordingMode,
         displayLabel: String?,
@@ -517,16 +561,19 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     private func addRecordingItems(to menu: NSMenu) {
         guard screenRecorder.isRecording else {
-            menu.addItem(
-                NSMenuItem(
-                    title: AppMenuText.startRecording, action: #selector(showRecordingDialog), keyEquivalent: "r"))
-            // The shortcut starts recording without showing the picker, so say
-            // what it is pointed at rather than leaving the user to guess.
-            if let summary = quickRecordSummary {
-                let summaryItem = NSMenuItem(title: summary, action: nil, keyEquivalent: "")
-                summaryItem.isEnabled = false
-                menu.addItem(summaryItem)
+            let startItem = NSMenuItem(
+                title: AppMenuText.startRecording, action: #selector(showRecordingDialog), keyEquivalent: "")
+            menu.addItem(startItem)
+            // The toggle shortcut records the remembered target without the
+            // picker, so it labels that item. With nothing remembered, the
+            // shortcut opens the picker, and labels Start Recording instead.
+            guard let quickTitle = quickRecordTitle else {
+                showShortcut(of: .toggleRecording, on: startItem)
+                return
             }
+            let quickItem = NSMenuItem(title: quickTitle, action: #selector(recordRememberedTarget), keyEquivalent: "")
+            showShortcut(of: .toggleRecording, on: quickItem)
+            menu.addItem(quickItem)
             return
         }
         let recordingItem = NSMenuItem(
@@ -536,16 +583,30 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         )
         recordingItem.isEnabled = false
         menu.addItem(recordingItem)
-        menu.addItem(
-            NSMenuItem(
-                title: screenRecorder.isPaused ? AppMenuText.resumeRecording : AppMenuText.pauseRecording,
-                action: #selector(togglePause),
-                keyEquivalent: "p"
-            ))
-        menu.addItem(NSMenuItem(title: AppMenuText.stopRecording, action: #selector(stopRecording), keyEquivalent: "s"))
-        menu.addItem(
-            NSMenuItem(
-                title: AppMenuText.discardRecording, action: #selector(discardRecordingFromMenu), keyEquivalent: ""))
+        let pauseItem = NSMenuItem(
+            title: screenRecorder.isPaused ? AppMenuText.resumeRecording : AppMenuText.pauseRecording,
+            action: #selector(togglePause),
+            keyEquivalent: ""
+        )
+        showShortcut(of: .pauseRecording, on: pauseItem)
+        menu.addItem(pauseItem)
+        let stopItem = NSMenuItem(title: AppMenuText.stopRecording, action: #selector(stopRecording), keyEquivalent: "")
+        showShortcut(of: .toggleRecording, on: stopItem)
+        menu.addItem(stopItem)
+        let discardItem = NSMenuItem(
+            title: AppMenuText.discardRecording, action: #selector(discardRecordingFromMenu), keyEquivalent: "")
+        showShortcut(of: .discardRecording, on: discardItem)
+        menu.addItem(discardItem)
+    }
+
+    private func showShortcut(of action: HotkeyAction, on item: NSMenuItem) {
+        guard let shortcut = MenuShortcut(AppSettings.shared.hotkey(for: action)) else { return }
+        item.keyEquivalent = shortcut.key
+        item.keyEquivalentModifierMask = shortcut.modifiers
+    }
+
+    @objc private func recordRememberedTarget() {
+        handleToggleRecording()
     }
 
     private func addRecordingsAccessItems(to menu: NSMenu) {
@@ -982,8 +1043,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
     }
 
-    private var quickRecordSummary: String? {
-        QuickRecordSummary.text(
+    private var quickRecordTitle: String? {
+        QuickRecordTitle.text(
             mode: screenRecorder.recordingMode,
             displayLabel: selectedDisplayLabel,
             windowLabel: screenRecorder.selectedWindow.map { window in
@@ -1274,7 +1335,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             button.toolTip =
                 isRecording
                 ? "Reel — click to stop recording"
-                : quickRecordSummary.map { "Reel — \($0)" } ?? "Reel"
+                : quickRecordTitle.map { "Reel — \($0) (\(AppSettings.shared.recordingHotkey.displayString))" }
+                    ?? "Reel"
         }
 
         if isRecording {
