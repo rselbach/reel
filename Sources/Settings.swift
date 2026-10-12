@@ -13,7 +13,7 @@ enum SettingsErrorText {
 
 enum HotkeyConflictText {
     static func message(shortcut: String, otherAction: String) -> String {
-        "\(shortcut) is already used by \(otherAction.replacingOccurrences(of: ":", with: "").lowercased())."
+        "\(shortcut) is already used by \(otherAction.lowercased())."
     }
 }
 

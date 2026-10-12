@@ -723,8 +723,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         styleMask: NSWindow.StyleMask,
         rootView: Content
     ) -> NSWindow {
-        let hostingController = NSHostingController(rootView: rootView)
-        let window = NSWindow(contentViewController: hostingController)
+        makeWindow(title: title, styleMask: styleMask, contentViewController: NSHostingController(rootView: rootView))
+    }
+
+    private func makeWindow(
+        title: String,
+        styleMask: NSWindow.StyleMask,
+        contentViewController: NSViewController
+    ) -> NSWindow {
+        let window = NSWindow(contentViewController: contentViewController)
         window.title = title
         window.styleMask = styleMask
         window.center()
@@ -1351,7 +1358,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             settingsWindow = makeWindow(
                 title: AppMenuText.settingsWindowTitle,
                 styleMask: [.titled, .closable],
-                rootView: SettingsView()
+                contentViewController: SettingsPane.makeTabViewController()
             )
         }
 

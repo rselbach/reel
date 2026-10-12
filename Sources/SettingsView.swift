@@ -1,44 +1,47 @@
 import AVFoundation
+import AppKit
 import SwiftUI
 import os.log
 
 private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "com.rselbach.reel", category: "SettingsView")
 
 enum SettingsText {
-    static let generalTab = "General"
-    static let recordingTab = "Recording"
-    static let shortcutsTab = "Shortcuts"
     static let launchAtLogin = "Launch at login"
-    static let saveRecordingsTo = "Save recordings to:"
+    static let saving = "Saving"
+    static let saveRecordingsTo = "Save recordings to"
     static let askEachTime = "Ask each time"
     static let fixedFolder = "Fixed folder"
-    static let outputFolder = "Output folder:"
+    static let outputFolder = "Folder"
     static let choose = "Choose..."
     static let outputDirectoryNotWritable = "Cannot write to selected folder. Pick another location."
-    static let openFinderAfterRecording = "Open Finder after recording"
-    static let showPreviewAfterRecording = "Show preview after recording"
-    static let finderSuppressedByPreview = "Finder opens automatically only when the preview is off."
+    static let whenRecordingEnds = "When a recording ends"
     static let playSoundCues = "Play a sound when recording starts and stops"
+    static let capture = "Capture"
+    static let format = "Format"
     static let showCursor = "Show cursor in recording"
     static let highlightClicks = "Highlight clicks"
+    static let windowFraming = "Window Framing"
     static let frameWindowRecordings = "Frame window recordings on a background"
-    static let windowBackgroundLabel = "Background:"
-    static let frameRate = "Frame rate:"
-    static let videoQuality = "Video quality:"
-    static let videoResolution = "Resolution:"
-    static let videoCodec = "Codec:"
-    static let countdown = "Countdown:"
+    static let windowBackgroundLabel = "Background"
+    static let frameRate = "Frame rate"
+    static let videoQuality = "Video quality"
+    static let videoResolution = "Resolution"
+    static let videoCodec = "Codec"
+    static let countdown = "Countdown"
     static let countdownOff = "Off"
+    static let audio = "Audio"
     static let recordAudio = "Record audio"
-    static let audioSource = "Source:"
-    static let audioInput = "Microphone:"
+    static let audioSource = "Source"
+    static let audioInput = "Microphone"
     static let recordCamera = "Record camera overlay"
-    static let camera = "Camera:"
-    static let position = "Position:"
-    static let size = "Size:"
-    static let shape = "Shape:"
+    static let camera = "Camera"
+    static let position = "Position"
+    static let size = "Size"
+    static let shape = "Shape"
+    static let textOverlay = "Text"
     static let addTextOverlay = "Add text overlay"
-    static let text = "Text:"
+    static let text = "Text"
+    static let textPrompt = "Shown on every frame"
     static let pressShortcut = "Press shortcut..."
     static let shortcutHelp = "Press the button and type your desired shortcut."
     static let restoreDefaultShortcuts = "Restore Default Shortcuts"
@@ -46,100 +49,181 @@ enum SettingsText {
     static let unavailableDevice = "Unavailable device"
 }
 
-enum SettingsLayout {
-    static let width: CGFloat = 460
-    /// The Recording tab grows well past this once camera and text overlay
-    /// are both enabled, so tab content scrolls rather than clipping.
-    static let height: CGFloat = 480
+/// What Reel shows once a take is saved. Stored as two settings because the
+/// preview, when on, replaces the Finder reveal.
+enum AfterRecordingAction: CaseIterable {
+    case showPreview
+    case revealInFinder
+    case nothing
+
+    init(showPreview: Bool, openFinder: Bool) {
+        switch (showPreview, openFinder) {
+        case (true, _): self = .showPreview
+        case (false, true): self = .revealInFinder
+        case (false, false): self = .nothing
+        }
+    }
+
+    var displayName: String {
+        switch self {
+        case .showPreview: return "Show the preview"
+        case .revealInFinder: return "Reveal it in Finder"
+        case .nothing: return "Do nothing"
+        }
+    }
+
+    var showsPreview: Bool { self == .showPreview }
+    var revealsInFinder: Bool { self == .revealInFinder }
 }
 
-/// Wraps a settings tab so content taller than the window scrolls instead of
-/// being silently cut off at the bottom.
-private struct ScrollingTab<Content: View>: View {
+/// One toolbar tab of the Settings window.
+enum SettingsPane: CaseIterable {
+    case general
+    case video
+    case audioAndCamera
+    case overlays
+    case shortcuts
+
+    var title: String {
+        switch self {
+        case .general: return "General"
+        case .video: return "Video"
+        case .audioAndCamera: return "Audio & Camera"
+        case .overlays: return "Overlays"
+        case .shortcuts: return "Shortcuts"
+        }
+    }
+
+    var symbolName: String {
+        switch self {
+        case .general: return "gearshape"
+        case .video: return "video"
+        case .audioAndCamera: return "mic"
+        case .overlays: return "square.on.square"
+        case .shortcuts: return "keyboard"
+        }
+    }
+
+    @MainActor
+    @ViewBuilder
+    private var content: some View {
+        let settings = AppSettings.shared
+        switch self {
+        case .general: GeneralPane(settings: settings)
+        case .video: VideoPane(settings: settings)
+        case .audioAndCamera: AudioAndCameraPane(settings: settings)
+        case .overlays: OverlaysPane(settings: settings)
+        case .shortcuts: ShortcutsPane(settings: settings)
+        }
+    }
+
+    /// Toolbar tabs, one per pane. Each pane reports its natural height, so
+    /// the window fits whichever pane is showing and grows with it.
+    @MainActor
+    static func makeTabViewController() -> NSTabViewController {
+        let tabs = NSTabViewController()
+        tabs.tabStyle = .toolbar
+        // Keeps the window titled Reel Settings instead of renaming it after
+        // each pane.
+        tabs.canPropagateSelectedChildViewControllerTitle = false
+        for pane in allCases {
+            let controller = NSHostingController(rootView: pane.content)
+            controller.sizingOptions = [.preferredContentSize]
+            let item = NSTabViewItem(viewController: controller)
+            item.label = pane.title
+            item.image = NSImage(systemSymbolName: pane.symbolName, accessibilityDescription: pane.title)
+            tabs.addTabViewItem(item)
+        }
+        return tabs
+    }
+}
+
+/// A grouped form with scrolling off, so it reports its natural height.
+private struct SettingsForm<Content: View>: View {
     @ViewBuilder let content: Content
 
     var body: some View {
-        ScrollView {
+        Form {
             content
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding()
         }
+        .formStyle(.grouped)
+        .scrollDisabled(true)
+        .frame(width: 500)
+        .fixedSize(horizontal: false, vertical: true)
     }
 }
 
-struct SettingsView: View {
-    @ObservedObject var settings = AppSettings.shared
+private struct CaptionText: View {
+    let text: String
+    var color: Color = .secondary
+
+    init(_ text: String, color: Color = .secondary) {
+        self.text = text
+        self.color = color
+    }
 
     var body: some View {
-        TabView {
-            ScrollingTab { GeneralTab(settings: settings) }
-                .tabItem {
-                    Label(SettingsText.generalTab, systemImage: "gear")
-                }
-
-            ScrollingTab { RecordingTab(settings: settings) }
-                .tabItem {
-                    Label(SettingsText.recordingTab, systemImage: "video")
-                }
-
-            ScrollingTab { ShortcutsTab(settings: settings) }
-                .tabItem {
-                    Label(SettingsText.shortcutsTab, systemImage: "keyboard")
-                }
-        }
-        .frame(width: SettingsLayout.width, height: SettingsLayout.height)
-        .padding()
+        Text(text)
+            .font(.caption)
+            .foregroundStyle(color)
+            .fixedSize(horizontal: false, vertical: true)
     }
 }
 
-struct GeneralTab: View {
+struct GeneralPane: View {
     @ObservedObject var settings: AppSettings
     @State private var outputDirectoryError: String?
 
-    var body: some View {
-        Form {
-            Toggle(SettingsText.launchAtLogin, isOn: $settings.launchAtLogin)
+    private var afterRecording: Binding<AfterRecordingAction> {
+        Binding(
+            get: {
+                AfterRecordingAction(
+                    showPreview: settings.showPreviewAfterRecording,
+                    openFinder: settings.openFinderAfterRecording
+                )
+            },
+            set: { action in
+                settings.showPreviewAfterRecording = action.showsPreview
+                settings.openFinderAfterRecording = action.revealsInFinder
+            }
+        )
+    }
 
-            Picker(SettingsText.saveRecordingsTo, selection: $settings.askWhereToSave) {
-                Text(SettingsText.askEachTime).tag(true)
-                Text(SettingsText.fixedFolder).tag(false)
+    var body: some View {
+        SettingsForm {
+            Section {
+                Toggle(SettingsText.launchAtLogin, isOn: $settings.launchAtLogin)
+                if let launchError = settings.launchAtLoginError {
+                    CaptionText(launchError, color: .orange)
+                }
+                Toggle(SettingsText.playSoundCues, isOn: $settings.playSoundCues)
             }
 
-            if !settings.askWhereToSave {
-                HStack {
-                    Text(SettingsText.outputFolder)
-                    Text(settings.outputDirectory.path())
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                        .foregroundColor(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+            Section(SettingsText.saving) {
+                Picker(SettingsText.saveRecordingsTo, selection: $settings.askWhereToSave) {
+                    Text(SettingsText.askEachTime).tag(true)
+                    Text(SettingsText.fixedFolder).tag(false)
+                }
 
-                    Button(SettingsText.choose) {
-                        selectOutputDirectory()
+                if !settings.askWhereToSave {
+                    LabeledContent(SettingsText.outputFolder) {
+                        HStack(spacing: 8) {
+                            OutputFolderLabel(url: settings.outputDirectory)
+                            Button(SettingsText.choose) {
+                                selectOutputDirectory()
+                            }
+                        }
+                    }
+                    if let outputDirectoryError {
+                        CaptionText(outputDirectoryError, color: .red)
                     }
                 }
-                if let outputDirectoryError {
-                    Text(outputDirectoryError)
-                        .font(.caption)
-                        .foregroundColor(.red)
-                        .lineLimit(2)
-                }
-            }
 
-            Toggle(SettingsText.showPreviewAfterRecording, isOn: $settings.showPreviewAfterRecording)
-            Toggle(SettingsText.openFinderAfterRecording, isOn: $settings.openFinderAfterRecording)
-                .disabled(settings.showPreviewAfterRecording)
-            if settings.showPreviewAfterRecording {
-                Text(SettingsText.finderSuppressedByPreview)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-            Toggle(SettingsText.playSoundCues, isOn: $settings.playSoundCues)
-            if let launchError = settings.launchAtLoginError {
-                Text(launchError)
-                    .font(.caption)
-                    .foregroundColor(.orange)
-                    .lineLimit(2)
+                Picker(SettingsText.whenRecordingEnds, selection: afterRecording) {
+                    ForEach(AfterRecordingAction.allCases, id: \.self) { action in
+                        Text(action.displayName).tag(action)
+                    }
+                }
             }
         }
     }
@@ -174,6 +258,69 @@ struct GeneralTab: View {
     }
 }
 
+/// The folder as Finder shows it, by icon and name. The full path is in the
+/// tooltip rather than squeezed into the row.
+private struct OutputFolderLabel: View {
+    let url: URL
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(nsImage: NSWorkspace.shared.icon(forFile: url.path()))
+                .resizable()
+                .frame(width: 16, height: 16)
+            Text(FileManager.default.displayName(atPath: url.path()))
+                .lineLimit(1)
+                .truncationMode(.middle)
+        }
+        .help(url.path())
+        .accessibilityElement(children: .combine)
+    }
+}
+
+struct VideoPane: View {
+    @ObservedObject var settings: AppSettings
+
+    var body: some View {
+        SettingsForm {
+            Section(SettingsText.capture) {
+                Picker(SettingsText.countdown, selection: $settings.countdownDuration) {
+                    ForEach(AppSettings.supportedCountdownDurations, id: \.self) { duration in
+                        Text(duration == 0 ? SettingsText.countdownOff : "\(duration) seconds").tag(duration)
+                    }
+                }
+                Toggle(SettingsText.showCursor, isOn: $settings.showCursor)
+                Toggle(SettingsText.highlightClicks, isOn: $settings.highlightClicks)
+            }
+
+            Section(SettingsText.format) {
+                Picker(SettingsText.videoResolution, selection: $settings.videoResolution) {
+                    ForEach(AppSettings.VideoResolution.allCases, id: \.self) { resolution in
+                        Text(resolution.displayName).tag(resolution)
+                    }
+                }
+
+                Picker(SettingsText.frameRate, selection: $settings.frameRate) {
+                    ForEach(AppSettings.supportedFrameRates, id: \.self) { frameRate in
+                        Text("\(frameRate) fps").tag(frameRate)
+                    }
+                }
+
+                Picker(SettingsText.videoCodec, selection: $settings.videoCodec) {
+                    ForEach(AppSettings.VideoCodec.allCases, id: \.self) { codec in
+                        Text(codec.displayName).tag(codec)
+                    }
+                }
+
+                Picker(SettingsText.videoQuality, selection: $settings.videoQuality) {
+                    ForEach(AppSettings.VideoQuality.allCases, id: \.self) { quality in
+                        Text(quality.displayName).tag(quality)
+                    }
+                }
+            }
+        }
+    }
+}
+
 struct DevicePicker: View {
     let title: String
     let devices: [AVCaptureDevice]
@@ -192,7 +339,7 @@ struct DevicePicker: View {
     }
 }
 
-struct RecordingTab: View {
+struct AudioAndCameraPane: View {
     @ObservedObject var settings: AppSettings
     @StateObject private var levelMonitor = AudioLevelMonitor()
 
@@ -215,130 +362,68 @@ struct RecordingTab: View {
     }
 
     var body: some View {
-        Form {
-            Toggle(SettingsText.showCursor, isOn: $settings.showCursor)
-            Toggle(SettingsText.highlightClicks, isOn: $settings.highlightClicks)
-            Toggle(SettingsText.frameWindowRecordings, isOn: $settings.frameWindowRecordings)
+        SettingsForm {
+            Section(SettingsText.audio) {
+                Toggle(SettingsText.recordAudio, isOn: $settings.recordAudio)
 
-            if settings.frameWindowRecordings {
-                Picker(SettingsText.windowBackgroundLabel, selection: $settings.windowBackground) {
-                    ForEach(AppSettings.WindowBackground.allCases, id: \.self) { background in
-                        Text(background.displayName).tag(background)
+                if settings.recordAudio {
+                    Picker(SettingsText.audioSource, selection: $settings.audioSource) {
+                        ForEach(AppSettings.AudioSource.allCases, id: \.self) { source in
+                            Text(source.displayName).tag(source)
+                        }
+                    }
+
+                    if settings.audioSource == .microphone {
+                        DevicePicker(
+                            title: SettingsText.audioInput,
+                            devices: settings.availableAudioDevices,
+                            selection: $settings.audioDeviceID
+                        )
+
+                        // A muted or misrouted input is otherwise only
+                        // discovered after a take is already ruined.
+                        LabeledContent(AudioLevelText.label) {
+                            AudioLevelMeter(level: levelMonitor.level)
+                                .frame(width: 160)
+                        }
+
+                        if let error = levelMonitor.errorMessage {
+                            CaptionText(error, color: .orange)
+                        }
                     }
                 }
             }
 
-            Picker(SettingsText.frameRate, selection: $settings.frameRate) {
-                ForEach(AppSettings.supportedFrameRates, id: \.self) { frameRate in
-                    Text("\(frameRate) fps").tag(frameRate)
-                }
-            }
+            Section(SettingsText.camera) {
+                Toggle(SettingsText.recordCamera, isOn: $settings.recordCamera)
 
-            Picker(SettingsText.videoResolution, selection: $settings.videoResolution) {
-                ForEach(AppSettings.VideoResolution.allCases, id: \.self) { resolution in
-                    Text(resolution.displayName).tag(resolution)
-                }
-            }
-
-            Picker(SettingsText.videoCodec, selection: $settings.videoCodec) {
-                ForEach(AppSettings.VideoCodec.allCases, id: \.self) { codec in
-                    Text(codec.displayName).tag(codec)
-                }
-            }
-
-            Picker(SettingsText.videoQuality, selection: $settings.videoQuality) {
-                ForEach(AppSettings.VideoQuality.allCases, id: \.self) { quality in
-                    Text(quality.displayName).tag(quality)
-                }
-            }
-
-            Picker(SettingsText.countdown, selection: $settings.countdownDuration) {
-                ForEach(AppSettings.supportedCountdownDurations, id: \.self) { duration in
-                    Text(duration == 0 ? SettingsText.countdownOff : "\(duration) seconds").tag(duration)
-                }
-            }
-
-            Divider()
-
-            Toggle(SettingsText.recordAudio, isOn: $settings.recordAudio)
-
-            if settings.recordAudio {
-                Picker(SettingsText.audioSource, selection: $settings.audioSource) {
-                    ForEach(AppSettings.AudioSource.allCases, id: \.self) { source in
-                        Text(source.displayName).tag(source)
-                    }
-                }
-
-                if settings.audioSource == .microphone {
+                if settings.recordCamera {
                     DevicePicker(
-                        title: SettingsText.audioInput,
-                        devices: settings.availableAudioDevices,
-                        selection: $settings.audioDeviceID
+                        title: SettingsText.camera,
+                        devices: settings.availableCameras,
+                        selection: $settings.cameraDeviceID
                     )
 
-                    // A muted or misrouted input is otherwise only discovered
-                    // after a take is already ruined.
-                    HStack {
-                        Text(AudioLevelText.label)
-                        AudioLevelMeter(level: levelMonitor.level)
+                    Picker(SettingsText.position, selection: $settings.cameraPosition) {
+                        ForEach(AppSettings.CameraOverlayPosition.allCases, id: \.self) { position in
+                            Text(position.displayName).tag(position)
+                        }
                     }
 
-                    if let error = levelMonitor.errorMessage {
-                        Text(error)
-                            .font(.caption)
-                            .foregroundColor(.orange)
-                            .lineLimit(2)
+                    Picker(SettingsText.size, selection: cameraSizeSelection) {
+                        ForEach(AppSettings.CameraOverlaySize.allCases, id: \.self) { size in
+                            Text(size.displayName).tag(size as AppSettings.CameraOverlaySize?)
+                        }
+                        if settings.cameraSizePreset == nil {
+                            Text("Custom (\(Int((settings.cameraSizeFraction * 100).rounded()))%)")
+                                .tag(nil as AppSettings.CameraOverlaySize?)
+                        }
                     }
-                }
-            }
 
-            Divider()
-
-            Toggle(SettingsText.recordCamera, isOn: $settings.recordCamera)
-
-            if settings.recordCamera {
-                DevicePicker(
-                    title: SettingsText.camera,
-                    devices: settings.availableCameras,
-                    selection: $settings.cameraDeviceID
-                )
-
-                Picker(SettingsText.position, selection: $settings.cameraPosition) {
-                    ForEach(AppSettings.CameraOverlayPosition.allCases, id: \.self) { position in
-                        Text(position.displayName).tag(position)
-                    }
-                }
-
-                Picker(SettingsText.size, selection: cameraSizeSelection) {
-                    ForEach(AppSettings.CameraOverlaySize.allCases, id: \.self) { size in
-                        Text(size.displayName).tag(size as AppSettings.CameraOverlaySize?)
-                    }
-                    if settings.cameraSizePreset == nil {
-                        Text("Custom (\(Int((settings.cameraSizeFraction * 100).rounded()))%)")
-                            .tag(nil as AppSettings.CameraOverlaySize?)
-                    }
-                }
-
-                Picker(SettingsText.shape, selection: $settings.cameraShape) {
-                    ForEach(AppSettings.CameraOverlayShape.allCases, id: \.self) { shape in
-                        Text(shape.displayName).tag(shape)
-                    }
-                }
-            }
-
-            Divider()
-
-            Toggle(SettingsText.addTextOverlay, isOn: $settings.textOverlayEnabled)
-
-            if settings.textOverlayEnabled {
-                HStack {
-                    Text(SettingsText.text)
-                    TextField("", text: $settings.textOverlayText)
-                }
-
-                Picker(SettingsText.position, selection: $settings.textOverlayPosition) {
-                    ForEach(AppSettings.TextOverlayPosition.allCases, id: \.self) { position in
-                        Text(position.displayName).tag(position)
+                    Picker(SettingsText.shape, selection: $settings.cameraShape) {
+                        ForEach(AppSettings.CameraOverlayShape.allCases, id: \.self) { shape in
+                            Text(shape.displayName).tag(shape)
+                        }
                     }
                 }
             }
@@ -370,41 +455,74 @@ struct RecordingTab: View {
     }
 }
 
-struct ShortcutsTab: View {
+struct OverlaysPane: View {
+    @ObservedObject var settings: AppSettings
+
+    var body: some View {
+        SettingsForm {
+            Section(SettingsText.windowFraming) {
+                Toggle(SettingsText.frameWindowRecordings, isOn: $settings.frameWindowRecordings)
+
+                if settings.frameWindowRecordings {
+                    Picker(SettingsText.windowBackgroundLabel, selection: $settings.windowBackground) {
+                        ForEach(AppSettings.WindowBackground.allCases, id: \.self) { background in
+                            Text(background.displayName).tag(background)
+                        }
+                    }
+                }
+            }
+
+            Section(SettingsText.textOverlay) {
+                Toggle(SettingsText.addTextOverlay, isOn: $settings.textOverlayEnabled)
+
+                if settings.textOverlayEnabled {
+                    TextField(SettingsText.text, text: $settings.textOverlayText, prompt: Text(SettingsText.textPrompt))
+
+                    Picker(SettingsText.position, selection: $settings.textOverlayPosition) {
+                        ForEach(AppSettings.TextOverlayPosition.allCases, id: \.self) { position in
+                            Text(position.displayName).tag(position)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+struct ShortcutsPane: View {
     @ObservedObject var settings: AppSettings
     @State private var recordingAction: HotkeyAction?
 
     var body: some View {
-        Form {
-            ForEach(HotkeyAction.allCases, id: \.rawValue) { action in
-                ShortcutRow(
-                    action: action,
-                    combo: settings.hotkey(for: action),
-                    isRecording: recordingAction == action,
-                    onBeginRecording: { recordingAction = action },
-                    onRecorded: { combo in
-                        settings.setHotkey(combo, for: action)
-                        recordingAction = nil
-                    },
-                    onCancel: { recordingAction = nil }
-                )
-            }
+        SettingsForm {
+            Section {
+                ForEach(HotkeyAction.allCases, id: \.rawValue) { action in
+                    ShortcutRow(
+                        action: action,
+                        combo: settings.hotkey(for: action),
+                        isRecording: recordingAction == action,
+                        onBeginRecording: { recordingAction = action },
+                        onRecorded: { combo in
+                            settings.setHotkey(combo, for: action)
+                            recordingAction = nil
+                        },
+                        onCancel: { recordingAction = nil }
+                    )
+                }
 
-            if let error = settings.hotkeyError {
-                Text(error)
-                    .font(.caption)
-                    .foregroundColor(.red)
-                    .lineLimit(2)
+                if let error = settings.hotkeyError {
+                    CaptionText(error, color: .red)
+                }
+            } footer: {
+                HStack(alignment: .firstTextBaseline) {
+                    CaptionText(SettingsText.shortcutHelp)
+                    Spacer()
+                    Button(SettingsText.restoreDefaultShortcuts) {
+                        settings.resetHotkeys()
+                    }
+                    .disabled(settings.usesDefaultHotkeys)
+                }
             }
-
-            Button(SettingsText.restoreDefaultShortcuts) {
-                settings.resetHotkeys()
-            }
-            .disabled(settings.usesDefaultHotkeys)
-
-            Text(SettingsText.shortcutHelp)
-                .font(.caption)
-                .foregroundColor(.secondary)
         }
     }
 }
@@ -418,9 +536,7 @@ private struct ShortcutRow: View {
     let onCancel: () -> Void
 
     var body: some View {
-        HStack {
-            Text(action.displayName)
-            Spacer()
+        LabeledContent(action.displayName) {
             Button(action: onBeginRecording) {
                 Text(isRecording ? SettingsText.pressShortcut : combo.displayString)
                     .frame(minWidth: 100)

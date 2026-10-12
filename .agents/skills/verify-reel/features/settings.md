@@ -6,9 +6,10 @@ and the three global shortcuts, with changes persisted between windows.
 ## Sub-features
 
 - `settings-open` opens one reusable Reel Settings window.
-- `settings-general` changes save, preview, Finder, cue, and login behavior.
-- `settings-recording` changes cursor, frame, video, audio, camera, and text
-  overlay behavior.
+- `settings-general` changes save, after-recording, cue, and login behavior.
+- `settings-video` changes countdown, cursor, click, and format behavior.
+- `settings-audio-camera` changes audio and camera overlay behavior.
+- `settings-overlays` changes window framing and text overlay behavior.
 - `settings-meter` shows live microphone level only for microphone capture.
 - `settings-shortcuts` records three shortcuts and rejects conflicts.
 - `settings-persist` restores saved values after closing and reopening.
@@ -29,26 +30,30 @@ Preconditions:
 - Do not enable microphone or camera unless the needed permission already
   exists or the user approves the system prompt.
 
-- **Open.** Click `Settings...`. Require window `Reel Settings` and tabs
-  `General`, `Recording`, and `Shortcuts`. Capture `settings-general-before`.
-- **General dependency.** Toggle `Show preview after recording` off. Require
-  `Open Finder after recording` to become enabled and the text `Finder opens
-  automatically only when the preview is off.` to disappear. Toggle preview
-  back on and require the inverse. Capture `settings-general-after`.
-- **Save choice.** Change `Save recordings to:` between `Ask each time` and
-  `Fixed folder`. Require `Output folder:` and `Choose...` only for the fixed
-  choice. Restore the original value.
-- **Recording tab.** Click `Recording`. Require `Show cursor in recording`,
-  `Highlight clicks`, `Frame window recordings on a background`, frame rate,
-  resolution, codec, quality, countdown, audio, camera, and text overlay
-  controls. Capture `settings-recording`.
-- **Conditional controls.** Toggle framing and require `Background:`. Toggle
-  text overlay and require `Text:` and `Position:`. Restore both values.
-- **Audio and camera.** If permissions already exist, toggle audio and camera
-  and require their source or device controls. For microphone audio, require the
-  `Input level` meter to react to sound. Restore the values.
-- **Shortcuts tab.** Click `Shortcuts`. Require rows for `Start/Stop Recording`,
-  `Pause/Resume Recording`, and `Discard Recording`, plus `Restore Default
+- **Open.** Click `Settings...`. Require window `Reel Settings` with toolbar
+  buttons `General`, `Video`, `Audio & Camera`, `Overlays`, and `Shortcuts`.
+  Capture `settings-general-before`.
+- **After recording.** Set `When a recording ends` to `Reveal it in Finder`,
+  then `Do nothing`. After each, read `showPreviewAfterRecording` and
+  `openFinderAfterRecording` with `verify-reel preference`; require `0` and `1`,
+  then `0` and `0`. Restore `Show the preview`. Capture
+  `settings-general-after`.
+- **Save choice.** Change `Save recordings to` between `Ask each time` and
+  `Fixed folder`. Require the `Folder` row, showing the folder's name, and
+  `Choose...` only for the fixed choice. Restore the original value.
+- **Video tab.** Click `Video`. Require `Countdown`, `Show cursor in
+  recording`, and `Highlight clicks` under `Capture`, and `Resolution`, `Frame
+  rate`, `Codec`, and `Video quality` under `Format`. Capture `settings-video`.
+- **Overlays tab.** Click `Overlays`. Turn on window framing and require
+  `Background`. Turn on `Add text overlay` and require `Text` and `Position`.
+  Require the window to grow for each. Restore both values.
+- **Audio & Camera tab.** Click `Audio & Camera`. Turn on `Record camera
+  overlay` and require `Camera`, `Position`, `Size`, and `Shape`. If microphone
+  permission already exists, turn on `Record audio` and require `Source`,
+  `Microphone`, and an `Input level` meter that reacts to sound. Restore the
+  values.
+- **Shortcuts tab.** Click `Shortcuts`. Require rows for `Toggle recording`,
+  `Discard recording`, and `Pause and resume`, plus `Restore Default
   Shortcuts`. Do not type a global shortcut unless the recipe intends to change
   it and can restore it.
 - **Persistence.** Close `Reel Settings`, reopen it from the menu, and require
@@ -62,7 +67,11 @@ Preconditions:
 - Launch at login is not isolated by `CFFIXED_USER_HOME`. It uses macOS service
   management and can affect the user's login items.
 - Opening a device control can prompt for microphone or camera permission.
-- The Recording tab scrolls when conditional camera and text controls are open.
+- Toggles are switches with no accessible name of their own. Each sits in a
+  group beside its label text, which it names as its title element. Click the
+  switch in the same group as the label.
+- Each tab resizes the window as its toggles reveal rows. Fetch a fresh tree
+  after every toggle; element IDs and frames change.
 - A picker may expose its current value as a pop-up button. Inspect the fresh
   tree before selecting a menu choice.
 - Shortcut capture registers machine-wide Carbon hotkeys. Never run beside

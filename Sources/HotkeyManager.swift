@@ -27,9 +27,9 @@ enum HotkeyAction: UInt32, CaseIterable {
 
     var displayName: String {
         switch self {
-        case .toggleRecording: return "Toggle recording:"
-        case .discardRecording: return "Discard recording:"
-        case .pauseRecording: return "Pause and resume:"
+        case .toggleRecording: return "Toggle recording"
+        case .discardRecording: return "Discard recording"
+        case .pauseRecording: return "Pause and resume"
         }
     }
 

@@ -184,7 +184,7 @@ final class AudioLevelMonitor: ObservableObject {
 }
 
 enum AudioLevelText {
-    static let label = "Input level:"
+    static let label = "Input level"
     static let noInput = "No microphone available."
     static let accessDenied =
         "Microphone access denied. Enable it in System Settings → Privacy & Security → Microphone."

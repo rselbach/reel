@@ -248,7 +248,7 @@ Expected behavior: After successful finalize, Finder selects the file only when 
 
 Manual steps:
 
-1. Disable preview and enable Open Finder
+1. In Settings, General, set When a recording ends to Reveal it in Finder
 2. record
 3. verify Finder reveals saved file
 4. simulate reveal failure if possible and verify menu error appears.
@@ -332,14 +332,16 @@ Notes:
 
 User story: As a user, I want general preferences to persist across launches.
 
-Expected behavior: General settings include launch at login, ask/fixed save destination, output folder selection with writability validation, Finder reveal, preview after recording, and launch-at-login error display. Values persist in UserDefaults. Closing Settings clears AppDelegate state so Settings can be reopened.
+Expected behavior: Settings is one window with toolbar tabs for General, Video, Audio & Camera, Overlays, and Shortcuts. Each tab is a grouped form, and the window fits the tab showing and grows as its toggles reveal rows. General includes launch at login, sound cues, ask/fixed save destination, the output folder shown by Finder icon and name with its full path in the tooltip and writability validation, a When a recording ends choice between showing the preview, revealing the file in Finder, and doing nothing, and launch-at-login error display. Values persist in UserDefaults. Closing Settings clears AppDelegate state so Settings can be reopened.
 
 Manual steps:
 
 1. Open Settings
-2. change each General setting
-3. close/reopen and relaunch
-4. verify persistence and stale window references do not prevent reopening.
+2. verify toolbar tabs General, Video, Audio & Camera, Overlays, and Shortcuts and that the window resizes to each
+3. set When a recording ends to each option and verify the stored preview and Finder settings follow
+4. change each other General setting
+5. close/reopen and relaunch
+6. verify persistence and stale window references do not prevent reopening.
 
 Current status: Partial automated evidence passed; manual UI validation still pending. Validate manually using the listed steps.
 
@@ -794,11 +796,11 @@ Notes:
 
 User story: As a user recording narration, I want to see that my microphone is live before I start so I do not lose a ten-minute take to a muted input.
 
-Expected behavior: With microphone audio selected, the Recording settings tab shows a live level meter fed by a metering-only capture session on the chosen device. Levels come from the capture connection's audio channel power reading, mapped from decibels onto 0 to 1 with a floor at -60 dB, and the bar turns green once the input is clearly audible. The session runs only while the tab is visible and the microphone source is selected, and restarts when the device changes. Missing devices, denied permission, and inputs that cannot be opened each surface their own message.
+Expected behavior: With microphone audio selected, the Audio & Camera settings tab shows a live level meter fed by a metering-only capture session on the chosen device. Levels come from the capture connection's audio channel power reading, mapped from decibels onto 0 to 1 with a floor at -60 dB, and the bar turns green once the input is clearly audible. The session runs only while the tab is visible and the microphone source is selected, and restarts when the device changes. Missing devices, denied permission, and inputs that cannot be opened each surface their own message.
 
 Manual steps:
 
-1. Open Settings, Recording, enable Record audio with the Microphone source
+1. Open Settings, Audio & Camera, enable Record audio with the Microphone source
 2. speak and verify the meter moves and turns green
 3. mute the input and verify it drops and stays orange
 4. switch to another input device and verify the meter follows it

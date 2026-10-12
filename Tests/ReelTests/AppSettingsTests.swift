@@ -1222,19 +1222,13 @@ final class AppSettingsTests: XCTestCase {
     }
 
     func testSettingsTextMatchesGeneralRecordingAndShortcutControls() {
-        XCTAssertEqual(SettingsText.generalTab, "General")
-        XCTAssertEqual(SettingsText.recordingTab, "Recording")
-        XCTAssertEqual(SettingsText.shortcutsTab, "Shortcuts")
         XCTAssertEqual(SettingsText.launchAtLogin, "Launch at login")
-        XCTAssertEqual(SettingsText.saveRecordingsTo, "Save recordings to:")
+        XCTAssertEqual(SettingsText.saveRecordingsTo, "Save recordings to")
         XCTAssertEqual(SettingsText.askEachTime, "Ask each time")
         XCTAssertEqual(SettingsText.fixedFolder, "Fixed folder")
         XCTAssertEqual(
             SettingsText.outputDirectoryNotWritable, "Cannot write to selected folder. Pick another location.")
-        XCTAssertEqual(
-            SettingsText.finderSuppressedByPreview,
-            "Finder opens automatically only when the preview is off."
-        )
+        XCTAssertEqual(SettingsText.whenRecordingEnds, "When a recording ends")
         XCTAssertEqual(SettingsText.recordAudio, "Record audio")
         XCTAssertEqual(SettingsText.recordCamera, "Record camera overlay")
         XCTAssertEqual(SettingsText.addTextOverlay, "Add text overlay")
@@ -1253,13 +1247,43 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertTrue(PermissionText.relaunchStep.contains("Relaunch Reel"))
     }
 
+    func testAfterRecordingActionMatchesWhatFinalizationDoes() {
+        for action in AfterRecordingAction.allCases {
+            XCTAssertEqual(
+                AfterRecordingAction(showPreview: action.showsPreview, openFinder: action.revealsInFinder),
+                action
+            )
+        }
+        XCTAssertEqual(AfterRecordingAction(showPreview: true, openFinder: true), .showPreview)
+        XCTAssertEqual(AfterRecordingAction(showPreview: false, openFinder: true), .revealInFinder)
+        XCTAssertEqual(AfterRecordingAction(showPreview: false, openFinder: false), .nothing)
+        for showPreview in [true, false] {
+            for openFinder in [true, false] {
+                let action = AfterRecordingAction(showPreview: showPreview, openFinder: openFinder)
+                XCTAssertEqual(
+                    action.revealsInFinder,
+                    RecordingFinalizationLogic.shouldRevealInFinder(
+                        openFinderAfterRecording: openFinder,
+                        showPreviewAfterRecording: showPreview
+                    )
+                )
+            }
+        }
+    }
+
     @MainActor
-    func testSettingsWindowIsTallEnoughForTheRecordingTab() {
-        // The Recording tab is the tallest: 6 always-visible controls, 3
-        // dividers, and up to 9 more rows once camera and text overlay are on.
-        // Scrolling covers the overflow, but the common case should still fit.
-        XCTAssertGreaterThanOrEqual(SettingsLayout.height, 480)
-        XCTAssertEqual(SettingsLayout.width, 460)
+    func testSettingsPanesSplitRecordingIntoFocusedTabs() throws {
+        XCTAssertEqual(
+            SettingsPane.allCases.map(\.title),
+            ["General", "Video", "Audio & Camera", "Overlays", "Shortcuts"]
+        )
+        for pane in SettingsPane.allCases {
+            XCTAssertNotNil(NSImage(systemSymbolName: pane.symbolName, accessibilityDescription: nil), pane.title)
+        }
+
+        let tabs = SettingsPane.makeTabViewController()
+        XCTAssertEqual(tabs.tabStyle, .toolbar)
+        XCTAssertEqual(tabs.tabViewItems.map(\.label), SettingsPane.allCases.map(\.title))
     }
 
     @MainActor
