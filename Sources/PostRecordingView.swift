@@ -41,10 +41,9 @@ enum PostRecordingText {
     static let copied = "Copied!"
     static let dragHint = "Drag this recording into Slack, Mail, or Finder"
     static let exportToShare = "Export edits to share"
-    static let exportToShareHelp =
-        "Drag and Copy share a file. Choose Save Edited... or Smaller Copy... to make one from your edits."
+    static let exportToShareHelp = "Drag, Copy, and Share use a file. Choose Export to make one from your edits."
+    static let share = "Share"
     static let delete = "Move to Trash"
-    static let saveEdited = "Save Edited..."
     static let timeline = "Timeline"
     static let timelineHelp = "Drag the yellow handles to trim. To remove a middle part, split around it and delete it."
     static let split = "Split"
@@ -83,10 +82,16 @@ enum PostRecordingText {
     static let redo = "Redo"
     static let undoHelp = "Undo (⌘Z)"
     static let redoHelp = "Redo (⇧⌘Z)"
-    static let exportSmaller = "Smaller Copy..."
-    static let exportGIF = "GIF..."
-    static let exportGIFHelp = "Silent, looping, capped in size and frame count for README and issue embeds."
-    static let exportSmallerHelp = "Re-encodes at 720p for sharing in chat, issues, and pull requests."
+    static let export = "Export"
+    static let exportEdited = "Edited Video..."
+    static let exportEditedHelp = "Full size, with your edits"
+    static let exportSmaller = "Smaller Copy (720p)..."
+    static let exportSmallerHelp = "For chat, issues, and pull requests"
+    static let exportGIF = "Animated GIF..."
+    static let exportGIFHelp = "Silent and looping, for READMEs and issues"
+    static let exporting = "Exporting"
+    static let cancelExport = "Cancel"
+    static let showInFinder = "Show in Finder"
     static let editNote =
         "Deleted clips are skipped, and zoom scenes are applied during playback and export."
     static let done = "Done"
@@ -186,6 +191,10 @@ struct PostRecordingView: View {
     @State private var isScrubbing = false
     @State private var timelineSelection: TimelineSelection = .none
     @State private var isExporting = false
+    /// How far the file being written has got; nil while nothing is written.
+    @State private var exportProgress: Double?
+    /// The file the last export wrote, until the edit changes.
+    @State private var lastExportURL: URL?
     @State private var exportTask: Task<Void, Never>?
     @State private var showDeleteConfirmation = false
     @State private var exportError: String?
@@ -260,11 +269,20 @@ struct PostRecordingView: View {
                     .font(.caption)
             }
 
+            if let lastExportURL {
+                exportedNote(for: lastExportURL)
+            }
+
             HStack(spacing: 12) {
                 fileChip
 
                 Button(justCopied ? PostRecordingText.copied : PostRecordingText.copy) {
                     copyToPasteboard()
+                }
+                .disabled(isExporting || shareURL == nil)
+
+                ShareLink(item: shareURL ?? videoURL) {
+                    Label(PostRecordingText.share, systemImage: "square.and.arrow.up")
                 }
                 .disabled(isExporting || shareURL == nil)
 
@@ -296,35 +314,7 @@ struct PostRecordingView: View {
 
                 Spacer()
 
-                if hasEdits {
-                    Button(PostRecordingText.saveEdited) {
-                        startVideoExport(
-                            quality: .source,
-                            suffix: "edited"
-                        )
-                    }
-                    .disabled(!canExport)
-                }
-
-                Button(PostRecordingText.exportSmaller) {
-                    startVideoExport(
-                        quality: .p720,
-                        suffix: "720p"
-                    )
-                }
-                .disabled(!canExport)
-                .help(PostRecordingText.exportSmallerHelp)
-
-                Button(PostRecordingText.exportGIF) {
-                    startGIFExport()
-                }
-                .disabled(!canExport)
-                .help(PostRecordingText.exportGIFHelp)
-
-                if isExporting {
-                    ProgressView()
-                        .scaleEffect(0.7)
-                }
+                exportControls
 
                 Button(PostRecordingText.done) {
                     onDismiss()
@@ -348,6 +338,7 @@ struct PostRecordingView: View {
             setupPlayer()
         }
         .onChange(of: edit) { previousEdit, changedEdit in
+            lastExportURL = nil
             guard let changedEdit else {
                 timelineSelection = .none
                 player?.currentItem?.videoComposition = nil
@@ -414,7 +405,7 @@ struct PostRecordingView: View {
             Text(shareURL?.lastPathComponent ?? PostRecordingText.exportToShare)
                 .lineLimit(1)
                 .truncationMode(.middle)
-                .frame(maxWidth: 220)
+                .frame(maxWidth: 220, alignment: .leading)
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 5)
@@ -435,6 +426,68 @@ struct PostRecordingView: View {
                 .foregroundStyle(.secondary)
                 .help(PostRecordingText.exportToShareHelp)
         }
+    }
+
+    /// One Export menu, replaced by progress and Cancel while a file is
+    /// being written.
+    @ViewBuilder
+    private var exportControls: some View {
+        if let exportProgress {
+            Text("\(PostRecordingText.exporting) \(Int((exportProgress * 100).rounded()))%")
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
+            ProgressView(value: exportProgress)
+                .frame(width: 120)
+                .accessibilityLabel(PostRecordingText.exporting)
+            Button(PostRecordingText.cancelExport) {
+                exportTask?.cancel()
+            }
+            .keyboardShortcut(.cancelAction)
+        } else {
+            Menu(PostRecordingText.export) {
+                Button {
+                    startExport(.video(.source, suffix: "edited"))
+                } label: {
+                    Text(PostRecordingText.exportEdited)
+                    Text(PostRecordingText.exportEditedHelp)
+                }
+                .disabled(!hasEdits)
+
+                Button {
+                    startExport(.video(.p720, suffix: "720p"))
+                } label: {
+                    Text(PostRecordingText.exportSmaller)
+                    Text(PostRecordingText.exportSmallerHelp)
+                }
+
+                Button {
+                    startExport(.gif)
+                } label: {
+                    Text(PostRecordingText.exportGIF)
+                    Text(PostRecordingText.exportGIFHelp)
+                }
+            }
+            .fixedSize()
+            .disabled(!canExport)
+        }
+    }
+
+    private func exportedNote(for url: URL) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: "checkmark.circle.fill")
+                .foregroundStyle(.green)
+                .accessibilityHidden(true)
+            Text("Saved “\(url.lastPathComponent)”")
+                .lineLimit(1)
+                .truncationMode(.middle)
+            Button(PostRecordingText.showInFinder) {
+                if !NSWorkspace.shared.selectFile(url.path(), inFileViewerRootedAtPath: "") {
+                    exportError = "Finder could not show \(url.lastPathComponent)."
+                }
+            }
+            .buttonStyle(.link)
+        }
+        .font(.caption)
     }
 
     private var hasUnsavedEdits: Bool {
@@ -738,78 +791,40 @@ struct PostRecordingView: View {
         seekPlayer(to: sourceTime)
     }
 
-    private func startVideoExport(quality: VideoExportQuality, suffix: String) {
-        guard !isExporting else { return }
+    private func startExport(_ format: ExportFormat) {
+        guard !isExporting, let edit else { return }
         pausePlayback()
         isExporting = true
         exportError = nil
+        lastExportURL = nil
         exportTask = Task { @MainActor in
-            await performVideoExport(quality: quality, suffix: suffix)
-            isExporting = false
-            exportTask = nil
-        }
-    }
-
-    private func startGIFExport() {
-        guard !isExporting else { return }
-        pausePlayback()
-        isExporting = true
-        exportError = nil
-        exportTask = Task { @MainActor in
-            await performGIFExport()
-            isExporting = false
-            exportTask = nil
-        }
-    }
-
-    private func performVideoExport(quality: VideoExportQuality, suffix: String) async {
-        guard let outputURL = await selectExportURL(suffix: suffix) else {
-            return
-        }
-        guard let edit else { return }
-
-        do {
-            let warning = try await exportVideo(to: outputURL, quality: quality, edit: edit)
-            try Task.checkCancellation()
-            exportedEdit = edit
-            exportedVideo = ExportedVideo(edit: edit, url: outputURL)
-            if let warning {
-                exportError = warning.localizedDescription
+            defer {
+                isExporting = false
+                exportProgress = nil
+                exportTask = nil
             }
-            let revealed = NSWorkspace.shared.selectFile(outputURL.path(), inFileViewerRootedAtPath: "")
-            if !revealed {
-                let revealError = "Video saved, but Finder could not reveal it."
-                exportError = exportError.map { "\($0)\n\(revealError)" } ?? revealError
-            }
-        } catch is CancellationError {
-            return
-        } catch {
-            exportError = "Export failed: \(error.localizedDescription)"
-        }
-    }
+            guard let outputURL = await selectExportURL(for: format) else { return }
+            exportProgress = 0
 
-    private func performGIFExport() async {
-        guard let outputURL = await selectExportURL(suffix: "gif", contentType: .gif) else {
-            return
-        }
-        guard let edit else { return }
-
-        do {
-            let warning = try await exportGIF(to: outputURL, edit: edit)
-            try Task.checkCancellation()
-            exportedEdit = edit
-            if let warning {
-                exportError = warning.localizedDescription
+            do {
+                let warning: FileReplacementWarning?
+                switch format {
+                case .video(let quality, _):
+                    warning = try await exportVideo(to: outputURL, quality: quality, edit: edit)
+                    exportedVideo = ExportedVideo(edit: edit, url: outputURL)
+                case .gif:
+                    warning = try await exportGIF(to: outputURL, edit: edit)
+                }
+                exportedEdit = edit
+                lastExportURL = outputURL
+                if let warning {
+                    exportError = warning.localizedDescription
+                }
+            } catch is CancellationError {
+                return
+            } catch {
+                exportError = "Export failed: \(error.localizedDescription)"
             }
-            let revealed = NSWorkspace.shared.selectFile(outputURL.path(), inFileViewerRootedAtPath: "")
-            if !revealed {
-                let revealError = "GIF saved, but Finder could not reveal it."
-                exportError = exportError.map { "\($0)\n\(revealError)" } ?? revealError
-            }
-        } catch is CancellationError {
-            return
-        } catch {
-            exportError = "GIF export failed: \(error.localizedDescription)"
         }
     }
 
@@ -835,9 +850,12 @@ struct PostRecordingView: View {
         let sampling = GIFExport.frames(edit: edit)
         let imageContext = CIContext(options: [.cacheIntermediates: false])
 
+        // Built in memory: a file destination writes through a hidden file of
+        // its own that a cancelled export would leave behind.
+        let gifData = NSMutableData()
         guard
-            let destination = CGImageDestinationCreateWithURL(
-                outputURL as CFURL,
+            let destination = CGImageDestinationCreateWithData(
+                gifData as CFMutableData,
                 UTType.gif.identifier as CFString,
                 sampling.times.count,
                 nil
@@ -857,7 +875,7 @@ struct PostRecordingView: View {
                 kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFDelayTime: sampling.delay]
             ] as CFDictionary
 
-        for seconds in sampling.times {
+        for (index, seconds) in sampling.times.enumerated() {
             try Task.checkCancellation()
             let time = CMTime(seconds: seconds, preferredTimescale: 600)
             let frame = try await generator.image(at: time)
@@ -871,19 +889,20 @@ struct PostRecordingView: View {
                 throw ExportError.gifFrameRenderFailed
             }
             CGImageDestinationAddImage(destination, renderedFrame, frameProperties)
+            exportProgress = Double(index + 1) / Double(sampling.times.count)
         }
 
         guard CGImageDestinationFinalize(destination) else {
             throw ExportError.gifWriteFailed
         }
+        try gifData.write(to: outputURL)
     }
 
-    private func selectExportURL(suffix: String, contentType: UTType = .mpeg4Movie) async -> URL? {
+    private func selectExportURL(for format: ExportFormat) async -> URL? {
         let panel = NSSavePanel()
-        panel.allowedContentTypes = [contentType]
+        panel.allowedContentTypes = [format.contentType]
         let originalName = videoURL.deletingPathExtension().lastPathComponent
-        let fileExtension = contentType == .gif ? "gif" : "mp4"
-        panel.nameFieldStringValue = "\(originalName)-\(suffix).\(fileExtension)"
+        panel.nameFieldStringValue = "\(originalName)-\(format.suffix).\(format.fileExtension)"
         panel.directoryURL = videoURL.deletingLastPathComponent()
 
         let response: NSApplication.ModalResponse
@@ -911,7 +930,8 @@ struct PostRecordingView: View {
             sourceURL: videoURL,
             outputURL: tempURL,
             quality: quality,
-            edit: edit
+            edit: edit,
+            onProgress: { exportProgress = $0 }
         )
         try Task.checkCancellation()
         return try FileReplacement.commit(tempURL: tempURL, to: outputURL)
@@ -925,6 +945,38 @@ struct PostRecordingView: View {
             logger.error(
                 "Failed to remove temporary \(kind, privacy: .public) export at \(url.path(), privacy: .public): \(error.localizedDescription, privacy: .public)"
             )
+        }
+    }
+}
+
+private enum ExportFormat {
+    case video(VideoExportQuality, suffix: String)
+    case gif
+
+    var suffix: String {
+        switch self {
+        case .video(_, let suffix):
+            return suffix
+        case .gif:
+            return "gif"
+        }
+    }
+
+    var contentType: UTType {
+        switch self {
+        case .video:
+            return .mpeg4Movie
+        case .gif:
+            return .gif
+        }
+    }
+
+    var fileExtension: String {
+        switch self {
+        case .video:
+            return "mp4"
+        case .gif:
+            return "gif"
         }
     }
 }

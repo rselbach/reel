@@ -481,6 +481,52 @@ final class PostRecordingTimelineTests: XCTestCase {
         }
     }
 
+    @MainActor
+    func testVideoExporterReportsProgressAndStopsWhenCancelled() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("Reel-Abed-Export-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer {
+            do {
+                try FileManager.default.removeItem(at: directory)
+            } catch {
+                XCTFail("Could not remove video export fixture: \(error)")
+            }
+        }
+        let sourceURL = directory.appendingPathComponent("Greendale-source.mp4")
+        try await Self.writeColorFixture(to: sourceURL)
+        let edit = try XCTUnwrap(TimelineEdit(sourceDuration: 3))
+
+        var progress: [Double] = []
+        try await VideoEditExporter.export(
+            sourceURL: sourceURL,
+            outputURL: directory.appendingPathComponent("Greendale-720p.mp4"),
+            quality: .p720,
+            edit: edit,
+            onProgress: { progress.append($0) }
+        )
+        XCTAssertEqual(progress.last, 1)
+        XCTAssertEqual(progress, progress.sorted())
+        XCTAssertTrue(progress.allSatisfy { (0...1).contains($0) })
+
+        let cancelledURL = directory.appendingPathComponent("Greendale-cancelled.mp4")
+        let export = Task { @MainActor in
+            try await VideoEditExporter.export(
+                sourceURL: sourceURL,
+                outputURL: cancelledURL,
+                quality: .p720,
+                edit: edit
+            )
+        }
+        export.cancel()
+        do {
+            try await export.value
+            XCTFail("A cancelled export should not finish")
+        } catch is CancellationError {
+            XCTAssertFalse(FileManager.default.fileExists(atPath: cancelledURL.path()))
+        }
+    }
+
     private func makeThreeClipEdit(
         initialID: UUID,
         middleID: UUID,

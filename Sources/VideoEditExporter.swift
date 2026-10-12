@@ -18,11 +18,15 @@ enum VideoEditExporter {
         }
     }
 
+    /// Writes the edited recording to `outputURL`, reporting progress from 0
+    /// to 1 along the way and 1 once the file is complete. Cancelling the
+    /// calling task stops the export and throws CancellationError.
     static func export(
         sourceURL: URL,
         outputURL: URL,
         quality: VideoExportQuality,
-        edit: TimelineEdit
+        edit: TimelineEdit,
+        onProgress: @escaping @MainActor @Sendable (Double) -> Void = { _ in }
     ) async throws {
         let sourceAsset = AVURLAsset(url: sourceURL)
         let plan = try await ZoomVideoComposition.exportPlan(asset: sourceAsset, edit: edit)
@@ -44,6 +48,19 @@ enum VideoEditExporter {
             session.timeRange = timeRange
         }
         session.videoComposition = plan.videoComposition
-        try await session.export(to: outputURL, as: .mp4)
+
+        let states = session.states(updateInterval: 0.1)
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            group.addTask {
+                for await state in states {
+                    if case .exporting(let progress) = state {
+                        await onProgress(progress.fractionCompleted)
+                    }
+                }
+            }
+            try await session.export(to: outputURL, as: .mp4)
+            group.cancelAll()
+        }
+        await onProgress(1)
     }
 }
