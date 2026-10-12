@@ -24,7 +24,7 @@ enum AppMenuText {
     static let resumeRecording = "Resume Recording"
     static let recordingPaused = "❚❚ Paused"
     static let discardConfirmationTitle = "Discard this recording?"
-    static let discardConfirmationMessage = "The take will be deleted. This cannot be undone."
+    static let discardConfirmationMessage = "The take will be moved to the Trash."
     static let discard = "Discard"
     static let cancel = "Cancel"
     static let discardEditsTitle = "Discard your edits?"
@@ -765,6 +765,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             guard await screenRecorder.discardRecording() else { return }
             RecordingCue.stop.play()
             rebuildMenu()
+            if let message = screenRecorder.errorMessage {
+                showErrorAlert(title: AppMenuText.recordingWarning, message: message)
+            }
         }
     }
 

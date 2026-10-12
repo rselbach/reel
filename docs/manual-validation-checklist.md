@@ -688,13 +688,13 @@ Notes:
 
 User story: As a user who flubbed a take, I want to throw the recording away in one step instead of stopping it and then deleting the file.
 
-Expected behavior: While recording, the status item menu offers Discard Recording alongside Stop Recording, and a second global shortcut does the same. Discarding stops the stream, cancels the asset writer, removes the temporary file, and adds nothing to recent recordings or the preview. The menu item confirms first because it sits next to Stop Recording; the shortcut does not, being a deliberate chord where a modal would interrupt a demo. The stop cue plays either way.
+Expected behavior: While recording, the status item menu offers Discard Recording alongside Stop Recording, and a second global shortcut does the same. Discarding stops the stream, finishes the file, and moves it to the Trash, so a take discarded by mistake can be recovered; a take with no frames is deleted outright. It adds nothing to recent recordings or the preview. If the move to the Trash fails, the file is kept in place and an alert says where. The menu item confirms first because it sits next to Stop Recording; the shortcut does not, being a deliberate chord where a modal would interrupt a demo. The stop cue plays either way.
 
 Manual steps:
 
-1. Start a recording, choose Discard Recording from the menu, confirm, and verify no file appears in the output folder or recent recordings
+1. Start a recording, choose Discard Recording from the menu, confirm, and verify the take is not in the output folder or recent recordings and that it plays from the Trash
 2. repeat and cancel the confirmation, verifying the recording continues
-3. press the discard shortcut during a recording and verify it ends immediately with no confirmation and no file
+3. press the discard shortcut during a recording and verify it ends immediately with no confirmation and the take is in the Trash
 4. open Settings, Shortcuts and verify both shortcuts are listed and that assigning one the other's combination is refused with an explanation.
 
 Current status: Partial automated evidence passed; manual UI validation still pending. Validate manually using the listed steps.

@@ -957,9 +957,8 @@ class ScreenRecorder: NSObject, ObservableObject {
         isPaused ? resumeRecording() : pauseRecording()
     }
 
-    /// Ends the recording and throws the file away, for a take the user does
-    /// not want kept. Unlike stopRecording, nothing is finalized, nothing is
-    /// added to recent recordings, and no preview is offered.
+    /// Ends the recording and throws the take away. Unlike stopRecording,
+    /// nothing is added to recent recordings and no preview is offered.
     @discardableResult
     func discardRecording() async -> Bool {
         if isStarting {
@@ -982,17 +981,41 @@ class ScreenRecorder: NSObject, ObservableObject {
             logger.warning("Failed to stop capture while discarding: \(error.localizedDescription)")
         }
 
-        assetWriter?.cancelWriting()
-        if let outputURL {
-            discardTempRecording(outputURL)
-        }
+        errorMessage = nil
+        await moveTakeToTrash()
 
         cleanup()
         isRecording = false
         isPaused = false
-        errorMessage = nil
         logger.info("Recording discarded at the user's request")
         return true
+    }
+
+    /// The discard shortcut is one modifier away from stop, so a discarded
+    /// take is finished and moved to the Trash, where a slip can be undone.
+    /// A take with no frames was never a playable file and is just deleted.
+    private func moveTakeToTrash() async {
+        guard let outputURL else { return }
+        let hasCapturedFrames = withFrameLock { frameState.frameWriter?.startTime != nil }
+        guard hasCapturedFrames else {
+            assetWriter?.cancelWriting()
+            discardTempRecording(outputURL)
+            return
+        }
+
+        await finishWriting()
+        guard assetWriter?.status == .completed else {
+            discardTempRecording(outputURL)
+            return
+        }
+
+        do {
+            try FileManager.default.trashItem(at: outputURL, resultingItemURL: nil)
+        } catch {
+            logger.error("Failed to move discarded recording to the Trash: \(error.localizedDescription)")
+            errorMessage =
+                "Could not move the discarded recording to the Trash. It was kept at \(outputURL.path()): \(error.localizedDescription)"
+        }
     }
 
     private func waitForActiveStart() async {
@@ -1456,12 +1479,7 @@ class ScreenRecorder: NSObject, ObservableObject {
         // recordings go while this one was running.
         let options = activeOptions ?? RecordingOptions(settings: settings)
 
-        videoInput?.markAsFinished()
-        audioInput?.markAsFinished()
-        withFrameLock {
-            frameState.frameWriter?.cursorMetadataWriter.input.markAsFinished()
-        }
-        await assetWriter?.finishWriting()
+        await finishWriting()
 
         guard let tempURL = outputURL else { return }
         guard let assetWriter else { return }
@@ -1523,6 +1541,15 @@ class ScreenRecorder: NSObject, ObservableObject {
                 errorMessage = errorMessage.map { "\($0)\n\(revealError)" } ?? revealError
             }
         }
+    }
+
+    private func finishWriting() async {
+        videoInput?.markAsFinished()
+        audioInput?.markAsFinished()
+        withFrameLock {
+            frameState.frameWriter?.cursorMetadataWriter.input.markAsFinished()
+        }
+        await assetWriter?.finishWriting()
     }
 
     private func moveTempRecording(
