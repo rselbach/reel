@@ -566,13 +566,13 @@ Notes:
 
 User story: As a user, I want to refresh the recording picker and understand why it is empty so I can recover without closing and reopening it.
 
-Expected behavior: RecordingDialog always shows the refresh control, including when no windows are listed, and preselects the target the recorder is currently pointed at. Thumbnails are buttons, so selection is immediate and reachable from the keyboard, and arrow keys move between displays and windows in the order shown — one step for left and right, one row for up and down, using the same column count the adaptive grid lays out, clamped at both ends. Area recording offers both drawing a fresh area and reusing the remembered one. Empty states distinguish no open windows from nothing recordable at all, the latter offering a button to the System Settings privacy pane.
+Expected behavior: RecordingDialog shows the refresh control whenever it lists displays, including when no windows are listed, and preselects the target the recorder is currently pointed at. Thumbnails are buttons, so selection is immediate and reachable from the keyboard, and arrow keys move between displays and windows in the order shown — one step for left and right, one row for up and down, using the same column count the adaptive grid lays out, clamped at both ends. Area recording offers both drawing a fresh area and reusing the remembered one. When ScreenCaptureKit lists no displays, which in practice means the permission is not in effect, the picker replaces its whole content with a permission state that explains turning Reel on in System Settings and relaunching, offers Open System Settings and Relaunch Reel, and keeps only Cancel; the no-open-windows empty state stays separate.
 
 Manual steps:
 
 1. Open the recording picker with screen recording permission revoked
-2. verify the empty state explains the permission and the System Settings button opens the privacy pane
-3. grant permission, press refresh, and verify displays and windows appear
+2. verify the picker shows only the permission state with Open System Settings, Relaunch Reel, and Cancel, and that Open System Settings opens the privacy pane
+3. grant permission, press Relaunch Reel, reopen the picker, and verify displays and windows appear
 4. record a window, reopen the picker, and verify that window is preselected
 5. move through the cards with the arrow keys and verify left and right step one card and up and down step one row without wrapping
 6. press Return and verify recording starts with the highlighted card

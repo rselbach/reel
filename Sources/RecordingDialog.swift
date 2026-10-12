@@ -28,10 +28,6 @@ enum RecordingDialogText {
     static let noWindows = "No open windows found."
     static let noWindowsHint = "Open a window, then refresh."
     static let noSearchResults = "No windows match your search."
-    static let nothingRecordable = "No recordable displays or windows found"
-    static let nothingRecordableHint = "Check screen recording permission and try again."
-    static let openSystemSettings = "Open System Settings..."
-    static let openSystemSettingsFailed = "Could not open System Settings."
     static let selectArea = "Select Area to Record..."
     static let forThisRecording = "For this recording"
     static let recordCamera = "Camera"
@@ -162,6 +158,7 @@ private enum AppIconCache {
 struct RecordingDialog: View {
     let onStart: (RecordingSelection, RecordingOverrides) -> Void
     let onCancel: () -> Void
+    let onOpenSystemSettings: @MainActor () async throws -> Void
     let onRefresh:
         @MainActor () async -> (
             displays: [SCDisplay],
@@ -179,7 +176,6 @@ struct RecordingDialog: View {
     @State private var windowThumbnails: [CGWindowID: NSImage] = [:]
     @State private var isLoading = true
     @State private var searchText = ""
-    @State private var settingsError: String?
     @State private var recordAudio: Bool
     @State private var recordCamera: Bool
     @StateObject private var levelMonitor = AudioLevelMonitor()
@@ -194,6 +190,7 @@ struct RecordingDialog: View {
         initialOverrides: RecordingOverrides,
         onStart: @escaping (RecordingSelection, RecordingOverrides) -> Void,
         onCancel: @escaping () -> Void,
+        onOpenSystemSettings: @escaping @MainActor () async throws -> Void,
         onRefresh:
             @escaping @MainActor () async -> (
                 displays: [SCDisplay],
@@ -203,6 +200,7 @@ struct RecordingDialog: View {
     ) {
         self.onStart = onStart
         self.onCancel = onCancel
+        self.onOpenSystemSettings = onOpenSystemSettings
         self.onRefresh = onRefresh
         self.lastRegionOutputSize = lastRegionOutputSize
         _recordAudio = State(initialValue: initialOverrides.recordAudio ?? false)
@@ -264,6 +262,49 @@ struct RecordingDialog: View {
     }
 
     var body: some View {
+        Group {
+            // ScreenCaptureKit lists no displays only when Reel cannot capture
+            // at all, which in practice means the permission is not in effect.
+            if displays.isEmpty {
+                permissionNeeded
+            } else {
+                picker
+            }
+        }
+        .frame(width: 540, height: 540)
+        .task {
+            await loadThumbnails()
+        }
+    }
+
+    private var permissionNeeded: some View {
+        VStack(spacing: 0) {
+            Spacer()
+            VStack(spacing: 16) {
+                Image(systemName: "rectangle.dashed.badge.record")
+                    .font(.system(size: 48))
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
+                Text(PermissionText.required)
+                    .font(.title3)
+                    .fontWeight(.semibold)
+                ScreenRecordingPermissionSteps(onOpenSystemSettings: onOpenSystemSettings)
+            }
+            .padding(.horizontal, 48)
+            Spacer()
+            Divider()
+            HStack {
+                Spacer()
+                Button("Cancel") {
+                    onCancel()
+                }
+                .keyboardShortcut(.cancelAction)
+            }
+            .padding(16)
+        }
+    }
+
+    private var picker: some View {
         VStack(spacing: 0) {
             Text("Select what to record")
                 .font(.headline)
@@ -430,10 +471,6 @@ struct RecordingDialog: View {
             }
             .padding(16)
         }
-        .frame(width: 540, height: 540)
-        .task {
-            await loadThumbnails()
-        }
         .onMoveCommand { moveSelection($0) }
         .onAppear { refreshMetering() }
         .onDisappear { levelMonitor.stop() }
@@ -442,35 +479,14 @@ struct RecordingDialog: View {
         }
     }
 
-    /// Shown in place of the window grid. Missing displays *and* windows
-    /// almost always means the screen recording permission is not in effect,
-    /// so that case offers a way straight to System Settings.
-    @ViewBuilder
+    /// Shown in place of the window grid when no windows are open.
     private var emptyState: some View {
         VStack(alignment: .leading, spacing: 6) {
-            if displays.isEmpty {
-                Text(RecordingDialogText.nothingRecordable)
-                    .font(.subheadline)
-                Text(RecordingDialogText.nothingRecordableHint)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                Button(RecordingDialogText.openSystemSettings) {
-                    openScreenCaptureSettings()
-                }
-                .padding(.top, 4)
-            } else {
-                Text(RecordingDialogText.noWindows)
-                    .font(.subheadline)
-                Text(RecordingDialogText.noWindowsHint)
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-
-            if let settingsError {
-                Text(settingsError)
-                    .font(.caption)
-                    .foregroundColor(.red)
-            }
+            Text(RecordingDialogText.noWindows)
+                .font(.subheadline)
+            Text(RecordingDialogText.noWindowsHint)
+                .font(.caption)
+                .foregroundColor(.secondary)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 16)
@@ -489,16 +505,6 @@ struct RecordingDialog: View {
             return
         }
         levelMonitor.start(device: AppSettings.shared.selectedAudioDevice)
-    }
-
-    private func openScreenCaptureSettings() {
-        guard let url = SystemSettingsLink.screenCapturePrivacy,
-            NSWorkspace.shared.open(url)
-        else {
-            settingsError = RecordingDialogText.openSystemSettingsFailed
-            return
-        }
-        settingsError = nil
     }
 
     private func refresh() async {

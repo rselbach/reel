@@ -1589,15 +1589,6 @@ final class AppSettingsTests: XCTestCase {
     func testRecordingDialogTextDistinguishesEmptyStates() {
         XCTAssertEqual(RecordingDialogText.noWindows, "No open windows found.")
         XCTAssertEqual(RecordingDialogText.noSearchResults, "No windows match your search.")
-        XCTAssertEqual(
-            RecordingDialogText.nothingRecordable,
-            "No recordable displays or windows found"
-        )
-        XCTAssertNotEqual(
-            RecordingDialogText.noWindows,
-            RecordingDialogText.nothingRecordable
-        )
-        XCTAssertEqual(RecordingDialogText.openSystemSettings, PermissionText.openSystemSettings)
     }
 
     @MainActor

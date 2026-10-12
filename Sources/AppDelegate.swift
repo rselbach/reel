@@ -960,6 +960,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                     self?.recordingDialogWindow?.close()
                     self?.recordingDialogWindow = nil
                 },
+                onOpenSystemSettings: openScreenRecordingSettings,
                 onRefresh: { [weak self] in
                     guard let self else { return ([], [], []) }
                     await self.screenRecorder.refreshWindows()
