@@ -196,9 +196,13 @@ class AppSettings: ObservableObject {
         }
     }
 
+    /// A folder of its own inside Movies, so recordings do not mix with
+    /// everything else there. Created with the first recording.
     static func defaultOutputDirectory() -> URL {
-        FileManager.default.urls(for: .moviesDirectory, in: .userDomainMask).first
+        let movies =
+            FileManager.default.urls(for: .moviesDirectory, in: .userDomainMask).first
             ?? URL(fileURLWithPath: NSHomeDirectory())
+        return movies.appendingPathComponent("Reel", isDirectory: true)
     }
 
     private static func isWritableDirectory(_ url: URL) -> Bool {

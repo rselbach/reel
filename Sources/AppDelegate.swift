@@ -670,6 +670,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     @objc private func openRecordingsFolder() {
         let url = AppSettings.shared.outputDirectory
+        // The default folder only exists once something has been recorded.
+        do {
+            try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        } catch {
+            showErrorAlert(
+                title: AppMenuText.couldNotOpenRecordingsFolder,
+                message: "Reel could not create \(url.path()): \(error.localizedDescription)"
+            )
+            return
+        }
         if !NSWorkspace.shared.open(url) {
             showErrorAlert(
                 title: AppMenuText.couldNotOpenRecordingsFolder,

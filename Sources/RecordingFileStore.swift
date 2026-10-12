@@ -7,13 +7,35 @@ private let logger = Logger(
 )
 
 enum RecordingFileNaming {
-    static func sanitizedTimestamp(from date: Date) -> String {
-        ISO8601DateFormatter().string(from: date)
-            .replacingOccurrences(of: ":", with: "-")
-    }
+    /// Named the way macOS names its own screen recordings, in local time
+    /// and the user's 12- or 24-hour clock: "Reel 2026-10-11 at 7.58.07 PM.mp4".
+    /// Finder names cannot hold colons, so the time uses periods, as macOS
+    /// does. A second take in the same second gets " (2)", and so on.
+    static func fileName(
+        date: Date,
+        copy: Int = 1,
+        timeZone: TimeZone = .current,
+        locale: Locale = .current
+    ) -> String {
+        let day = DateFormatter()
+        day.calendar = Calendar(identifier: .gregorian)
+        day.locale = Locale(identifier: "en_US_POSIX")
+        day.timeZone = timeZone
+        day.dateFormat = "yyyy-MM-dd"
 
-    static func fileName(date: Date, randomID: String) -> String {
-        "Reel-\(sanitizedTimestamp(from: date))-\(randomID).mp4"
+        let time = DateFormatter()
+        time.locale = locale
+        time.timeZone = timeZone
+        time.setLocalizedDateFormatFromTemplate("jms")
+        // Plain spaces: some locales put a narrow no-break space before
+        // "PM", which is hard to type in a terminal.
+        let clock = time.string(from: date)
+            .replacingOccurrences(of: ":", with: ".")
+            .replacingOccurrences(of: "\u{202F}", with: " ")
+            .replacingOccurrences(of: "\u{00A0}", with: " ")
+
+        let suffix = copy > 1 ? " (\(copy))" : ""
+        return "Reel \(day.string(from: date)) at \(clock)\(suffix).mp4"
     }
 }
 
@@ -199,10 +221,9 @@ enum RecordingFileStore {
         }
 
         let date = Date()
-        for _ in 0..<64 {
-            let randomID = String(UUID().uuidString.prefix(8))
+        for copy in 1...64 {
             let candidate = outputDir.appendingPathComponent(
-                RecordingFileNaming.fileName(date: date, randomID: randomID)
+                RecordingFileNaming.fileName(date: date, copy: copy)
             )
             if !FileManager.default.fileExists(atPath: candidate.path()) {
                 return candidate

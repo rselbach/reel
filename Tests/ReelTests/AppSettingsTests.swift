@@ -2131,12 +2131,32 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(dimensions.height, 1080)
     }
 
-    func testRecordingFileNamingUsesReelPrefixTimestampRandomIDAndMP4Extension() {
-        let date = Date(timeIntervalSince1970: 0)
-        let filename = RecordingFileNaming.fileName(date: date, randomID: "ABC12345")
+    func testRecordingFilesAreNamedInLocalTimeLikeMacOSRecordings() throws {
+        // 2026-10-11 23:58:07 UTC is 7:58:07 PM in Toronto.
+        let date = Date(timeIntervalSince1970: 1_791_763_087)
+        let toronto = try XCTUnwrap(TimeZone(identifier: "America/Toronto"))
+        let cases: [String: String] = [
+            "en_US": "Reel 2026-10-11 at 7.58.07 PM.mp4",
+            "en_GB": "Reel 2026-10-11 at 19.58.07.mp4",
+        ]
+        for (tc, want) in cases {
+            XCTAssertEqual(
+                RecordingFileNaming.fileName(date: date, timeZone: toronto, locale: Locale(identifier: tc)),
+                want,
+                tc
+            )
+        }
+        XCTAssertEqual(
+            RecordingFileNaming.fileName(date: date, copy: 2, timeZone: toronto, locale: Locale(identifier: "en_GB")),
+            "Reel 2026-10-11 at 19.58.07 (2).mp4"
+        )
+    }
 
-        XCTAssertEqual(filename, "Reel-1970-01-01T00-00-00Z-ABC12345.mp4")
-        XCTAssertFalse(RecordingFileNaming.sanitizedTimestamp(from: date).contains(":"))
+    @MainActor
+    func testDefaultRecordingsFolderIsReelInsideMovies() {
+        let folder = AppSettings.defaultOutputDirectory()
+        XCTAssertEqual(folder.lastPathComponent, "Reel")
+        XCTAssertEqual(folder.deletingLastPathComponent().lastPathComponent, "Movies")
     }
 
     func testRecordingFinalizationRevealsFinderOnlyWhenPreviewIsDisabled() {
