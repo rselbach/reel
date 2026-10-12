@@ -21,10 +21,13 @@ enum ThumbnailSizing {
 // concurrent tasks and SCScreenshotManager is safe to call off the main
 // thread.
 class ThumbnailCapture {
+    /// `maxSize` is in points; `scale` is the backing scale of the screen
+    /// the thumbnail is shown on, so it stays sharp on Retina displays.
     static func captureDisplay(
         _ display: SCDisplay,
         excludingApplications: [SCRunningApplication],
-        maxSize: CGSize = CGSize(width: 320, height: 180)
+        maxSize: CGSize = CGSize(width: 320, height: 180),
+        scale: CGFloat
     ) async -> NSImage? {
         let filter = SCContentFilter(
             display: display,
@@ -32,19 +35,24 @@ class ThumbnailCapture {
             exceptingWindows: []
         )
         let sourceSize = CGSize(width: CGFloat(display.width), height: CGFloat(display.height))
-        return await capture(filter: filter, sourceSize: sourceSize, maxSize: maxSize)
+        return await capture(filter: filter, sourceSize: sourceSize, maxSize: maxSize, scale: scale)
     }
 
-    static func captureWindow(_ window: SCWindow, maxSize: CGSize = CGSize(width: 320, height: 180)) async -> NSImage? {
+    static func captureWindow(
+        _ window: SCWindow,
+        maxSize: CGSize = CGSize(width: 320, height: 180),
+        scale: CGFloat
+    ) async -> NSImage? {
         let filter = SCContentFilter(desktopIndependentWindow: window)
         let sourceSize = CGSize(width: window.frame.width, height: window.frame.height)
-        return await capture(filter: filter, sourceSize: sourceSize, maxSize: maxSize)
+        return await capture(filter: filter, sourceSize: sourceSize, maxSize: maxSize, scale: scale)
     }
 
     private static func capture(
         filter: SCContentFilter,
         sourceSize: CGSize,
-        maxSize: CGSize
+        maxSize: CGSize,
+        scale: CGFloat
     ) async -> NSImage? {
         do {
             let config = SCStreamConfiguration()
@@ -55,8 +63,8 @@ class ThumbnailCapture {
                 return nil
             }
 
-            config.width = Int(targetSize.width)
-            config.height = Int(targetSize.height)
+            config.width = Int((targetSize.width * scale).rounded())
+            config.height = Int((targetSize.height * scale).rounded())
             config.pixelFormat = kCVPixelFormatType_32BGRA
             config.showsCursor = false
 
@@ -64,7 +72,7 @@ class ThumbnailCapture {
                 contentFilter: filter,
                 configuration: config
             )
-            return NSImage(cgImage: image, size: NSSize(width: config.width, height: config.height))
+            return NSImage(cgImage: image, size: targetSize)
         } catch {
             logger.debug("Thumbnail capture failed: \(error.localizedDescription)")
             return nil

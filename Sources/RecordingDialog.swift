@@ -183,6 +183,7 @@ struct RecordingDialog: View {
     @State private var recordAudio: Bool
     @State private var recordCamera: Bool
     @StateObject private var levelMonitor = AudioLevelMonitor()
+    @Environment(\.displayScale) private var displayScale
 
     init(
         availableDisplays: [SCDisplay],
@@ -529,6 +530,7 @@ struct RecordingDialog: View {
     /// captures overlap instead of loading one by one.
     private func loadThumbnails() async {
         let size = thumbnailSize
+        let scale = displayScale
         let boxedExcludedApplications = UncheckedSendable(value: excludedApplications)
 
         await withTaskGroup(of: UncheckedSendable<(Int, NSImage)>?.self) { group in
@@ -539,7 +541,8 @@ struct RecordingDialog: View {
                         let image = await ThumbnailCapture.captureDisplay(
                             boxed.value,
                             excludingApplications: boxedExcludedApplications.value,
-                            maxSize: size
+                            maxSize: size,
+                            scale: scale
                         )
                     else {
                         return nil
@@ -563,7 +566,8 @@ struct RecordingDialog: View {
                         guard
                             let image = await ThumbnailCapture.captureWindow(
                                 boxed.value,
-                                maxSize: size
+                                maxSize: size,
+                                scale: scale
                             )
                         else {
                             return nil
