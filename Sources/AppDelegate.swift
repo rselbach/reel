@@ -831,6 +831,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private func configure<Window: NSWindow>(_ window: Window, title: String, styleMask: NSWindow.StyleMask) -> Window {
         window.title = title
         window.styleMask = styleMask
+        // A SwiftUI window has no size until it is shown, so centering it
+        // first would put its top-left corner at the middle of the screen.
+        if let content = window.contentViewController?.view {
+            content.layoutSubtreeIfNeeded()
+            window.setContentSize(content.fittingSize)
+        }
         window.center()
         window.isReleasedWhenClosed = false
         window.delegate = self
