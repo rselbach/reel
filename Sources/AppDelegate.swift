@@ -284,6 +284,15 @@ enum RecordingElapsedFormat {
     }
 }
 
+enum LaunchLogic {
+    /// The welcome explains the menu bar icon and asks for screen recording
+    /// with context. It comes back on every launch until access is granted,
+    /// instead of Reel firing the bare system prompt.
+    static func showsWelcome(hasShownWelcome: Bool, hasScreenRecordingAccess: Bool) -> Bool {
+        !hasShownWelcome || !hasScreenRecordingAccess
+    }
+}
+
 enum AppTerminationLogic {
     static func reply(
         isRecorderInitialized: Bool,
@@ -403,19 +412,21 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             }
         }
 
-        if AppSettings.shared.hasShownWelcome {
+        // Checked without prompting: asking ScreenCaptureKit for content
+        // would show the bare system prompt on every launch.
+        if LaunchLogic.showsWelcome(
+            hasShownWelcome: AppSettings.shared.hasShownWelcome,
+            hasScreenRecordingAccess: CGPreflightScreenCaptureAccess()
+        ) {
+            rebuildMenu()
+            showWelcome()
+        } else {
             Task { @MainActor in
                 await screenRecorder.requestPermission()
                 screenRecorder.restoreRememberedTarget()
                 rebuildMenu()
                 applyStatusItemAppearance()
             }
-        } else {
-            // First launch: explain the menu bar icon and ask for the screen
-            // recording permission with context instead of firing the TCC
-            // prompt out of nowhere.
-            rebuildMenu()
-            showWelcome()
         }
     }
 

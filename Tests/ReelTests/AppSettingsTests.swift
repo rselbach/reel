@@ -1383,7 +1383,15 @@ final class AppSettingsTests: XCTestCase {
         let publicKey = try XCTUnwrap(plist["SUPublicEDKey"] as? String)
         XCTAssertFalse(publicKey.isEmpty)
         XCTAssertNotEqual(publicKey, "SPARKLE_PUBLIC_KEY_PLACEHOLDER")
+        XCTAssertEqual(plist["SUEnableAutomaticChecks"] as? Bool, true)
         XCTAssertEqual(AppMenuText.checkForUpdates, "Check for Updates...")
+    }
+
+    func testWelcomeReturnsUntilScreenRecordingIsGranted() {
+        XCTAssertTrue(LaunchLogic.showsWelcome(hasShownWelcome: false, hasScreenRecordingAccess: false))
+        XCTAssertTrue(LaunchLogic.showsWelcome(hasShownWelcome: false, hasScreenRecordingAccess: true))
+        XCTAssertTrue(LaunchLogic.showsWelcome(hasShownWelcome: true, hasScreenRecordingAccess: false))
+        XCTAssertFalse(LaunchLogic.showsWelcome(hasShownWelcome: true, hasScreenRecordingAccess: true))
     }
 
     func testInfoPlistDeclaresMenuBarAppAndPermissionUsageDescriptions() throws {
