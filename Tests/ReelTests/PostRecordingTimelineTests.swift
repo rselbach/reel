@@ -225,6 +225,68 @@ final class PostRecordingTimelineTests: XCTestCase {
         XCTAssertEqual(edit.keptRanges, [TimelineSpan(start: 0, end: 10)])
     }
 
+    func testHistoryUndoesAndRedoesEachEditInOrder() throws {
+        let original = try XCTUnwrap(TimelineEdit(sourceDuration: 10))
+        var split = original
+        let clipID = try XCTUnwrap(split.splitClip(at: 4))
+        var deleted = split
+        XCTAssertTrue(deleted.deleteClip(id: clipID))
+
+        var history = TimelineHistory()
+        XCTAssertFalse(history.canUndo)
+        history.record(from: original, to: split)
+        history.record(from: split, to: deleted)
+        history.record(from: deleted, to: deleted)
+
+        XCTAssertEqual(history.undo(from: deleted), split)
+        XCTAssertEqual(history.undo(from: split), original)
+        XCTAssertNil(history.undo(from: original))
+        XCTAssertEqual(history.redo(from: original), split)
+        XCTAssertEqual(history.redo(from: split), deleted)
+        XCTAssertNil(history.redo(from: deleted))
+
+        XCTAssertEqual(history.undo(from: deleted), split)
+        var trimmed = split
+        trimmed.trim(.start, to: 1)
+        history.record(from: split, to: trimmed)
+        XCTAssertFalse(history.canRedo)
+        XCTAssertEqual(history.undo(from: trimmed), split)
+    }
+
+    func testHistoryUndoesAQuickRunOfChangesToOneZoomSceneAsOneStep() throws {
+        let original = try XCTUnwrap(TimelineEdit(sourceDuration: 10))
+        var zoomed = original
+        let sceneID = try zoomed.addZoomScene(span: TimelineSpan(start: 1, end: 3))
+        let start = Date(timeIntervalSinceReferenceDate: 0)
+
+        var history = TimelineHistory()
+        history.record(from: original, to: zoomed, at: start)
+
+        var dragged = zoomed
+        for (index, x) in [0.2, 0.3, 0.4].enumerated() {
+            let previous = dragged
+            try dragged.setZoomFocalPoint(try XCTUnwrap(UnitPoint2D(x: x, y: 0.5)), for: sceneID)
+            history.record(from: previous, to: dragged, at: start.addingTimeInterval(0.3 * Double(index + 1)))
+        }
+
+        let afterPause = dragged
+        try dragged.setZoomFocalPoint(try XCTUnwrap(UnitPoint2D(x: 0.9, y: 0.5)), for: sceneID)
+        history.record(from: afterPause, to: dragged, at: start.addingTimeInterval(3))
+
+        var resized = dragged
+        try resized.setZoomSettings(
+            ZoomSceneSettings(level: ZoomSceneSettings.Level(scale: 2), transitionSpeed: .normal),
+            for: sceneID
+        )
+        history.record(from: dragged, to: resized, at: start.addingTimeInterval(3.2))
+
+        XCTAssertEqual(history.undo(from: resized), dragged)
+        XCTAssertEqual(history.undo(from: dragged), afterPause)
+        XCTAssertEqual(history.undo(from: afterPause), zoomed)
+        XCTAssertEqual(history.undo(from: zoomed), original)
+        XCTAssertFalse(history.canUndo)
+    }
+
     func testMappingsCrossDeletedClipBoundaries() throws {
         let initialID = UUID()
         var edit = try XCTUnwrap(TimelineEdit(sourceDuration: 10, initialClipID: initialID))

@@ -529,3 +529,71 @@ struct TimelineEdit: Equatable, Sendable {
         return nil
     }
 }
+
+/// Undo and redo for the preview's timeline. Each step keeps the whole edit
+/// from before a change, since a TimelineEdit is a small value.
+struct TimelineHistory: Sendable {
+    /// Changes to one zoom scene's focus or settings this close together,
+    /// such as the moves of a slider drag, undo as one step.
+    static let coalescingInterval: TimeInterval = 1
+
+    private var undoStack: [TimelineEdit] = []
+    private var redoStack: [TimelineEdit] = []
+    private var lastAdjustment: (adjustment: Adjustment, date: Date)?
+
+    var canUndo: Bool { !undoStack.isEmpty }
+    var canRedo: Bool { !redoStack.isEmpty }
+
+    mutating func record(from previous: TimelineEdit, to current: TimelineEdit, at date: Date = .now) {
+        guard previous != current else { return }
+        redoStack.removeAll()
+        let adjustment = Adjustment(from: previous, to: current)
+        defer { lastAdjustment = adjustment.map { ($0, date) } }
+        if let adjustment, let lastAdjustment, lastAdjustment.adjustment == adjustment,
+            date.timeIntervalSince(lastAdjustment.date) < Self.coalescingInterval
+        {
+            return
+        }
+        undoStack.append(previous)
+    }
+
+    /// Returns the edit to show instead of `current`, or nil when there is
+    /// nothing to undo.
+    mutating func undo(from current: TimelineEdit) -> TimelineEdit? {
+        guard let previous = undoStack.popLast() else { return nil }
+        redoStack.append(current)
+        lastAdjustment = nil
+        return previous
+    }
+
+    mutating func redo(from current: TimelineEdit) -> TimelineEdit? {
+        guard let next = redoStack.popLast() else { return nil }
+        undoStack.append(current)
+        lastAdjustment = nil
+        return next
+    }
+
+    /// A change to only the focus or only the settings of one zoom scene.
+    private enum Adjustment: Equatable {
+        case focalPoint(ZoomScene.ID)
+        case settings(ZoomScene.ID)
+
+        init?(from previous: TimelineEdit, to current: TimelineEdit) {
+            guard
+                previous.clips == current.clips,
+                previous.zoomScenes.map(\.id) == current.zoomScenes.map(\.id)
+            else { return nil }
+            let changed = zip(previous.zoomScenes, current.zoomScenes).filter { $0 != $1 }
+            guard changed.count == 1, let (before, after) = changed.first, before.span == after.span else {
+                return nil
+            }
+            if before.settings == after.settings {
+                self = .focalPoint(after.id)
+            } else if before.focalPoint == after.focalPoint {
+                self = .settings(after.id)
+            } else {
+                return nil
+            }
+        }
+    }
+}

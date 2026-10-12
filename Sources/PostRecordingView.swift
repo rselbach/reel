@@ -80,6 +80,10 @@ enum PostRecordingText {
     static let play = "Play"
     static let pause = "Pause"
     static let editedPlaybackTime = "Edited playback time"
+    static let undo = "Undo"
+    static let redo = "Redo"
+    static let undoHelp = "Undo (⌘Z)"
+    static let redoHelp = "Redo (⇧⌘Z)"
     static let exportSmaller = "Smaller Copy..."
     static let exportGIF = "GIF..."
     static let exportGIFHelp = "Silent, looping, capped in size and frame count for README and issue embeds."
@@ -172,6 +176,7 @@ struct PostRecordingView: View {
     @State private var zoomCompositionTask: Task<Void, Never>?
     @State private var isCleanedUp = false
     @State private var edit: TimelineEdit?
+    @State private var history = TimelineHistory()
     /// The edit as of the last successful export, in any format.
     @State private var exportedEdit: TimelineEdit?
     @State private var exportedVideo: ExportedVideo?
@@ -221,6 +226,10 @@ struct PostRecordingView: View {
                 onTogglePlayback: togglePlayback,
                 onSkip: skipEditedSeconds
             )
+            // An overlay, so the playback buttons stay centered.
+            .overlay(alignment: .leading) {
+                undoButtons
+            }
             .padding(.horizontal)
 
             if let loadedEdit = edit {
@@ -228,7 +237,7 @@ struct PostRecordingView: View {
                     videoURL: videoURL,
                     edit: Binding(
                         get: { self.edit ?? loadedEdit },
-                        set: { self.edit = $0 }
+                        set: { applyEdit($0) }
                     ),
                     currentSourceTime: $currentTime,
                     selection: $timelineSelection,
@@ -373,6 +382,26 @@ struct PostRecordingView: View {
 
     private var hasEdits: Bool {
         edit?.hasMeaningfulChanges == true
+    }
+
+    private var undoButtons: some View {
+        HStack(spacing: 8) {
+            Button(action: undoEdit) {
+                Label(PostRecordingText.undo, systemImage: "arrow.uturn.backward")
+                    .labelStyle(.iconOnly)
+            }
+            .keyboardShortcut("z", modifiers: .command)
+            .help(PostRecordingText.undoHelp)
+            .disabled(!history.canUndo || isExporting)
+
+            Button(action: redoEdit) {
+                Label(PostRecordingText.redo, systemImage: "arrow.uturn.forward")
+                    .labelStyle(.iconOnly)
+            }
+            .keyboardShortcut("z", modifiers: [.command, .shift])
+            .help(PostRecordingText.redoHelp)
+            .disabled(!history.canRedo || isExporting)
+        }
     }
 
     private var shareURL: URL? {
@@ -644,11 +673,37 @@ struct PostRecordingView: View {
     }
 
     private func updateZoomFocalPoint(_ point: UnitPoint2D, sceneID: ZoomScene.ID) {
+        guard var changed = edit else { return }
         do {
-            try edit?.setZoomFocalPoint(point, for: sceneID)
+            try changed.setZoomFocalPoint(point, for: sceneID)
         } catch {
             exportError = error.localizedDescription
+            return
         }
+        applyEdit(changed)
+    }
+
+    /// Every change to the edit comes through here so it can be undone.
+    private func applyEdit(_ changed: TimelineEdit) {
+        guard let edit else { return }
+        history.record(from: edit, to: changed)
+        self.edit = changed
+    }
+
+    private func undoEdit() {
+        guard let edit, let previous = history.undo(from: edit) else { return }
+        showRestoredEdit(previous)
+    }
+
+    private func redoEdit() {
+        guard let edit, let next = history.redo(from: edit) else { return }
+        showRestoredEdit(next)
+    }
+
+    private func showRestoredEdit(_ restored: TimelineEdit) {
+        edit = restored
+        // Moves the playhead off footage the restored edit deletes.
+        seekPlayer(to: currentTime)
     }
 
     private func togglePlayback() {
