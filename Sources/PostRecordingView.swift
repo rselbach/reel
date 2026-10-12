@@ -46,8 +46,9 @@ enum PostRecordingText {
     static let delete = "Move to Trash"
     static let saveEdited = "Save Edited..."
     static let timeline = "Timeline"
-    static let timelineHelp =
-        "Drag the yellow handles to trim the ends. Right-click the timeline to split at the playhead."
+    static let timelineHelp = "Drag the yellow handles to trim. To remove a middle part, split around it and delete it."
+    static let split = "Split"
+    static let splitHelp = "Split the clip at the playhead (⌘B)"
     static let trimStart = "Trim start"
     static let trimEnd = "Trim end"
     static let trimHandleHelp = "Drag to trim. Trimmed footage stays on the timeline so you can restore it."
@@ -73,7 +74,7 @@ enum PostRecordingText {
     static let deleteClipFailedMessage =
         "The edited recording must keep at least 0.5 seconds."
     static let playhead = "Playhead"
-    static let playheadHint = "Drag to seek. Right-click the timeline to split here."
+    static let playheadHint = "Drag to seek. Split to cut the clip here."
     static let backFiveSeconds = "Back 5 seconds"
     static let forwardFiveSeconds = "Forward 5 seconds"
     static let play = "Play"
@@ -229,7 +230,7 @@ struct PostRecordingView: View {
                         get: { self.edit ?? loadedEdit },
                         set: { self.edit = $0 }
                     ),
-                    currentSourceTime: currentTime,
+                    currentSourceTime: $currentTime,
                     selection: $timelineSelection,
                     onSeek: seekPlayer,
                     onScrub: scrub,

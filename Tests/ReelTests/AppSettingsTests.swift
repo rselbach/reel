@@ -1285,6 +1285,8 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(PostRecordingText.timeline, "Timeline")
         XCTAssertEqual(PostRecordingText.clearSelection, "Clear Selection")
         XCTAssertEqual(PostRecordingText.splitClipAtPlayhead, "Split Clip at Playhead")
+        XCTAssertEqual(PostRecordingText.split, "Split")
+        XCTAssertEqual(PostRecordingText.splitHelp, "Split the clip at the playhead (⌘B)")
         XCTAssertEqual(PostRecordingText.deleteClip, "Delete Clip")
         XCTAssertEqual(PostRecordingText.restoreClip, "Restore Clip")
         XCTAssertEqual(PostRecordingText.backFiveSeconds, "Back 5 seconds")

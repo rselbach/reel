@@ -190,7 +190,10 @@ private struct ZoomSceneSettingsPopover: View {
 struct PostRecordingTimelineView: View {
     let videoURL: URL
     @Binding var edit: TimelineEdit
-    let currentSourceTime: Double
+    /// Read-only here, but a binding so the Split shortcut sees the current
+    /// time: SwiftUI keeps the action from when a shortcut was registered,
+    /// and a plain value in it would stay at the time Split was enabled.
+    @Binding var currentSourceTime: Double
     @Binding var selection: TimelineSelection
     let onSeek: (Double) -> Void
     /// Shows a source frame without moving it to kept footage, so a trim
@@ -334,6 +337,15 @@ struct PostRecordingTimelineView: View {
                 }
                 .keyboardShortcut(.delete, modifiers: [])
             }
+
+            Button {
+                splitClipAtPlayhead()
+            } label: {
+                Label(PostRecordingText.split, systemImage: "scissors")
+            }
+            .keyboardShortcut("b", modifiers: .command)
+            .help(PostRecordingText.splitHelp)
+            .disabled(!edit.canSplit(at: currentSourceTime))
         }
     }
 
