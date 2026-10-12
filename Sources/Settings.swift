@@ -541,13 +541,18 @@ class AppSettings: ObservableObject {
     enum AudioSource: String, StoredAppSetting {
         case microphone
         case systemAudio
+        case microphoneAndSystemAudio
 
         var displayName: String {
             switch self {
             case .microphone: return "Microphone"
             case .systemAudio: return "System Audio"
+            case .microphoneAndSystemAudio: return "Microphone and System Audio"
             }
         }
+
+        var capturesMicrophone: Bool { self != .systemAudio }
+        var capturesSystemAudio: Bool { self != .microphone }
     }
 
     enum CameraOverlayPosition: String, StoredAppSetting {

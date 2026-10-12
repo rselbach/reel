@@ -365,7 +365,7 @@ struct AudioAndCameraPane: View {
     }
 
     private var shouldMeter: Bool {
-        settings.recordAudio && settings.audioSource == .microphone
+        settings.recordAudio && settings.audioSource.capturesMicrophone
     }
 
     var body: some View {
@@ -380,7 +380,7 @@ struct AudioAndCameraPane: View {
                         }
                     }
 
-                    if settings.audioSource == .microphone {
+                    if settings.audioSource.capturesMicrophone {
                         DevicePicker(
                             title: SettingsText.audioInput,
                             devices: settings.availableAudioDevices,

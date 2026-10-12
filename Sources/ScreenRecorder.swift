@@ -268,7 +268,8 @@ struct RecordingOptions {
 private struct FrameWriter {
     let adaptor: AVAssetWriterInputPixelBufferAdaptor
     let videoInput: AVAssetWriterInput
-    let audioInput: AVAssetWriterInput?
+    let microphoneInput: AVAssetWriterInput?
+    let systemAudioInput: AVAssetWriterInput?
     let cursorMetadataWriter: CursorMetadataTrack.Writer
     let assetWriter: AVAssetWriter
     let bufferPool: CVPixelBufferPool?
@@ -460,13 +461,13 @@ class ScreenRecorder: NSObject, ObservableObject {
     private var stream: SCStream?
     private var assetWriter: AVAssetWriter?
     private var videoInput: AVAssetWriterInput?
-    private var audioInput: AVAssetWriterInput?
+    private var audioInputs: [AVAssetWriterInput] = []
     private var audioCaptureSession: AVCaptureSession?
     private var audioOutput: AVCaptureAudioDataOutput?
     // Recommended audio settings captured from the configured AVCaptureSession;
     // used to build the asset writer input so it matches the source format
     // instead of a hardcoded 44100/2ch/128k.
-    private var audioOutputSettings: [String: Any]?
+    private var microphoneAudioSettings: [String: Any]?
     private var cameraCaptureSession: AVCaptureSession?
     private var cameraOutput: AVCaptureVideoDataOutput?
     private var outputURL: URL?
@@ -886,7 +887,7 @@ class ScreenRecorder: NSObject, ObservableObject {
             // resources, so a denial surfaces a clear message instead of a
             // generic "Failed to start" and leaves no temp file behind.
             // System audio rides on the screen recording permission instead.
-            if options.recordAudio, options.audioSource == .microphone {
+            if options.recordAudio, options.audioSource.capturesMicrophone {
                 guard await ensureAVPermission(for: .audio) else {
                     return failStart(
                         "Microphone access denied. Enable it in System Settings → Privacy & Security → Microphone."
@@ -904,13 +905,11 @@ class ScreenRecorder: NSObject, ObservableObject {
 
             // Set up capture sessions before the asset writer so the audio
             // input can use the source's recommended settings (makeAudioInput).
-            if options.recordAudio {
-                switch options.audioSource {
-                case .microphone:
-                    try setupAudioCapture(options: options)
-                case .systemAudio:
-                    configureSystemAudioCapture(config)
-                }
+            if options.recordAudio, options.audioSource.capturesMicrophone {
+                try setupAudioCapture(options: options)
+            }
+            if options.recordAudio, options.audioSource.capturesSystemAudio {
+                configureSystemAudioCapture(config)
             }
 
             if options.recordCamera {
@@ -1210,9 +1209,15 @@ class ScreenRecorder: NSObject, ObservableObject {
 
         let adaptor = makePixelBufferAdaptor(videoInput: videoInput, width: width, height: height)
         let bufferPool = makeBufferPool(width: width, height: height)
-        let audioInput =
-            options.recordAudio
-            ? try makeAudioInput(assetWriter: assetWriter)
+        // Each source gets its own track, mixed into one when the take ends,
+        // so neither source's timing can disturb the other's.
+        let microphoneInput =
+            options.recordAudio && options.audioSource.capturesMicrophone
+            ? try makeAudioInput(assetWriter: assetWriter, settings: microphoneAudioSettings)
+            : nil
+        let systemAudioInput =
+            options.recordAudio && options.audioSource.capturesSystemAudio
+            ? try makeAudioInput(assetWriter: assetWriter, settings: Self.systemAudioSettings)
             : nil
         let cursorMetadataWriter = try CursorMetadataTrack.Writer(
             assetWriter: assetWriter,
@@ -1222,7 +1227,8 @@ class ScreenRecorder: NSObject, ObservableObject {
         updateFrameWriter(
             adaptor: adaptor,
             videoInput: videoInput,
-            audioInput: audioInput,
+            microphoneInput: microphoneInput,
+            systemAudioInput: systemAudioInput,
             cursorMetadataWriter: cursorMetadataWriter,
             assetWriter: assetWriter,
             bufferPool: bufferPool,
@@ -1234,7 +1240,7 @@ class ScreenRecorder: NSObject, ObservableObject {
         self.outputURL = outputURL
         self.assetWriter = assetWriter
         self.videoInput = videoInput
-        self.audioInput = audioInput
+        self.audioInputs = [microphoneInput, systemAudioInput].compactMap { $0 }
 
         guard assetWriter.startWriting() else {
             let reason = assetWriter.error?.localizedDescription ?? "Unknown writer error"
@@ -1349,10 +1355,10 @@ class ScreenRecorder: NSObject, ObservableObject {
         return bufferPool
     }
 
-    private func makeAudioInput(assetWriter: AVAssetWriter) throws -> AVAssetWriterInput {
+    private func makeAudioInput(assetWriter: AVAssetWriter, settings: [String: Any]?) throws -> AVAssetWriterInput {
         let audioSettings: [String: Any]
-        if let recommended = audioOutputSettings, !recommended.isEmpty {
-            audioSettings = recommended
+        if let settings, !settings.isEmpty {
+            audioSettings = settings
         } else {
             // Fallback when no source format is known.
             audioSettings = [
@@ -1375,7 +1381,8 @@ class ScreenRecorder: NSObject, ObservableObject {
     private func updateFrameWriter(
         adaptor: AVAssetWriterInputPixelBufferAdaptor,
         videoInput: AVAssetWriterInput,
-        audioInput: AVAssetWriterInput?,
+        microphoneInput: AVAssetWriterInput?,
+        systemAudioInput: AVAssetWriterInput?,
         cursorMetadataWriter: CursorMetadataTrack.Writer,
         assetWriter: AVAssetWriter,
         bufferPool: CVPixelBufferPool?,
@@ -1391,7 +1398,8 @@ class ScreenRecorder: NSObject, ObservableObject {
             frameState.frameWriter = FrameWriter(
                 adaptor: adaptor,
                 videoInput: videoInput,
-                audioInput: audioInput,
+                microphoneInput: microphoneInput,
+                systemAudioInput: systemAudioInput,
                 cursorMetadataWriter: cursorMetadataWriter,
                 assetWriter: assetWriter,
                 bufferPool: bufferPool,
@@ -1475,7 +1483,7 @@ class ScreenRecorder: NSObject, ObservableObject {
         // recommendedAudioSettingsForAssetWriter requires the output to be
         // attached to a configured session; capture it now so the writer input
         // matches the actual source sample rate/channels.
-        audioOutputSettings = output.recommendedAudioSettingsForAssetWriter(writingTo: .mp4)
+        microphoneAudioSettings = output.recommendedAudioSettingsForAssetWriter(writingTo: .mp4)
     }
 
     /// Captures the system's audio output through the SCStream itself; no
@@ -1486,7 +1494,10 @@ class ScreenRecorder: NSObject, ObservableObject {
         config.excludesCurrentProcessAudio = true
         config.sampleRate = 48_000
         config.channelCount = 2
-        audioOutputSettings = [
+    }
+
+    private static var systemAudioSettings: [String: Any] {
+        [
             AVFormatIDKey: kAudioFormatMPEG4AAC,
             AVSampleRateKey: 48_000,
             AVNumberOfChannelsKey: 2,
@@ -1578,6 +1589,18 @@ class ScreenRecorder: NSObject, ObservableObject {
         var finalURL = tempURL
         var replacementWarning: FileReplacementWarning?
 
+        if options.recordAudio, options.audioSource == .microphoneAndSystemAudio {
+            do {
+                if let warning = try await AudioTrackMixer.mixAudioTracks(at: tempURL) {
+                    errorMessage = warning.localizedDescription
+                }
+            } catch {
+                // The take is still whole: QuickTime plays both tracks.
+                errorMessage =
+                    "Could not combine the microphone and system audio, so they are separate tracks: \(error.localizedDescription)"
+            }
+        }
+
         if options.askWhereToSave, let requestSaveDestination {
             let request = SaveDestinationRequest(
                 suggestedName: tempURL.lastPathComponent,
@@ -1630,7 +1653,9 @@ class ScreenRecorder: NSObject, ObservableObject {
 
     private func finishWriting() async {
         videoInput?.markAsFinished()
-        audioInput?.markAsFinished()
+        for input in audioInputs {
+            input.markAsFinished()
+        }
         withFrameLock {
             frameState.frameWriter?.cursorMetadataWriter.input.markAsFinished()
         }
@@ -1672,10 +1697,10 @@ class ScreenRecorder: NSObject, ObservableObject {
         activeBitrateEstimate = nil
         assetWriter = nil
         videoInput = nil
-        audioInput = nil
+        audioInputs = []
         audioCaptureSession = nil
         audioOutput = nil
-        audioOutputSettings = nil
+        microphoneAudioSettings = nil
         cameraCaptureSession = nil
         cameraOutput = nil
         compositor.reset()
@@ -2044,7 +2069,7 @@ extension ScreenRecorder: SCStreamOutput {
         case .audio:
             autoreleasepool {
                 guard sampleBuffer.isValid else { return }
-                appendAudioSampleBuffer(sampleBuffer)
+                appendAudioSampleBuffer(sampleBuffer, from: .systemAudio)
             }
         default:
             return
@@ -2224,7 +2249,7 @@ extension ScreenRecorder: AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptur
                 }
                 guard stored else { return }
             } else if output is AVCaptureAudioDataOutput {
-                appendAudioSampleBuffer(sampleBuffer)
+                appendAudioSampleBuffer(sampleBuffer, from: .microphone)
             }
         }
     }
@@ -2278,10 +2303,13 @@ extension ScreenRecorder: AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptur
         return retimedBuffer
     }
 
-    /// Appends an audio sample (microphone or system audio) to the writer.
-    /// Samples arriving before the video session starts are dropped so audio
-    /// never leads the first frame.
-    private nonisolated func appendAudioSampleBuffer(_ sampleBuffer: CMSampleBuffer) {
+    /// Appends an audio sample to its source's track. Samples arriving before
+    /// the video session starts are dropped so audio never leads the first
+    /// frame.
+    private nonisolated func appendAudioSampleBuffer(
+        _ sampleBuffer: CMSampleBuffer,
+        from source: AppSettings.AudioSource
+    ) {
         withFrameLock {
             guard var writer = frameState.frameWriter else { return }
             guard !frameState.isCaptureStopped,
@@ -2289,7 +2317,7 @@ extension ScreenRecorder: AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptur
                 writer.pauses.outputTime(
                     forCaptureTime: CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
                 ) != nil,
-                let audio = writer.audioInput,
+                let audio = source == .microphone ? writer.microphoneInput : writer.systemAudioInput,
                 audio.isReadyForMoreMediaData
             else {
                 return

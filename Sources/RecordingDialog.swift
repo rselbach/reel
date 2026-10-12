@@ -460,7 +460,7 @@ struct RecordingDialog: View {
                 )
                 Toggle(RecordingDialogText.recordCamera, isOn: $recordCamera)
 
-                if recordAudio, AppSettings.shared.audioSource == .microphone {
+                if recordAudio, AppSettings.shared.audioSource.capturesMicrophone {
                     AudioLevelMeter(level: levelMonitor.level)
                         .frame(width: 80)
                 }
@@ -471,7 +471,7 @@ struct RecordingDialog: View {
             .padding(.top, 10)
 
             if recordAudio,
-                AppSettings.shared.audioSource == .microphone,
+                AppSettings.shared.audioSource.capturesMicrophone,
                 let error = levelMonitor.errorMessage
             {
                 Text(error)
@@ -651,7 +651,7 @@ struct RecordingDialog: View {
     }
 
     private func refreshMetering() {
-        guard recordAudio, AppSettings.shared.audioSource == .microphone else {
+        guard recordAudio, AppSettings.shared.audioSource.capturesMicrophone else {
             levelMonitor.stop()
             return
         }
