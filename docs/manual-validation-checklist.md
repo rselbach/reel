@@ -263,22 +263,25 @@ Notes:
 
 User story: As a user, I want a preview window after capture so I can inspect, edit, reveal, delete, or finish with the recording.
 
-Expected behavior: When enabled, a preview window opens after each recording with playback, a draggable playhead, split clips, a draggable file chip, copy, reveal, delete, Record Again, and export actions. Right-clicking the timeline splits at the playhead. The file chip and Copy share the recording until the timeline is edited, then the latest video exported from exactly that edit; while edits exist only in the preview, the chip reads Export edits to share and Copy is disabled. Any retained clip can be deleted and any deleted clip can be restored. Record Again closes the preview and starts another take with the remembered target. While cuts or zoom scenes have not been exported in any format, the close button shows the unsaved-changes dot, and Done, Record Again, Change Target, the close button, Command-W, and Quit ask before discarding them.
+Expected behavior: When enabled, a preview window opens after each recording with playback, Undo and Redo, a timeline with trim handles and a Split button, a draggable file chip, Copy, Share, reveal, delete, Record Again, and one Export menu. The file chip, Copy, and Share hand out the recording until the timeline is edited, then the latest video exported from exactly that edit; while edits exist only in the preview, the chip reads Export edits to share and Copy and Share are disabled. Any retained clip can be deleted and any deleted clip can be restored, and Delete always acts on the current selection. Undo and Redo, also Command-Z and Shift-Command-Z, step through every timeline change; a quick run of changes to one zoom scene's focus or settings undoes as one step. The preview shows one clock, edited time beside the playback controls, and describes selections by length. The playhead can be dragged by its knob wherever it is. Record Again closes the preview and starts another take with the remembered target. While cuts or zoom scenes have not been exported in any format, the close button shows the unsaved-changes dot, and Done, Record Again, Change Target, the close button, Command-W, and Quit ask before discarding them.
 
 Manual steps:
 
 1. Record something with preview enabled
-2. drag the playhead and right-click to split three times
-3. delete and restore a middle clip
-4. delete and restore the first and last clips
-5. verify playback skips deleted clips
-6. press Record Again and verify countdown starts for the remembered target
-7. verify Done closes the preview without deleting the file
-8. delete a clip and verify the file chip reads Export edits to share and Copy is disabled
-9. export a Smaller Copy and verify the chip names the exported file and dragging it into Finder copies the edited video
-10. delete a clip, press Done, and verify Reel asks before discarding the edit
-11. cancel, export a Smaller Copy, press Done, and verify the preview closes without asking
-12. delete a clip and quit Reel, and verify it asks before quitting.
+2. drag the start and end trim handles and verify the video follows the handle, then drag them back out
+3. move the playhead by dragging its knob and press Split or Command-B to split there
+4. select one clip, then another, press Delete, and verify only the second is deleted
+5. restore it
+6. press Undo and Redo, then Command-Z and Shift-Command-Z, and verify each change steps back and forward
+7. drag a zoom scene's focus twice and verify each drag undoes separately
+8. verify playback skips deleted clips and only edited time is shown
+9. press Record Again and verify countdown starts for the remembered target
+10. verify Done closes the preview without deleting the file
+11. delete a clip and verify the file chip reads Export edits to share and Copy and Share are disabled
+12. export a Smaller Copy and verify the chip names the exported file and dragging it into Finder copies the edited video
+13. delete a clip, press Done, and verify Reel asks before discarding the edit
+14. cancel, export a Smaller Copy, press Done, and verify the preview closes without asking
+15. delete a clip and quit Reel, and verify it asks before quitting.
 
 Current status: Partial automated evidence passed; manual UI and accessibility interaction validation still pending. Validate manually using the listed steps.
 
@@ -290,18 +293,19 @@ Notes:
 
 User story: As a user, I want to trim either end or remove sections from the middle of a recording and export a new MP4.
 
-Expected behavior: The preview splits the source into clips at the playhead. Deleting the first or last clip trims an endpoint, while deleting an interior clip removes a middle section. Save Edited appears after a deletion. A single kept range uses the passthrough preset directly; multiple kept ranges are joined in source order with AVMutableComposition before export. Smaller Copy applies the same edit at 720p. Both exports use a temporary sibling file and rollback-safe atomic replacement, report failures, and reveal the result in Finder.
+Expected behavior: Yellow handles at both ends of the filmstrip trim the start and end. A trim is one deleted clip at that end, keeps at least 0.5 seconds, and never leaves a sliver shorter than a split allows; dragging a handle back out returns footage. Split cuts the clip at the playhead. Deleting the first or last clip also trims an endpoint, while deleting an interior clip removes a middle section. The Export menu offers Edited Video once there is an edit, Smaller Copy (720p), and Animated GIF. A single kept range uses the passthrough preset directly; multiple kept ranges are joined in source order with AVMutableComposition before export. While a file is written, the menu becomes a progress bar with Cancel, also Escape, and cancelling removes the partial file. Exports use a temporary sibling file and rollback-safe atomic replacement, report failures, and finish with a Saved line and a Show in Finder link instead of switching to Finder.
 
 Manual steps:
 
 1. Record at least ten seconds
-2. split the timeline into four clips
-3. delete the first, last, and one middle clip
-4. save with Save Edited
+2. trim both ends with the handles
+3. split the timeline and delete one middle clip
+4. choose Export, then Edited Video
 5. verify the output duration equals the sum of the kept clips and audio/video stay continuous at each join
 6. restore one clip and export again
 7. verify Smaller Copy applies the same edits and remains 720p
-8. overwrite an existing destination and verify rollback protection on failure.
+8. start an export, press Cancel, and verify no file or hidden partial file is left
+9. overwrite an existing destination and verify rollback protection on failure.
 
 Current status: Partial automated evidence passed; manual UI and audio continuity validation still pending. Validate manually using the listed steps.
 
@@ -839,16 +843,17 @@ Notes:
 
 User story: As a user putting a demo in a README, an issue, or a pull request, I want a looping GIF without taking the recording into another tool.
 
-Expected behavior: The preview exports the edited timeline as an infinitely looping GIF. Frames are sampled uniformly across edited time and mapped back to retained clips, so deleting endpoint or middle clips is honored. Output is scaled to fit 800 pixels while preserving aspect ratio. Timelines longer than 300 frames are sampled more sparsely across the whole result, with delay based on actual spacing so playback stays at real speed. Creation and finalization failures are reported.
+Expected behavior: Export, then Animated GIF, writes the edited timeline as an infinitely looping GIF. Frames are sampled uniformly across edited time and mapped back to retained clips, so trims and deleted middle clips are honored. Output is scaled to fit 800 pixels while preserving aspect ratio. Timelines longer than 300 frames are sampled more sparsely across the whole result, with delay based on actual spacing so playback stays at real speed. Progress advances per frame, and Cancel leaves no file because the GIF is built in memory and written once complete. Creation and finalization failures are reported.
 
 Manual steps:
 
 1. Record a few seconds
-2. split it into clips and delete an endpoint and a middle clip
-3. export a GIF
+2. trim an end and delete a middle clip
+3. choose Export, then Animated GIF
 4. verify it loops, omits deleted clips, plays at the right speed, and is no wider than 800 pixels
-5. export a several-minute recording and verify it spans the edited timeline rather than being truncated
-6. verify the GIF opens in Finder preview and a browser.
+5. start another GIF export, press Cancel, and verify nothing is left in the destination folder, including hidden files
+6. export a several-minute recording and verify it spans the edited timeline rather than being truncated
+7. verify the GIF opens in Finder preview and a browser.
 
 Current status: Partial automated evidence passed; manual UI validation still pending. Validate manually using the listed steps.
 

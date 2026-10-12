@@ -32,8 +32,10 @@ A lightweight macOS screen recording app built with Swift and ScreenCaptureKit.
 
 **After the take**
 
-- Preview with split-and-delete editing, a smaller 720p copy, or a looping GIF
-- Drag or copy the file straight out of the preview
+- Preview with trim handles, split-and-delete editing, and undo
+- Export an edited video, a smaller 720p copy, or a looping GIF, with
+  progress and Cancel
+- Drag, copy, or share the file straight out of the preview
 - Record Again to go straight into the next take
 
 **Elsewhere**
