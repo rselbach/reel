@@ -12,8 +12,6 @@ enum WelcomeText {
     static let grantPermission = "Grant Screen Recording Access"
     static let relaunchNote =
         "After granting access in System Settings, macOS requires relaunching Reel before recording works."
-    static let relaunchNow = "Relaunch Reel"
-    static let relaunchFailedTitle = "Could not relaunch Reel"
     static let getStarted = "Get Started"
 }
 
@@ -38,11 +36,9 @@ struct WelcomeView: View {
     @State private var relaunchError: String?
     @State private var hasRequestedPermission = false
 
-    /// Relaunching only makes sense for a real app bundle; under `swift run`
-    /// there is nothing for the workspace to open.
     private var canRelaunch: Bool {
         WelcomeLogic.canOfferRelaunch(
-            isBundledApp: Bundle.main.bundleIdentifier != nil,
+            isBundledApp: AppRelauncher.isAvailable,
             hasRequestedPermission: hasRequestedPermission,
             hasPermission: recorder.hasPermission
         )
@@ -100,7 +96,7 @@ struct WelcomeView: View {
                             .fixedSize(horizontal: false, vertical: true)
 
                         if canRelaunch {
-                            Button(WelcomeText.relaunchNow) {
+                            Button(PermissionText.relaunch) {
                                 relaunch()
                             }
                         }
@@ -118,7 +114,7 @@ struct WelcomeView: View {
         .padding(32)
         .frame(width: 440)
         .alert(
-            WelcomeText.relaunchFailedTitle,
+            PermissionText.relaunchFailedTitle,
             isPresented: Binding(
                 get: { relaunchError != nil },
                 set: { if !$0 { relaunchError = nil } }
@@ -130,22 +126,11 @@ struct WelcomeView: View {
         }
     }
 
-    /// Starts a second instance and quits this one. macOS refuses a duplicate
-    /// launch of the same bundle unless a new instance is requested
-    /// explicitly, so the flag is required rather than optional.
     private func relaunch() {
-        let configuration = NSWorkspace.OpenConfiguration()
-        configuration.createsNewApplicationInstance = true
-
-        NSWorkspace.shared.openApplication(
-            at: Bundle.main.bundleURL,
-            configuration: configuration
-        ) { _, error in
-            Task { @MainActor in
-                guard let error else {
-                    NSApp.terminate(nil)
-                    return
-                }
+        Task { @MainActor in
+            do {
+                try await AppRelauncher.relaunch()
+            } catch {
                 relaunchError = error.localizedDescription
             }
         }

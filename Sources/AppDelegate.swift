@@ -12,10 +12,6 @@ enum SystemSettingsLink {
 }
 
 enum AppMenuText {
-    static let screenRecordingPermissionRequired = "Screen Recording Permission Required"
-    static let openSystemSettings = "Open System Settings..."
-    static let checkPermission = "Check Permission"
-    static let relaunchAfterGranting = "Relaunch Reel after granting permission"
     static let startRecording = "Start Recording..."
     static let recordingInProgress = "● Recording..."
     static let stopRecording = "Stop Recording"
@@ -47,9 +43,6 @@ enum AppMenuText {
     static let recordingFailed = "Recording Failed"
     static let recordingWarning = "Recording Warning"
     static let recordingStopped = "Recording Stopped"
-    static let unableToOpenSettings = "Unable to open settings"
-    static let failedToOpenPrivacySettings = "Failed to open system privacy settings."
-    static let couldNotOpenSystemPreferences = "Could not open System Preferences."
     static let couldNotRevealRecording = "Could not reveal recording"
     static let couldNotDeleteRecording = "Could not move recording to Trash"
     static let recordingPreviewTitle = "Recording Preview"
@@ -505,18 +498,20 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     private func addPermissionItems(to menu: NSMenu) {
-        let permItem = NSMenuItem(title: AppMenuText.screenRecordingPermissionRequired, action: nil, keyEquivalent: "")
-        permItem.isEnabled = false
-        menu.addItem(permItem)
+        let header = NSMenuItem(title: PermissionText.required, action: nil, keyEquivalent: "")
+        header.isEnabled = false
+        menu.addItem(header)
 
         menu.addItem(
-            NSMenuItem(title: AppMenuText.openSystemSettings, action: #selector(openSettings), keyEquivalent: ""))
-        menu.addItem(
-            NSMenuItem(title: AppMenuText.checkPermission, action: #selector(checkPermission), keyEquivalent: ""))
-
-        let relaunchNote = NSMenuItem(title: AppMenuText.relaunchAfterGranting, action: nil, keyEquivalent: "")
-        relaunchNote.isEnabled = false
-        menu.addItem(relaunchNote)
+            NSMenuItem(
+                title: PermissionText.openSystemSettings,
+                action: #selector(openScreenRecordingSettingsFromMenu),
+                keyEquivalent: ""
+            ))
+        if AppRelauncher.isAvailable {
+            menu.addItem(
+                NSMenuItem(title: PermissionText.relaunch, action: #selector(relaunchFromMenu), keyEquivalent: ""))
+        }
     }
 
     private func addRecordingItems(to menu: NSMenu) {
@@ -595,7 +590,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     private func addErrorItems(to menu: NSMenu) {
-        if let error = screenRecorder.errorMessage {
+        // Without permission the header already says what is wrong; the raw
+        // ScreenCaptureKit error beneath it would add nothing.
+        if screenRecorder.hasPermission, let error = screenRecorder.errorMessage {
             menu.addItem(NSMenuItem.separator())
             let errorItem = NSMenuItem(title: error, action: nil, keyEquivalent: "")
             errorItem.isEnabled = false
@@ -696,15 +693,35 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         updaterController?.checkForUpdates(nil)
     }
 
-    @objc private func openSettings() {
-        guard let url = SystemSettingsLink.screenCapturePrivacy else {
-            logger.error("Failed to create System Settings URL for screen capture privacy settings")
-            showErrorAlert(title: AppMenuText.unableToOpenSettings, message: AppMenuText.failedToOpenPrivacySettings)
-            return
+    /// Requests access before opening the pane: macOS lists Reel under
+    /// Screen & System Audio Recording only once Reel has asked, and asking
+    /// again shows no prompt.
+    func openScreenRecordingSettings() async throws {
+        await screenRecorder.requestPermission()
+        rebuildMenu()
+        guard !screenRecorder.hasPermission else { return }
+        guard let url = SystemSettingsLink.screenCapturePrivacy, NSWorkspace.shared.open(url) else {
+            throw PermissionError.systemSettingsUnavailable
         }
-        let opened = NSWorkspace.shared.open(url)
-        if !opened {
-            showErrorAlert(title: AppMenuText.unableToOpenSettings, message: AppMenuText.couldNotOpenSystemPreferences)
+    }
+
+    @objc private func openScreenRecordingSettingsFromMenu() {
+        Task { @MainActor in
+            do {
+                try await openScreenRecordingSettings()
+            } catch {
+                showErrorAlert(title: PermissionText.openSettingsFailedTitle, message: error.localizedDescription)
+            }
+        }
+    }
+
+    @objc private func relaunchFromMenu() {
+        Task { @MainActor in
+            do {
+                try await AppRelauncher.relaunch()
+            } catch {
+                showErrorAlert(title: PermissionText.relaunchFailedTitle, message: error.localizedDescription)
+            }
         }
     }
 
@@ -716,13 +733,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         alert.alertStyle = .warning
         alert.addButton(withTitle: "OK")
         alert.runModal()
-    }
-
-    @objc private func checkPermission() {
-        Task { @MainActor in
-            await screenRecorder.requestPermission()
-            rebuildMenu()
-        }
     }
 
     @objc private func stopRecording() {

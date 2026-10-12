@@ -1170,13 +1170,16 @@ final class AppSettingsTests: XCTestCase {
         )
     }
 
-    func testPermissionMenuTextMatchesExpectedActions() {
-        XCTAssertEqual(AppMenuText.screenRecordingPermissionRequired, "Screen Recording Permission Required")
-        XCTAssertEqual(AppMenuText.openSystemSettings, "Open System Settings...")
-        XCTAssertEqual(AppMenuText.checkPermission, "Check Permission")
-        XCTAssertEqual(AppMenuText.unableToOpenSettings, "Unable to open settings")
-        XCTAssertEqual(AppMenuText.failedToOpenPrivacySettings, "Failed to open system privacy settings.")
-        XCTAssertEqual(AppMenuText.couldNotOpenSystemPreferences, "Could not open System Preferences.")
+    func testPermissionTextOffersBothStepsOutOfAMissingPermission() {
+        XCTAssertEqual(PermissionText.required, "Screen Recording Permission Required")
+        XCTAssertEqual(PermissionText.openSystemSettings, "Open System Settings...")
+        XCTAssertEqual(PermissionText.relaunch, "Relaunch Reel")
+        XCTAssertEqual(PermissionText.openSettingsFailedTitle, "Could not open System Settings")
+        XCTAssertEqual(PermissionText.relaunchFailedTitle, "Could not relaunch Reel")
+        XCTAssertEqual(
+            PermissionError.systemSettingsUnavailable.errorDescription,
+            "Open System Settings, then go to Privacy & Security → Screen & System Audio Recording."
+        )
     }
 
     func testAppMenuTextMatchesRecordingAndStandardMenuItems() {
@@ -1244,8 +1247,6 @@ final class AppSettingsTests: XCTestCase {
     @MainActor
     func testWelcomeTextPairsTheRelaunchNoteWithAnAction() {
         XCTAssertTrue(WelcomeText.relaunchNote.contains("relaunching Reel"))
-        XCTAssertEqual(WelcomeText.relaunchNow, "Relaunch Reel")
-        XCTAssertEqual(WelcomeText.relaunchFailedTitle, "Could not relaunch Reel")
         XCTAssertTrue(WelcomeText.menuBarExplainer.contains("choose what to record"))
         XCTAssertFalse(
             WelcomeLogic.canOfferRelaunch(
@@ -1596,7 +1597,7 @@ final class AppSettingsTests: XCTestCase {
             RecordingDialogText.noWindows,
             RecordingDialogText.nothingRecordable
         )
-        XCTAssertEqual(RecordingDialogText.openSystemSettings, AppMenuText.openSystemSettings)
+        XCTAssertEqual(RecordingDialogText.openSystemSettings, PermissionText.openSystemSettings)
     }
 
     @MainActor

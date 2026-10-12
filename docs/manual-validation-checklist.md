@@ -39,7 +39,7 @@ Notes:
 
 User story: As a first-time user, I want clear guidance when screen recording permission is missing so I can enable the app.
 
-Expected behavior: The first-run welcome window explains the menu bar icon and the recording shortcut, then requests screen recording permission with context. When permission is not yet in effect it explains that macOS requires a relaunch and offers a Relaunch Reel button that starts a fresh instance and quits the current one; relaunch failures are surfaced in an alert. The status item menu separately offers Open System Settings and Check Permission while permission is missing.
+Expected behavior: The first-run welcome window explains the menu bar icon and the recording shortcut, then requests screen recording permission with context. When permission is not yet in effect it explains that macOS requires a relaunch and offers a Relaunch Reel button that starts a fresh instance and quits the current one; relaunch failures are surfaced in an alert. While permission is missing, the status item menu shows the requirement, Open System Settings, and Relaunch Reel, and leaves out the raw ScreenCaptureKit error.
 
 Manual steps:
 
@@ -59,13 +59,14 @@ Notes:
 
 User story: As a user without permission, I want one menu action to open macOS Screen Recording privacy settings.
 
-Expected behavior: Open System Settings uses the x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture deep link and shows an alert if opening fails. The deep-link URL is centralized in SystemSettingsLink and covered by a unit test.
+Expected behavior: Open System Settings uses the x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture deep link and shows an alert if opening fails. It requests access first, because macOS lists an app under Screen & System Audio Recording only after the app has asked; if access is already in effect, it opens nothing. The deep-link URL is centralized in SystemSettingsLink and covered by a unit test.
 
 Manual steps:
 
-1. With permission missing, choose Open System Settings
-2. verify System Settings opens Privacy & Security > Screen & System Audio Recording or equivalent Screen Capture pane
-3. verify failure alert if URL cannot open.
+1. With permission missing and Reel never having asked, choose Open System Settings and verify Reel appears in the Screen & System Audio Recording list
+2. choose Relaunch Reel from the menu and verify a new instance starts and the old one quits
+3. verify System Settings opens Privacy & Security > Screen & System Audio Recording or equivalent Screen Capture pane
+4. verify failure alert if URL cannot open.
 
 Current status: Partial automated evidence passed; manual UI validation still pending. Validate manually using the listed steps.
 
