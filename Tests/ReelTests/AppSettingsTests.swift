@@ -1631,12 +1631,27 @@ final class AppSettingsTests: XCTestCase {
     func testLastAreaLabelNamesTheRememberedSize() {
         XCTAssertEqual(
             RecordingDialogLogic.lastAreaLabel(size: CGSize(width: 1280, height: 720)),
-            "Use Last Area (1280 × 720 px)"
+            "Last Area (1280 × 720 px)"
         )
         XCTAssertEqual(
             RecordingDialogLogic.lastAreaLabel(size: CGSize(width: 640.4, height: 360.6)),
-            "Use Last Area (640 × 361 px)"
+            "Last Area (640 × 361 px)"
         )
+    }
+
+    func testPickerOpensOnTheTabOfTheRememberedTarget() {
+        XCTAssertEqual(RecordingPickerMode(selection: .display(1)), .display)
+        XCTAssertEqual(RecordingPickerMode(selection: nil), .display)
+        XCTAssertEqual(RecordingPickerMode(selection: .region), .area)
+        XCTAssertEqual(RecordingPickerMode(selection: .lastRegion), .area)
+        XCTAssertEqual(RecordingPickerMode.allCases.map(\.title), ["Display", "Window", "Area"])
+    }
+
+    func testPickerButtonSaysWhenAnAreaIsDrawnFirst() {
+        XCTAssertEqual(RecordingDialogLogic.startTitle(for: .region), "Select Area...")
+        XCTAssertEqual(RecordingDialogLogic.startTitle(for: .lastRegion), "Start Recording")
+        XCTAssertEqual(RecordingDialogLogic.startTitle(for: .display(1)), "Start Recording")
+        XCTAssertEqual(RecordingDialogLogic.startTitle(for: nil), "Start Recording")
     }
 
     @MainActor

@@ -1124,8 +1124,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         case .window:
             return screenRecorder.selectedWindow.map { .window($0) }
         case .region:
-            // An area has no card to highlight in the picker.
-            return nil
+            return screenRecorder.selectedRegionOutputSize == nil ? .region : .lastRegion
         }
     }
 

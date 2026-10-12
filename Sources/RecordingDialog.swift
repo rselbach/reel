@@ -20,15 +20,48 @@ enum RecordingSelection: Equatable {
     }
 }
 
+/// The three kinds of thing the picker records, one tab each.
+enum RecordingPickerMode: CaseIterable, Identifiable {
+    case display
+    case window
+    case area
+
+    var id: Self { self }
+
+    var title: String {
+        switch self {
+        case .display: return "Display"
+        case .window: return "Window"
+        case .area: return "Area"
+        }
+    }
+
+    /// The tab that shows a selection.
+    init(selection: RecordingSelection?) {
+        switch selection {
+        case .window:
+            self = .window
+        case .region, .lastRegion:
+            self = .area
+        case .display, .none:
+            self = .display
+        }
+    }
+}
+
 enum RecordingDialogText {
-    static let windows = "Windows"
     static let search = "Search"
     static let refreshHelp = "Refresh displays and windows"
     static let refresh = "Refresh"
     static let noWindows = "No open windows found."
     static let noWindowsHint = "Open a window, then refresh."
     static let noSearchResults = "No windows match your search."
-    static let selectArea = "Select Area to Record..."
+    static let selectArea = "Select Area..."
+    static let startRecording = "Start Recording"
+    static let newArea = "New Area"
+    static let newAreaHint = "Drag across the screen to choose an area, then press Return to start recording."
+    static let lastAreaHint = "Records the same part of the screen as last time."
+    static let modeLabel = "Record"
     static let forThisRecording = "For this recording"
     static let recordCamera = "Camera"
 
@@ -81,7 +114,12 @@ enum RecordingDialogLogic {
     /// Names the remembered area by its size, so it is obvious which area is
     /// about to be reused.
     static func lastAreaLabel(size: CGSize) -> String {
-        "Use Last Area (\(Int(size.width.rounded())) × \(Int(size.height.rounded())) px)"
+        "Last Area (\(Int(size.width.rounded())) × \(Int(size.height.rounded())) px)"
+    }
+
+    /// A new area is drawn before anything records, so the button says so.
+    static func startTitle(for selection: RecordingSelection?) -> String {
+        selection == .region ? RecordingDialogText.selectArea : RecordingDialogText.startRecording
     }
 
     /// Keeps a preselected target only when it is actually listed, so Start
@@ -199,7 +237,11 @@ struct RecordingDialog: View {
     @State private var displays: [SCDisplay]
     @State private var windows: [SCWindow]
     @State private var excludedApplications: [SCRunningApplication]
-    @State private var selection: RecordingSelection?
+    @State private var mode: RecordingPickerMode
+    // Each tab keeps its own pick, so switching tabs never loses one.
+    @State private var selectedDisplayID: CGDirectDisplayID?
+    @State private var selectedWindow: SCWindow?
+    @State private var reusesLastArea: Bool
     @State private var displayThumbnails: [Int: NSImage] = [:]
     @State private var windowThumbnails: [CGWindowID: NSImage] = [:]
     @State private var isLoading = true
@@ -207,6 +249,8 @@ struct RecordingDialog: View {
     @State private var recordAudio: Bool
     @State private var recordCamera: Bool
     @StateObject private var levelMonitor = AudioLevelMonitor()
+    /// Arrow keys reach onMoveCommand only through a focused view.
+    @FocusState private var isPickerFocused: Bool
     @Environment(\.displayScale) private var displayScale
 
     init(
@@ -236,12 +280,36 @@ struct RecordingDialog: View {
         _displays = State(initialValue: availableDisplays)
         _windows = State(initialValue: availableWindows)
         _excludedApplications = State(initialValue: excludedApplications)
-        _selection = State(
-            initialValue: RecordingDialogLogic.validPreselection(
-                initialSelection,
-                displayIDs: availableDisplays.map(\.displayID),
-                windowIDs: availableWindows.map(\.windowID)
-            ))
+        let preselection = RecordingDialogLogic.validPreselection(
+            initialSelection,
+            displayIDs: availableDisplays.map(\.displayID),
+            windowIDs: availableWindows.map(\.windowID)
+        )
+        _mode = State(initialValue: RecordingPickerMode(selection: preselection))
+        var displayID = availableDisplays.first?.displayID
+        var window: SCWindow?
+        switch preselection {
+        case .display(let id):
+            displayID = id
+        case .window(let preselectedWindow):
+            window = preselectedWindow
+        case .region, .lastRegion, .none:
+            break
+        }
+        _selectedDisplayID = State(initialValue: displayID)
+        _selectedWindow = State(initialValue: window)
+        _reusesLastArea = State(initialValue: preselection == .lastRegion && lastRegionOutputSize != nil)
+    }
+
+    private var selection: RecordingSelection? {
+        switch mode {
+        case .display:
+            return selectedDisplayID.map { .display($0) }
+        case .window:
+            return selectedWindow.map { .window($0) }
+        case .area:
+            return reusesLastArea && lastRegionOutputSize != nil ? .lastRegion : .region
+        }
     }
 
     private var displayTitles: [String] {
@@ -260,6 +328,7 @@ struct RecordingDialog: View {
     }
 
     private let thumbnailSize = CGSize(width: 160, height: 100)
+    private let displayThumbnailSize = CGSize(width: 240, height: 150)
     private static let gridMinimum: CGFloat = 160
     private static let gridSpacing: CGFloat = 12
     private static let gridWidth: CGFloat = 540 - 32
@@ -267,30 +336,43 @@ struct RecordingDialog: View {
         GridItem(.adaptive(minimum: gridMinimum, maximum: 200), spacing: gridSpacing)
     ]
 
-    /// Everything the arrow keys can move between, in the order shown.
-    private var orderedSelections: [RecordingSelection] {
-        displays.map { .display($0.displayID) } + filteredWindows.map { .window($0) }
-    }
-
+    /// Moves the arrow keys through the cards on the current tab.
     private func moveSelection(_ direction: MoveCommandDirection) {
-        let targets = orderedSelections
-        guard !targets.isEmpty else { return }
-
-        let current = selection.flatMap { targets.firstIndex(of: $0) }
-        let columns = PickerNavigation.columnCount(
-            availableWidth: Self.gridWidth,
-            minimum: Self.gridMinimum,
-            spacing: Self.gridSpacing
-        )
-        selection =
-            targets[
+        switch mode {
+        case .display:
+            let ids = displays.map(\.displayID)
+            guard !ids.isEmpty else { return }
+            let current = selectedDisplayID.flatMap { ids.firstIndex(of: $0) }
+            selectedDisplayID = ids[
+                PickerNavigation.nextIndex(from: current, direction: direction, count: ids.count, columns: 2)
+            ]
+        case .window:
+            let candidates = filteredWindows
+            guard !candidates.isEmpty else { return }
+            let current = selectedWindow.flatMap { selected in
+                candidates.firstIndex { $0.windowID == selected.windowID }
+            }
+            let columns = PickerNavigation.columnCount(
+                availableWidth: Self.gridWidth,
+                minimum: Self.gridMinimum,
+                spacing: Self.gridSpacing
+            )
+            selectedWindow = candidates[
                 PickerNavigation.nextIndex(
                     from: current,
                     direction: direction,
-                    count: targets.count,
+                    count: candidates.count,
                     columns: columns
                 )
             ]
+        case .area:
+            guard lastRegionOutputSize != nil else { return }
+            switch direction {
+            case .left: reusesLastArea = false
+            case .right: reusesLastArea = true
+            default: return
+            }
+        }
     }
 
     var body: some View {
@@ -338,113 +420,33 @@ struct RecordingDialog: View {
 
     private var picker: some View {
         VStack(spacing: 0) {
-            Text("Select what to record")
-                .font(.headline)
-                .padding(.top, 16)
-                .padding(.bottom, 12)
-
-            if !displays.isEmpty {
-                Text("Displays")
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 16)
-
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 12) {
-                        ForEach(0..<displays.count, id: \.self) { index in
-                            let displayID = displays[index].displayID
-                            ThumbnailCard(
-                                image: displayThumbnails[index],
-                                title: displayTitles[index],
-                                isSelected: selection == .display(displayID),
-                                isLoading: isLoading,
-                                action: { selection = .display(displayID) },
-                                onDoubleClick: { start(.display(displayID)) }
-                            )
-                            .frame(width: 160)
-                        }
-                    }
-                    .padding(.horizontal, 16)
-                }
-                .frame(height: 130)
-            }
-
-            HStack {
-                Button {
-                    start(.region)
-                } label: {
-                    Label(RecordingDialogText.selectArea, systemImage: "rectangle.dashed")
-                }
-
-                if let lastRegionOutputSize {
-                    Button {
-                        start(.lastRegion)
-                    } label: {
-                        Label(
-                            RecordingDialogLogic.lastAreaLabel(size: lastRegionOutputSize),
-                            systemImage: "arrow.counterclockwise"
-                        )
-                    }
-                }
-
-                Spacer()
-            }
-            .padding(.horizontal, 16)
-            .padding(.top, 8)
-
-            // The refresh control lives outside the windows list: when nothing
-            // is listed yet is exactly when the user needs to retry.
-            HStack {
-                Text(RecordingDialogText.windows)
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-                Spacer()
-                Button {
-                    Task { await refresh() }
-                } label: {
-                    Image(systemName: "arrow.clockwise")
-                }
-                .buttonStyle(.borderless)
-                .disabled(isLoading)
-                .help(RecordingDialogText.refreshHelp)
-                if !windows.isEmpty {
-                    TextField(RecordingDialogText.search, text: $searchText)
-                        .textFieldStyle(.roundedBorder)
-                        .frame(width: 150)
+            Picker(RecordingDialogText.modeLabel, selection: $mode) {
+                ForEach(RecordingPickerMode.allCases) { mode in
+                    Text(mode.title).tag(mode)
                 }
             }
-            .padding(.horizontal, 16)
-            .padding(.top, 8)
-
-            if windows.isEmpty {
-                emptyState
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            } else if filteredWindows.isEmpty {
-                Text(RecordingDialogText.noSearchResults)
-                    .font(.subheadline)
-                    .foregroundColor(.secondary)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                    .padding(16)
-            } else {
-                ScrollView {
-                    LazyVGrid(columns: columns, spacing: 12) {
-                        ForEach(filteredWindows, id: \.windowID) { window in
-                            ThumbnailCard(
-                                image: windowThumbnails[window.windowID],
-                                title: windowTitle(for: window),
-                                appIcon: appIcon(for: window),
-                                isSelected: selection == .window(window),
-                                isLoading: isLoading,
-                                action: { selection = .window(window) },
-                                onDoubleClick: { start(.window(window)) }
-                            )
-                        }
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 16)
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .fixedSize()
+            .frame(maxWidth: .infinity)
+            .overlay(alignment: .trailing) {
+                if mode != .area {
+                    refreshButton
                 }
             }
+            .padding(16)
+
+            Group {
+                switch mode {
+                case .display:
+                    displayGrid
+                case .window:
+                    windowList
+                case .area:
+                    areaOptions
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
 
             Divider()
 
@@ -483,14 +485,14 @@ struct RecordingDialog: View {
             }
 
             HStack {
+                Spacer()
+
                 Button("Cancel") {
                     onCancel()
                 }
                 .keyboardShortcut(.cancelAction)
 
-                Spacer()
-
-                Button("Start Recording") {
+                Button(RecordingDialogLogic.startTitle(for: selection)) {
                     if let selection {
                         start(selection)
                     }
@@ -500,12 +502,134 @@ struct RecordingDialog: View {
             }
             .padding(16)
         }
+        .focusable()
+        .focusEffectDisabled()
+        .focused($isPickerFocused)
         .onMoveCommand { moveSelection($0) }
-        .onAppear { refreshMetering() }
+        .onAppear {
+            isPickerFocused = true
+            refreshMetering()
+        }
         .onDisappear { levelMonitor.stop() }
         .onChange(of: recordAudio) {
             refreshMetering()
         }
+    }
+
+    private var refreshButton: some View {
+        Button {
+            Task { await refresh() }
+        } label: {
+            Image(systemName: "arrow.clockwise")
+        }
+        .buttonStyle(.borderless)
+        .disabled(isLoading)
+        .help(RecordingDialogText.refreshHelp)
+        .accessibilityLabel(RecordingDialogText.refresh)
+    }
+
+    private var displayGrid: some View {
+        ScrollView {
+            LazyVGrid(
+                columns: [GridItem(.adaptive(minimum: 220, maximum: 250), spacing: Self.gridSpacing)],
+                spacing: Self.gridSpacing
+            ) {
+                ForEach(0..<displays.count, id: \.self) { index in
+                    let displayID = displays[index].displayID
+                    ThumbnailCard(
+                        image: displayThumbnails[index],
+                        title: displayTitles[index],
+                        isSelected: selectedDisplayID == displayID,
+                        isLoading: isLoading,
+                        thumbnailHeight: 150,
+                        action: { selectedDisplayID = displayID },
+                        onDoubleClick: { start(.display(displayID)) }
+                    )
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.bottom, 16)
+        }
+    }
+
+    @ViewBuilder
+    private var windowList: some View {
+        if windows.isEmpty {
+            emptyState
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        } else {
+            VStack(spacing: 12) {
+                TextField(RecordingDialogText.search, text: $searchText)
+                    .textFieldStyle(.roundedBorder)
+                    .padding(.horizontal, 16)
+
+                if filteredWindows.isEmpty {
+                    Text(RecordingDialogText.noSearchResults)
+                        .font(.subheadline)
+                        .foregroundColor(.secondary)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                        .padding(.horizontal, 16)
+                } else {
+                    ScrollView {
+                        LazyVGrid(columns: columns, spacing: 12) {
+                            ForEach(filteredWindows, id: \.windowID) { window in
+                                ThumbnailCard(
+                                    image: windowThumbnails[window.windowID],
+                                    title: windowTitle(for: window),
+                                    appIcon: appIcon(for: window),
+                                    isSelected: selectedWindow?.windowID == window.windowID,
+                                    isLoading: isLoading,
+                                    action: { selectedWindow = window },
+                                    onDoubleClick: { start(.window(window)) }
+                                )
+                            }
+                        }
+                        .padding(.horizontal, 16)
+                        .padding(.bottom, 16)
+                    }
+                }
+            }
+        }
+    }
+
+    private var areaOptions: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            LazyVGrid(
+                columns: [
+                    GridItem(.flexible(), spacing: Self.gridSpacing),
+                    GridItem(.flexible(), spacing: Self.gridSpacing),
+                ],
+                spacing: Self.gridSpacing
+            ) {
+                ThumbnailCard(
+                    image: nil,
+                    title: RecordingDialogText.newArea,
+                    isSelected: !reusesLastArea || lastRegionOutputSize == nil,
+                    isLoading: false,
+                    placeholderSymbol: "rectangle.dashed",
+                    thumbnailHeight: 150,
+                    action: { reusesLastArea = false },
+                    onDoubleClick: { start(.region) }
+                )
+                if let lastRegionOutputSize {
+                    ThumbnailCard(
+                        image: nil,
+                        title: RecordingDialogLogic.lastAreaLabel(size: lastRegionOutputSize),
+                        isSelected: reusesLastArea,
+                        isLoading: false,
+                        placeholderSymbol: "arrow.counterclockwise",
+                        thumbnailHeight: 150,
+                        action: { reusesLastArea = true },
+                        onDoubleClick: { start(.lastRegion) }
+                    )
+                }
+            }
+
+            Text(selection == .lastRegion ? RecordingDialogText.lastAreaHint : RecordingDialogText.newAreaHint)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.horizontal, 16)
     }
 
     /// Shown in place of the window grid when no windows are open.
@@ -546,16 +670,11 @@ struct RecordingDialog: View {
         windowThumbnails = [:]
         // Replace a selected window with the refreshed ScreenCaptureKit
         // snapshot so resizing and other metadata changes reach the recorder.
-        if case .window(let selected) = selection {
-            selection =
-                windows
-                .first(where: { $0.windowID == selected.windowID })
-                .map { .window($0) }
+        if let selected = selectedWindow {
+            selectedWindow = windows.first { $0.windowID == selected.windowID }
         }
-        if case .display(let displayID) = selection,
-            !displays.contains(where: { $0.displayID == displayID })
-        {
-            selection = nil
+        if let displayID = selectedDisplayID, !displays.contains(where: { $0.displayID == displayID }) {
+            selectedDisplayID = displays.first?.displayID
         }
         await loadThumbnails()
     }
@@ -565,6 +684,7 @@ struct RecordingDialog: View {
     /// captures overlap instead of loading one by one.
     private func loadThumbnails() async {
         let size = thumbnailSize
+        let displaySize = displayThumbnailSize
         let scale = displayScale
         let boxedExcludedApplications = UncheckedSendable(value: excludedApplications)
 
@@ -576,7 +696,7 @@ struct RecordingDialog: View {
                         let image = await ThumbnailCapture.captureDisplay(
                             boxed.value,
                             excludingApplications: boxedExcludedApplications.value,
-                            maxSize: size,
+                            maxSize: displaySize,
                             scale: scale
                         )
                     else {
@@ -644,6 +764,8 @@ struct ThumbnailCard: View {
     var appIcon: NSImage? = nil
     let isSelected: Bool
     let isLoading: Bool
+    var placeholderSymbol = "rectangle.dashed"
+    var thumbnailHeight: CGFloat = 100
     let action: () -> Void
     var onDoubleClick: (() -> Void)? = nil
 
@@ -665,21 +787,23 @@ struct ThumbnailCard: View {
     private var card: some View {
         VStack(spacing: 6) {
             ZStack {
+                // A faint fill rather than the control background, which
+                // matches the window and left icon-only cards without a box.
                 RoundedRectangle(cornerRadius: 6)
-                    .fill(Color(nsColor: .controlBackgroundColor))
-                    .frame(height: 100)
+                    .fill(Color.primary.opacity(0.06))
+                    .frame(height: thumbnailHeight)
 
                 if let image {
                     Image(nsImage: image)
                         .resizable()
                         .aspectRatio(contentMode: .fit)
-                        .frame(maxHeight: 96)
+                        .frame(maxHeight: thumbnailHeight - 4)
                         .clipShape(RoundedRectangle(cornerRadius: 4))
                 } else if isLoading {
                     ProgressView()
                         .scaleEffect(0.6)
                 } else {
-                    Image(systemName: "rectangle.dashed")
+                    Image(systemName: placeholderSymbol)
                         .font(.largeTitle)
                         .foregroundColor(.secondary)
                 }
