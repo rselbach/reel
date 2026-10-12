@@ -23,9 +23,9 @@ enum CountdownLayout {
     }
 
     /// The HUD never takes key focus, so Esc cannot reach it. Clicking it and
-    /// pressing the recording shortcut again are the two ways out.
-    static func cancelHint(shortcut: String) -> String {
-        "Click or press \(shortcut) to cancel"
+    /// pressing the recording shortcut again, when it is on, are the ways out.
+    static func cancelHint(shortcut: String?) -> String {
+        shortcut.map { "Click or press \($0) to cancel" } ?? "Click to cancel"
     }
 }
 
@@ -99,7 +99,7 @@ class CountdownOverlay {
 
         let hint = NSTextField(
             labelWithString: CountdownLayout.cancelHint(
-                shortcut: AppSettings.shared.recordingHotkey.displayString
+                shortcut: AppSettings.shared.recordingHotkey?.displayString
             )
         )
         hint.font = NSFont.systemFont(ofSize: 11)

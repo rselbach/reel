@@ -59,17 +59,19 @@ struct WelcomeView: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
 
-            HStack(spacing: 6) {
-                Text(WelcomeText.hotkeyPrefix)
-                    .foregroundStyle(.secondary)
-                Text(settings.recordingHotkey.displayString)
-                    .fontWeight(.semibold)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3)
-                    .background(
-                        RoundedRectangle(cornerRadius: 5)
-                            .fill(Color(nsColor: .controlBackgroundColor))
-                    )
+            if let hotkey = settings.recordingHotkey {
+                HStack(spacing: 6) {
+                    Text(WelcomeText.hotkeyPrefix)
+                        .foregroundStyle(.secondary)
+                    Text(hotkey.displayString)
+                        .fontWeight(.semibold)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3)
+                        .background(
+                            RoundedRectangle(cornerRadius: 5)
+                                .fill(Color(nsColor: .controlBackgroundColor))
+                        )
+                }
             }
 
             Divider()

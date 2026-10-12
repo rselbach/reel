@@ -44,6 +44,8 @@ enum SettingsText {
     static let text = "Text"
     static let textPrompt = "Shown on every frame"
     static let pressShortcut = "Press shortcut..."
+    static let noShortcut = "None"
+    static let turnOffShortcut = "Turn Off Shortcut"
     static let shortcutHelp = "Press the button and type your desired shortcut."
     static let restoreDefaultShortcuts = "Restore Default Shortcuts"
     static let defaultDevice = "Default"
@@ -564,7 +566,11 @@ struct ShortcutsPane: View {
                             settings.setHotkey(combo, for: action)
                             recordingAction = nil
                         },
-                        onCancel: { recordingAction = nil }
+                        onCancel: { recordingAction = nil },
+                        onTurnOff: {
+                            settings.setHotkey(nil, for: action)
+                            recordingAction = nil
+                        }
                     )
                 }
 
@@ -587,25 +593,53 @@ struct ShortcutsPane: View {
 
 private struct ShortcutRow: View {
     let action: HotkeyAction
-    let combo: AppSettings.HotkeyCombo
+    let combo: AppSettings.HotkeyCombo?
     let isRecording: Bool
     let onBeginRecording: () -> Void
     let onRecorded: (AppSettings.HotkeyCombo) -> Void
     let onCancel: () -> Void
+    let onTurnOff: () -> Void
+
+    private var canTurnOff: Bool {
+        combo != nil && !isRecording
+    }
 
     var body: some View {
         LabeledContent(action.displayName) {
-            Button(action: onBeginRecording) {
-                Text(isRecording ? SettingsText.pressShortcut : combo.displayString)
-                    .frame(minWidth: 100)
+            HStack(spacing: 6) {
+                Button(action: onBeginRecording) {
+                    Text(label)
+                        .foregroundStyle(combo == nil && !isRecording ? .secondary : .primary)
+                        .frame(minWidth: 100)
+                }
+                .background(
+                    HotkeyRecorder(
+                        isRecording: isRecording,
+                        onRecorded: onRecorded,
+                        onCancel: onCancel
+                    ))
+
+                // Kept in the layout while hidden, so the shortcut buttons
+                // stay aligned across rows.
+                Button(action: onTurnOff) {
+                    Image(systemName: "xmark.circle.fill")
+                }
+                .buttonStyle(.borderless)
+                .foregroundStyle(.secondary)
+                .help(SettingsText.turnOffShortcut)
+                .accessibilityLabel("\(SettingsText.turnOffShortcut), \(action.displayName)")
+                .opacity(canTurnOff ? 1 : 0)
+                .disabled(!canTurnOff)
+                .accessibilityHidden(!canTurnOff)
             }
-            .background(
-                HotkeyRecorder(
-                    isRecording: isRecording,
-                    onRecorded: onRecorded,
-                    onCancel: onCancel
-                ))
         }
+    }
+
+    private var label: String {
+        if isRecording {
+            return SettingsText.pressShortcut
+        }
+        return combo?.displayString ?? SettingsText.noShortcut
     }
 }
 

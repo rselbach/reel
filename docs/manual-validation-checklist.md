@@ -449,17 +449,19 @@ Notes:
 
 User story: As a user, I want to change the recording hotkey from Settings.
 
-Expected behavior: The Shortcuts tab lists every global action — toggle recording and discard recording — each with a recorder button that captures a new combination, rejects modifier-less and shift-only combinations, and cancels on Escape. Assigning a combination another action already owns is refused with a message naming that action, since Carbon would otherwise leave the second registration silently dead. While a recorder button waits for a combination, Reel unregisters its global shortcuts, so pressing one of Reel's own combinations reaches the recorder and is refused as a conflict instead of running that action; the shortcuts are restored when capture ends, is cancelled, or Settings closes.
+Expected behavior: The Shortcuts tab lists every global action, toggle recording, discard recording, and pause and resume, each with a recorder button that captures a new combination, rejects modifier-less and shift-only combinations, and cancels on Escape. Assigning a combination another action already owns is refused with a message naming that action, since Carbon would otherwise leave the second registration silently dead. While a recorder button waits for a combination, Reel unregisters its global shortcuts, so pressing one of Reel's own combinations reaches the recorder and is refused as a conflict instead of running that action; the shortcuts are restored when capture ends, is cancelled, or Settings closes. Each set shortcut has a turn-off button; a turned-off shortcut shows None, is unregistered, frees its combination for other actions, and is stored as JSON null so it stays off after relaunch, while a missing value still means the default. With the toggle shortcut off, the welcome window drops its shortcut line, the countdown hint reads Click to cancel, and the menu and tooltip show no shortcut.
 
 Manual steps:
 
 1. Open Settings, Shortcuts
-2. verify both toggle and discard rows appear with their current combinations
+2. verify the toggle, discard, and pause rows appear with their current combinations
 3. record a new combination for each and verify it takes effect globally
 4. try to assign one row the other's combination and verify it is refused with an explanation
 5. press Escape while recording a shortcut and verify the previous combination is kept
 6. while recording a shortcut for one row, press another row's current combination and verify it is refused with an explanation and its action does not run
-7. close Settings while recording a shortcut and verify the global shortcuts still work.
+7. close Settings while recording a shortcut and verify the global shortcuts still work
+8. turn off the toggle shortcut and verify the row shows None, the combination does nothing, and the setting stays off after relaunch
+9. press Restore Default Shortcuts and verify the combination works again.
 
 Current status: Partial automated evidence passed; manual UI validation still pending. Validate manually using the listed steps.
 

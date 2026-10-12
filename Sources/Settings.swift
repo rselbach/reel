@@ -304,21 +304,22 @@ class AppSettings: ObservableObject {
 
     static let hotkeyChangedNotification = Notification.Name("AppSettingsHotkeyChanged")
 
-    @Published var recordingHotkey: HotkeyCombo {
+    /// Nil when the user turned the shortcut off.
+    @Published var recordingHotkey: HotkeyCombo? {
         didSet {
             persistHotkey(recordingHotkey, key: DefaultsKey.recordingHotkey)
         }
     }
 
     /// Ends a take and throws the file away, for a flubbed demo.
-    @Published var discardHotkey: HotkeyCombo {
+    @Published var discardHotkey: HotkeyCombo? {
         didSet {
             persistHotkey(discardHotkey, key: DefaultsKey.discardHotkey)
         }
     }
 
     /// Pauses or resumes without ending the take.
-    @Published var pauseHotkey: HotkeyCombo {
+    @Published var pauseHotkey: HotkeyCombo? {
         didSet {
             persistHotkey(pauseHotkey, key: DefaultsKey.pauseHotkey)
         }
@@ -327,7 +328,7 @@ class AppSettings: ObservableObject {
     /// Non-nil when a shortcut conflicts or cannot be registered globally.
     @Published var hotkeyError: String?
 
-    func hotkey(for action: HotkeyAction) -> HotkeyCombo {
+    func hotkey(for action: HotkeyAction) -> HotkeyCombo? {
         switch action {
         case .toggleRecording: return recordingHotkey
         case .discardRecording: return discardHotkey
@@ -339,16 +340,19 @@ class AppSettings: ObservableObject {
         HotkeyAction.allCases.allSatisfy { hotkey(for: $0) == $0.defaultCombo }
     }
 
-    /// Assigns a shortcut, refusing combinations already taken by another
-    /// action rather than letting the second registration fail silently.
+    /// Assigns a shortcut, or turns it off when `combo` is nil, refusing
+    /// combinations already taken by another action rather than letting the
+    /// second registration fail silently.
     func setHotkey(
-        _ combo: HotkeyCombo,
+        _ combo: HotkeyCombo?,
         for action: HotkeyAction,
-        register: (HotkeyCombo, HotkeyAction) -> Bool = {
+        register: (HotkeyCombo?, HotkeyAction) -> Bool = {
             HotkeyManager.shared.updateHotkey($0, for: $1)
         }
     ) {
-        if let conflict = HotkeyAction.allCases.first(where: { $0 != action && hotkey(for: $0) == combo }) {
+        if let combo,
+            let conflict = HotkeyAction.allCases.first(where: { $0 != action && hotkey(for: $0) == combo })
+        {
             hotkeyError = HotkeyConflictText.message(
                 shortcut: combo.displayString,
                 otherAction: conflict.displayName
@@ -357,7 +361,7 @@ class AppSettings: ObservableObject {
         }
 
         guard register(combo, action) else {
-            hotkeyError = HotkeyRegistrationText.message(shortcut: combo.displayString)
+            hotkeyError = combo.map { HotkeyRegistrationText.message(shortcut: $0.displayString) }
             return
         }
 
@@ -388,7 +392,9 @@ class AppSettings: ObservableObject {
         hotkeyError = nil
     }
 
-    private func persistHotkey(_ combo: HotkeyCombo, key: String) {
+    /// Writes JSON null for a shortcut that was turned off, so loading can
+    /// tell it apart from one that was never set.
+    private func persistHotkey(_ combo: HotkeyCombo?, key: String) {
         do {
             let data = try JSONEncoder().encode(combo)
             UserDefaults.standard.set(data, forKey: key)
@@ -897,14 +903,16 @@ class AppSettings: ObservableObject {
         }
     }
 
-    private static func loadHotkey(
+    static func loadHotkey(
         from defaults: UserDefaults,
         key: String,
         fallback: HotkeyCombo
-    ) -> HotkeyCombo {
+    ) -> HotkeyCombo? {
         if let data = defaults.data(forKey: key) {
             do {
-                let combo = try JSONDecoder().decode(HotkeyCombo.self, from: data)
+                guard let combo = try JSONDecoder().decode(HotkeyCombo?.self, from: data) else {
+                    return nil
+                }
                 // Migrate old broken default modifier value (0x180500) to new correct value (0x120000)
                 // Old value masked to 0x100000 (Cmd only), new value masks to 0x120000 (Cmd+Shift)
                 if combo.keyCode == HotkeyCombo.default.keyCode && combo.modifiers == 0x180500 {

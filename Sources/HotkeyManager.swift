@@ -136,7 +136,12 @@ class HotkeyManager {
 
     /// Re-registers one shortcut after the user records a new combination,
     /// restoring the previous registration if Carbon rejects the replacement.
-    func updateHotkey(_ combo: AppSettings.HotkeyCombo, for action: HotkeyAction) -> Bool {
+    func updateHotkey(_ combo: AppSettings.HotkeyCombo?, for action: HotkeyAction) -> Bool {
+        guard let combo else {
+            unregister(action)
+            combos[action] = nil
+            return true
+        }
         guard combo.isUsableGlobalShortcut else { return false }
 
         let previousCombo = combos[action]

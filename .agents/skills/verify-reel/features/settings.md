@@ -57,9 +57,12 @@ Preconditions:
   `Microphone`, and an `Input level` meter that reacts to sound. Restore the
   values.
 - **Shortcuts tab.** Click `Shortcuts`. Require rows for `Toggle recording`,
-  `Discard recording`, and `Pause and resume`, plus `Restore Default
-  Shortcuts`. Do not type a global shortcut unless the recipe intends to change
-  it and can restore it.
+  `Discard recording`, and `Pause and resume`, each with a `Turn Off Shortcut`
+  button, plus `Restore Default Shortcuts`. To test turning one off, click
+  `Turn Off Shortcut, Toggle recording`, require the row to read `None`, and
+  require `recordingHotkey` to be stored as JSON `null` (bytes `6e756c6c`);
+  then click `Restore Default Shortcuts`. Do not type a global shortcut unless
+  the recipe intends to change it and can restore it.
 - **Persistence.** Close `Reel Settings`, reopen it from the menu, and require
   the final restored values. Use `verify-reel preference` to capture any value
   intentionally changed for the proof.

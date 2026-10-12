@@ -637,7 +637,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     private func showShortcut(of action: HotkeyAction, on item: NSMenuItem) {
-        guard let shortcut = MenuShortcut(AppSettings.shared.hotkey(for: action)) else { return }
+        guard let combo = AppSettings.shared.hotkey(for: action), let shortcut = MenuShortcut(combo) else { return }
         item.keyEquivalent = shortcut.key
         item.keyEquivalentModifierMask = shortcut.modifiers
     }
@@ -1395,8 +1395,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         switch state {
         case .idle:
             button.toolTip =
-                quickRecordTitle.map { "Reel — \($0) (\(AppSettings.shared.recordingHotkey.displayString))" }
-                ?? "Reel"
+                quickRecordTitle.map { title in
+                    AppSettings.shared.recordingHotkey.map { "Reel — \(title) (\($0.displayString))" }
+                        ?? "Reel — \(title)"
+                } ?? "Reel"
         case .recording:
             button.toolTip = AppMenuText.recordingToolTip
         case .paused:

@@ -1029,6 +1029,55 @@ final class AppSettingsTests: XCTestCase {
     }
 
     @MainActor
+    func testTurnedOffShortcutSurvivesReloadButMissingOneUsesTheDefault() throws {
+        let suiteName = "com.rselbach.reel.tests.\(UUID().uuidString)"
+        let defaults = try XCTUnwrap(UserDefaults(suiteName: suiteName))
+        defer { defaults.removePersistentDomain(forName: suiteName) }
+        let custom = AppSettings.HotkeyCombo(keyCode: KeyCode.f5, modifiers: 0x100000)
+
+        XCTAssertEqual(AppSettings.loadHotkey(from: defaults, key: "missing", fallback: .default), .default)
+
+        defaults.set(try JSONEncoder().encode(AppSettings.HotkeyCombo?.none), forKey: "off")
+        XCTAssertNil(AppSettings.loadHotkey(from: defaults, key: "off", fallback: .default))
+
+        defaults.set(try JSONEncoder().encode(custom), forKey: "custom")
+        XCTAssertEqual(AppSettings.loadHotkey(from: defaults, key: "custom", fallback: .default), custom)
+
+        defaults.set(Data("not json".utf8), forKey: "garbage")
+        XCTAssertEqual(AppSettings.loadHotkey(from: defaults, key: "garbage", fallback: .default), .default)
+    }
+
+    @MainActor
+    func testTurningOffAShortcutUnregistersItUntilDefaultsAreRestored() {
+        let settings = AppSettings.shared
+        let originals = HotkeyAction.allCases.map { ($0, settings.hotkey(for: $0)) }
+        defer {
+            settings.recordingHotkey = originals[0].1
+            settings.discardHotkey = originals[1].1
+            settings.pauseHotkey = originals[2].1
+            settings.hotkeyError = nil
+        }
+        settings.resetHotkeys { _ in true }
+
+        var registered: [AppSettings.HotkeyCombo?] = []
+        settings.setHotkey(nil, for: .discardRecording) { combo, _ in
+            registered.append(combo)
+            return true
+        }
+
+        XCTAssertEqual(registered, [nil])
+        XCTAssertNil(settings.discardHotkey)
+        XCTAssertNil(settings.hotkeyError)
+        XCTAssertFalse(settings.usesDefaultHotkeys)
+
+        settings.setHotkey(.discardDefault, for: .toggleRecording) { _, _ in true }
+        XCTAssertEqual(settings.recordingHotkey, .discardDefault, "a turned-off shortcut frees its combination")
+
+        settings.resetHotkeys { _ in true }
+        XCTAssertTrue(settings.usesDefaultHotkeys)
+    }
+
+    @MainActor
     func testFailedHotkeyRegistrationDoesNotSaveTheShortcut() {
         let settings = AppSettings.shared
         let original = settings.recordingHotkey
@@ -1748,6 +1797,7 @@ final class AppSettingsTests: XCTestCase {
             "Click or press ⇧⌘R to cancel"
         )
         XCTAssertFalse(CountdownLayout.cancelHint(shortcut: "⇧⌘R").contains("Esc"))
+        XCTAssertEqual(CountdownLayout.cancelHint(shortcut: nil), "Click to cancel")
     }
 
     @MainActor
