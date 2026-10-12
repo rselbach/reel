@@ -336,6 +336,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                         self.rebuildMenu()
                     }
                 },
+                onOpenSystemSettings: openScreenRecordingSettings,
                 onDismiss: { [weak self] in
                     self?.welcomeWindow?.close()
                 }

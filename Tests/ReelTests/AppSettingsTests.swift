@@ -1244,28 +1244,13 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(SettingsText.restoreDefaultShortcuts, "Restore Default Shortcuts")
     }
 
-    @MainActor
-    func testWelcomeTextPairsTheRelaunchNoteWithAnAction() {
-        XCTAssertTrue(WelcomeText.relaunchNote.contains("relaunching Reel"))
+    func testWelcomeStepFollowsTheRequestUntilAccessIsInEffect() {
         XCTAssertTrue(WelcomeText.menuBarExplainer.contains("choose what to record"))
-        XCTAssertFalse(
-            WelcomeLogic.canOfferRelaunch(
-                isBundledApp: true,
-                hasRequestedPermission: false,
-                hasPermission: false
-            ))
-        XCTAssertTrue(
-            WelcomeLogic.canOfferRelaunch(
-                isBundledApp: true,
-                hasRequestedPermission: true,
-                hasPermission: false
-            ))
-        XCTAssertFalse(
-            WelcomeLogic.canOfferRelaunch(
-                isBundledApp: true,
-                hasRequestedPermission: true,
-                hasPermission: true
-            ))
+        XCTAssertEqual(WelcomeStep.current(hasPermission: false, hasRequestedPermission: false), .requestAccess)
+        XCTAssertEqual(WelcomeStep.current(hasPermission: false, hasRequestedPermission: true), .finishInSettings)
+        XCTAssertEqual(WelcomeStep.current(hasPermission: true, hasRequestedPermission: false), .ready)
+        XCTAssertEqual(WelcomeStep.current(hasPermission: true, hasRequestedPermission: true), .ready)
+        XCTAssertTrue(PermissionText.relaunchStep.contains("Relaunch Reel"))
     }
 
     @MainActor

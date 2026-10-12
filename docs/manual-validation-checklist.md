@@ -39,15 +39,17 @@ Notes:
 
 User story: As a first-time user, I want clear guidance when screen recording permission is missing so I can enable the app.
 
-Expected behavior: The first-run welcome window explains the menu bar icon and the recording shortcut, then requests screen recording permission with context. When permission is not yet in effect it explains that macOS requires a relaunch and offers a Relaunch Reel button that starts a fresh instance and quits the current one; relaunch failures are surfaced in an alert. While permission is missing, the status item menu shows the requirement, Open System Settings, and Relaunch Reel, and leaves out the raw ScreenCaptureKit error.
+Expected behavior: The first-run welcome window explains the menu bar icon and the recording shortcut, then requests screen recording permission with context. Until access is in effect, Grant Screen Recording Access is the prominent default button and Get Started is secondary. Once access has been requested and is still not in effect, the window shows the two steps, turning Reel on in System Settings and relaunching, with Open System Settings and Relaunch Reel buttons; Relaunch Reel starts a fresh instance and quits the current one, and failures are surfaced in an alert. Get Started becomes the prominent default only once access is in effect. While permission is missing, the status item menu shows the requirement, Open System Settings, and Relaunch Reel, and leaves out the raw ScreenCaptureKit error.
 
 Manual steps:
 
 1. Launch Reel with screen recording permission revoked
-2. verify the welcome window explains the permission and the relaunch requirement
-3. grant access in System Settings
-4. press Relaunch Reel and verify a new instance starts and the old one quits
-5. verify recording works after the relaunch.
+2. verify the welcome window explains the permission, that Grant Screen Recording Access is the highlighted default, and that Get Started is not
+3. press Grant Screen Recording Access and verify the window switches to the two steps with Open System Settings and Relaunch Reel
+4. grant access in System Settings
+5. press Relaunch Reel and verify a new instance starts and the old one quits
+6. verify the relaunched welcome window shows access granted with Get Started as the highlighted default
+7. verify recording works after the relaunch.
 
 Current status: Partial automated evidence passed; manual UI validation still pending. Validate manually using the listed steps.
 
