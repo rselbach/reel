@@ -1021,9 +1021,15 @@ private struct ThumbnailFilmstrip: View {
     @ViewBuilder
     private func thumbnail(at index: Int) -> some View {
         if thumbnails.indices.contains(index), let image = thumbnails[index] {
-            Image(decorative: image, scale: 1, orientation: .up)
-                .resizable()
-                .aspectRatio(contentMode: .fill)
+            // A filling image reports its full width to the HStack, which
+            // would push the strip past the timeline's edges and out of step
+            // with the clip boundaries drawn over it; an overlay cannot.
+            Color.clear
+                .overlay {
+                    Image(decorative: image, scale: 1, orientation: .up)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                }
         } else {
             ZStack {
                 Color(nsColor: .underPageBackgroundColor)
