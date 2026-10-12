@@ -496,17 +496,25 @@ class HotkeyRecorderView: NSView {
     deinit {
         if let monitor {
             NSEvent.removeMonitor(monitor)
+            Task { @MainActor in
+                HotkeyManager.shared.resume()
+            }
         }
     }
 
     func startRecording() {
         guard monitor == nil else { return }
+        HotkeyManager.shared.suspend()
         monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { [weak self] event in
             switch HotkeyRecorderLogic.decision(keyCode: event.keyCode, modifierFlags: event.modifierFlags) {
             case .cancel:
+                self?.stopRecording()
                 self?.onCancel?()
                 return nil
             case .record(let keyCode, let modifiers):
+                // Restore the current shortcuts first, so the new one is
+                // registered against them and conflicts are reported.
+                self?.stopRecording()
                 self?.onHotkeyRecorded?(keyCode, modifiers)
                 return nil
             case .reject:
@@ -519,10 +527,18 @@ class HotkeyRecorderView: NSView {
     }
 
     func stopRecording() {
-        if let monitor {
-            NSEvent.removeMonitor(monitor)
-            self.monitor = nil
-        }
+        guard let monitor else { return }
+        NSEvent.removeMonitor(monitor)
+        self.monitor = nil
+        HotkeyManager.shared.resume()
     }
 
+    /// Closing Settings or switching tabs mid-capture must not leave the
+    /// global shortcuts suspended.
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+        super.viewWillMove(toWindow: newWindow)
+        if newWindow == nil {
+            stopRecording()
+        }
+    }
 }

@@ -82,6 +82,7 @@ class HotkeyManager {
     private var combos: [HotkeyAction: AppSettings.HotkeyCombo] = [:]
     private var eventHandler: EventHandlerRef?
     private var isStarted = false
+    private var suspensionCount = 0
     // Carbon delivers repeated kEventHotKeyPressed events while a key is held
     // (auto-repeat); only the first press before a release should fire.
     private var heldActions: Set<HotkeyAction> = []
@@ -110,6 +111,27 @@ class HotkeyManager {
             self.eventHandler = nil
         }
         isStarted = false
+    }
+
+    /// Unregisters every shortcut while Settings records a new combination.
+    /// Carbon consumes a registered combination before any window sees it,
+    /// so pressing one of Reel's own shortcuts would run its action instead
+    /// of being recorded. Calls nest; each must be balanced by resume().
+    func suspend() {
+        suspensionCount += 1
+        guard suspensionCount == 1 else { return }
+        for action in HotkeyAction.allCases {
+            unregister(action)
+        }
+    }
+
+    func resume() {
+        guard suspensionCount > 0 else { return }
+        suspensionCount -= 1
+        guard suspensionCount == 0, isStarted else { return }
+        for action in HotkeyAction.allCases {
+            _ = register(action)
+        }
     }
 
     /// Re-registers one shortcut after the user records a new combination,

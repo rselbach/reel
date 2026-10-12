@@ -439,7 +439,7 @@ Notes:
 
 User story: As a user, I want to change the recording hotkey from Settings.
 
-Expected behavior: The Shortcuts tab lists every global action — toggle recording and discard recording — each with a recorder button that captures a new combination, rejects modifier-less and shift-only combinations, and cancels on Escape. Assigning a combination another action already owns is refused with a message naming that action, since Carbon would otherwise leave the second registration silently dead.
+Expected behavior: The Shortcuts tab lists every global action — toggle recording and discard recording — each with a recorder button that captures a new combination, rejects modifier-less and shift-only combinations, and cancels on Escape. Assigning a combination another action already owns is refused with a message naming that action, since Carbon would otherwise leave the second registration silently dead. While a recorder button waits for a combination, Reel unregisters its global shortcuts, so pressing one of Reel's own combinations reaches the recorder and is refused as a conflict instead of running that action; the shortcuts are restored when capture ends, is cancelled, or Settings closes.
 
 Manual steps:
 
@@ -447,7 +447,9 @@ Manual steps:
 2. verify both toggle and discard rows appear with their current combinations
 3. record a new combination for each and verify it takes effect globally
 4. try to assign one row the other's combination and verify it is refused with an explanation
-5. press Escape while recording a shortcut and verify the previous combination is kept.
+5. press Escape while recording a shortcut and verify the previous combination is kept
+6. while recording a shortcut for one row, press another row's current combination and verify it is refused with an explanation and its action does not run
+7. close Settings while recording a shortcut and verify the global shortcuts still work.
 
 Current status: Partial automated evidence passed; manual UI validation still pending. Validate manually using the listed steps.
 
