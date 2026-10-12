@@ -49,6 +49,18 @@ enum AppMenuText {
     static let settingsWindowTitle = "Reel Settings"
 }
 
+enum MainMenuText {
+    static let edit = "Edit"
+    static let undo = "Undo"
+    static let redo = "Redo"
+    static let cut = "Cut"
+    static let copy = "Copy"
+    static let paste = "Paste"
+    static let selectAll = "Select All"
+    static let window = "Window"
+    static let close = "Close"
+}
+
 enum StatusItemClickLogic {
     /// Left-click stops an active recording immediately (stop latency matters
     /// at the end of a take); right-click, or any click while idle, opens the
@@ -231,6 +243,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             )
         }
 
+        installMainMenu()
+
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
 
         if let button = statusItem.button {
@@ -266,6 +280,42 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             rebuildMenu()
             showWelcome()
         }
+    }
+
+    /// Reel never shows a menu bar of its own, but AppKit still routes key
+    /// equivalents through the main menu. Without one, ⌘C, ⌘V, ⌘A, ⌘Z, and ⌘W
+    /// do nothing in Reel's windows.
+    private func installMainMenu() {
+        let appMenu = NSMenu()
+        appMenu.addItem(withTitle: AppMenuText.aboutReel, action: #selector(showAbout), keyEquivalent: "")
+        appMenu.addItem(.separator())
+        appMenu.addItem(withTitle: AppMenuText.settings, action: #selector(openPreferences), keyEquivalent: ",")
+        appMenu.addItem(.separator())
+        appMenu.addItem(
+            withTitle: AppMenuText.quitReel, action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+
+        let editMenu = NSMenu(title: MainMenuText.edit)
+        editMenu.addItem(withTitle: MainMenuText.undo, action: Selector(("undo:")), keyEquivalent: "z")
+        let redo = editMenu.addItem(withTitle: MainMenuText.redo, action: Selector(("redo:")), keyEquivalent: "z")
+        redo.keyEquivalentModifierMask = [.command, .shift]
+        editMenu.addItem(.separator())
+        editMenu.addItem(withTitle: MainMenuText.cut, action: #selector(NSText.cut(_:)), keyEquivalent: "x")
+        editMenu.addItem(withTitle: MainMenuText.copy, action: #selector(NSText.copy(_:)), keyEquivalent: "c")
+        editMenu.addItem(withTitle: MainMenuText.paste, action: #selector(NSText.paste(_:)), keyEquivalent: "v")
+        editMenu.addItem(
+            withTitle: MainMenuText.selectAll, action: #selector(NSText.selectAll(_:)), keyEquivalent: "a")
+
+        let windowMenu = NSMenu(title: MainMenuText.window)
+        windowMenu.addItem(
+            withTitle: MainMenuText.close, action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
+
+        let mainMenu = NSMenu()
+        for submenu in [appMenu, editMenu, windowMenu] {
+            let item = NSMenuItem()
+            item.submenu = submenu
+            mainMenu.addItem(item)
+        }
+        NSApp.mainMenu = mainMenu
     }
 
     private func showWelcome() {
