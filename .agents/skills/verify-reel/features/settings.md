@@ -45,8 +45,11 @@ Preconditions:
   recording`, and `Highlight clicks` under `Capture`, and `Resolution`, `Frame
   rate`, `Codec`, and `Video quality` under `Format`. Capture `settings-video`.
 - **Overlays tab.** Click `Overlays`. Turn on window framing and require
-  `Background`. Turn on `Add text overlay` and require `Text` and `Position`.
-  Require the window to grow for each. Restore both values.
+  `Background` with swatch buttons `Charcoal`, `Slate`, `Linen`, `Dusk
+  (gradient)`, and `Mist (gradient)`. Click `Dusk (gradient)`, require it to be
+  selected, and read `windowBackground` as `dusk`. Turn on `Add text overlay`
+  and require `Text` and `Position`. Require the window to grow for each.
+  Restore all values, including `Charcoal`.
 - **Audio & Camera tab.** Click `Audio & Camera`. Turn on `Record camera
   overlay` and require `Camera`, `Position`, `Size`, and `Shape`. If microphone
   permission already exists, turn on `Record audio` and require `Source`,

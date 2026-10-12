@@ -464,9 +464,15 @@ struct OverlaysPane: View {
                 Toggle(SettingsText.frameWindowRecordings, isOn: $settings.frameWindowRecordings)
 
                 if settings.frameWindowRecordings {
-                    Picker(SettingsText.windowBackgroundLabel, selection: $settings.windowBackground) {
-                        ForEach(AppSettings.WindowBackground.allCases, id: \.self) { background in
-                            Text(background.displayName).tag(background)
+                    LabeledContent(SettingsText.windowBackgroundLabel) {
+                        HStack(spacing: 8) {
+                            ForEach(AppSettings.WindowBackground.allCases, id: \.self) { background in
+                                BackgroundSwatch(
+                                    background: background,
+                                    isSelected: settings.windowBackground == background,
+                                    onSelect: { settings.windowBackground = background }
+                                )
+                            }
                         }
                     }
                 }
@@ -486,6 +492,53 @@ struct OverlaysPane: View {
                 }
             }
         }
+    }
+}
+
+/// A background shown as itself, painted from the same fill the compositor
+/// draws behind framed windows.
+private struct BackgroundSwatch: View {
+    let background: AppSettings.WindowBackground
+    let isSelected: Bool
+    let onSelect: () -> Void
+
+    var body: some View {
+        Button(action: onSelect) {
+            RoundedRectangle(cornerRadius: 5)
+                .fill(style)
+                .frame(width: 30, height: 20)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 5)
+                        .strokeBorder(Color(nsColor: .separatorColor), lineWidth: 1)
+                )
+                .padding(2)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 7)
+                        .strokeBorder(isSelected ? Color.accentColor : .clear, lineWidth: 2)
+                )
+        }
+        .buttonStyle(.plain)
+        .help(background.displayName)
+        .accessibilityLabel(background.displayName)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+
+    private var style: AnyShapeStyle {
+        switch background.fill {
+        case .solid(let color):
+            return AnyShapeStyle(Self.color(color))
+        case .linearGradient(let from, let to):
+            return AnyShapeStyle(
+                LinearGradient(
+                    colors: [Self.color(from), Self.color(to)],
+                    startPoint: .bottomLeading,
+                    endPoint: .topTrailing
+                ))
+        }
+    }
+
+    private static func color(_ color: CIColor) -> Color {
+        Color(red: color.red, green: color.green, blue: color.blue, opacity: color.alpha)
     }
 }
 
