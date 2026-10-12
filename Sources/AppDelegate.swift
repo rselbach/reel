@@ -173,7 +173,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var screenRecorder: ScreenRecorder!
     private var settingsWindow: NSWindow?
     private var recordingDialogWindow: NSWindow?
-    private var previewWindow: NSWindow?
+    /// Every open preview. A recording can finish while an earlier
+    /// preview is still open, so there can be more than one.
+    private var previewWindows: [NSWindow] = []
     private var aboutWindow: NSWindow?
     private var welcomeWindow: NSWindow?
     private var isCountdownActive = false
@@ -630,8 +632,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             settingsWindow = nil
         } else if window === recordingDialogWindow {
             recordingDialogWindow = nil
-        } else if window === previewWindow {
-            previewWindow = nil
+        } else if previewWindows.contains(where: { $0 === window }) {
+            previewWindows.removeAll { $0 === window }
         } else if window === aboutWindow {
             aboutWindow = nil
         } else if window === welcomeWindow {
@@ -794,11 +796,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     private func showPreview(for url: URL) {
+        // Each preview's buttons act on their own window, never on whichever
+        // preview opened last.
+        weak var window: NSWindow?
         let previewView = PostRecordingView(
             videoURL: url,
-            onDismiss: { [weak self] in
-                self?.previewWindow?.close()
-                self?.previewWindow = nil
+            onDismiss: {
+                window?.close()
             },
             onRevealInFinder: {
                 let revealed = NSWorkspace.shared.selectFile(url.path(), inFileViewerRootedAtPath: "")
@@ -811,16 +815,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 }
             },
             onRecordAgain: { [weak self] in
-                guard let self else { return }
-                self.previewWindow?.close()
-                self.previewWindow = nil
-                self.handleToggleRecording()
+                window?.close()
+                self?.handleToggleRecording()
             },
             onChangeTarget: { [weak self] in
-                guard let self else { return }
-                self.previewWindow?.close()
-                self.previewWindow = nil
-                self.showRecordingDialog()
+                window?.close()
+                self?.showRecordingDialog()
             },
             onDelete: { [weak self] in
                 do {
@@ -839,16 +839,17 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                     self?.screenRecorder.lastRecordedURL = nil
                 }
                 self?.rebuildMenu()
-                self?.previewWindow?.close()
-                self?.previewWindow = nil
+                window?.close()
             }
         )
 
-        previewWindow = makeWindow(
+        let previewWindow = makeWindow(
             title: AppMenuText.recordingPreviewTitle,
             styleMask: [.titled, .closable, .resizable],
             rootView: previewView
         )
+        window = previewWindow
+        previewWindows.append(previewWindow)
         presentWindow(previewWindow)
     }
 
