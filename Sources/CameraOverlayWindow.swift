@@ -82,6 +82,19 @@ enum CameraOverlayResizeLogic {
 }
 
 enum CameraOverlayLayout {
+    /// Corner radius of the rounded square, as a fraction of its side, so
+    /// the preview and the recording round it the same at any size.
+    static let cornerRadiusFraction: CGFloat = 0.16
+
+    static func cornerRadius(side: CGFloat, shape: AppSettings.CameraOverlayShape) -> CGFloat {
+        switch shape {
+        case .circle:
+            return side / 2
+        case .roundedSquare:
+            return (side * cornerRadiusFraction).rounded()
+        }
+    }
+
     static func overlaySize(sizeFraction: CGFloat, bounds: CGRect) -> CGFloat {
         guard bounds.width > 0, bounds.height > 0 else { return 0 }
         return min(bounds.width * sizeFraction, bounds.width, bounds.height)
@@ -295,7 +308,8 @@ struct CameraOverlayContent: View {
                     }
                 }
         }
-        .shadow(color: .black.opacity(0.3), radius: 8, x: 0, y: 4)
+        // No SwiftUI shadow: it filled the window's corners around the
+        // bubble, and the window's own shadow already follows the shape.
     }
 
     /// Shows a diagonal resize cursor over the corner hit regions.
@@ -341,14 +355,9 @@ private struct ResizeChrome: View {
         .allowsHitTesting(false)
     }
 
-    @ViewBuilder
     private var outline: some View {
-        switch shape {
-        case .circle:
-            Circle().stroke(Color.white.opacity(0.6), lineWidth: 1.5)
-        case .rectangle:
-            Rectangle().stroke(Color.white.opacity(0.6), lineWidth: 1.5)
-        }
+        CameraOverlayClipShape(shape: shape)
+            .stroke(Color.white.opacity(0.6), lineWidth: 1.5)
     }
 
     private var cornerDot: some View {

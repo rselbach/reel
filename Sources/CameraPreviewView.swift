@@ -145,11 +145,17 @@ private struct ShapeClipModifier: ViewModifier {
     let shape: AppSettings.CameraOverlayShape
 
     func body(content: Content) -> some View {
-        switch shape {
-        case .circle:
-            content.clipShape(Circle())
-        case .rectangle:
-            content.clipShape(Rectangle())
-        }
+        content.clipShape(CameraOverlayClipShape(shape: shape))
+    }
+}
+
+/// The camera bubble's outline at any size, rounded exactly as the
+/// recording rounds it.
+struct CameraOverlayClipShape: Shape {
+    let shape: AppSettings.CameraOverlayShape
+
+    func path(in rect: CGRect) -> Path {
+        let radius = CameraOverlayLayout.cornerRadius(side: min(rect.width, rect.height), shape: shape)
+        return RoundedRectangle(cornerRadius: radius, style: .circular).path(in: rect)
     }
 }

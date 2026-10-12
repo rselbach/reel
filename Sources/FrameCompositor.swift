@@ -23,6 +23,15 @@ enum CameraCompositeLayout {
     }
 }
 
+/// The shadow the window server draws under the camera bubble's borderless
+/// window, fitted to a screen capture. Core Image blends in linear light,
+/// which lightens a shadow, so the opacity is higher than it looks.
+enum CameraShadowLayout {
+    static let opacity: CGFloat = 0.45
+    static let blurPoints: CGFloat = 9
+    static let offsetPoints: CGFloat = 3
+}
+
 enum TextOverlayLayout {
     static let maxHeightFraction: CGFloat = 0.35
 
@@ -163,6 +172,9 @@ final class FrameCompositor: @unchecked Sendable {
         let sizeFraction: CGFloat
         let shape: AppSettings.CameraOverlayShape
         let mirrored: Bool
+        /// Output pixels per screen point, so the shadow matches the one
+        /// macOS draws under the on-screen bubble.
+        let pixelsPerPoint: CGFloat
     }
 
     /// A pointer position to mark, normalized over the content rect.
@@ -200,7 +212,12 @@ final class FrameCompositor: @unchecked Sendable {
     }
 
     private let ciContext: CIContext
-    private let circularMaskCache: NSCache<NSString, CIImage> = {
+    private let cameraMaskCache: NSCache<NSString, CIImage> = {
+        let cache = NSCache<NSString, CIImage>()
+        cache.countLimit = 4
+        return cache
+    }()
+    private let cameraShadowCache: NSCache<NSString, CIImage> = {
         let cache = NSCache<NSString, CIImage>()
         cache.countLimit = 4
         return cache
@@ -228,7 +245,8 @@ final class FrameCompositor: @unchecked Sendable {
     /// Drops cached masks and rendered text between recordings, which may use
     /// different overlay sizes and captions.
     func reset() {
-        circularMaskCache.removeAllObjects()
+        cameraMaskCache.removeAllObjects()
+        cameraShadowCache.removeAllObjects()
         textOverlayCache.removeAllObjects()
         clickHighlightCache.removeAllObjects()
         backgroundCache.removeAllObjects()
@@ -452,36 +470,15 @@ final class FrameCompositor: @unchecked Sendable {
         let scale = overlaySize / cropRect.width
         cameraImage = cameraImage.transformed(by: CGAffineTransform(scaleX: scale, y: scale))
 
-        if camera.shape == .circle {
-            let radius = overlaySize / 2
-
-            let cacheKey = "\(Int(overlaySize))"
-            let gradientOutput: CIImage
-            if let cached = circularMaskCache.object(forKey: cacheKey as NSString) {
-                gradientOutput = cached
-            } else {
-                guard let radialGradient = CIFilter(name: "CIRadialGradient") else { return nil }
-                radialGradient.setValue(CIVector(x: radius, y: radius), forKey: "inputCenter")
-                radialGradient.setValue(radius - 1, forKey: "inputRadius0")
-                radialGradient.setValue(radius, forKey: "inputRadius1")
-                radialGradient.setValue(CIColor.white, forKey: "inputColor0")
-                radialGradient.setValue(CIColor.clear, forKey: "inputColor1")
-
-                guard
-                    let cachedOutput = radialGradient.outputImage?.cropped(
-                        to: CGRect(x: 0, y: 0, width: overlaySize, height: overlaySize)
-                    )
-                else { return nil }
-                circularMaskCache.setObject(cachedOutput, forKey: cacheKey as NSString)
-                gradientOutput = cachedOutput
-            }
-
-            cameraImage = cameraImage.applyingFilter(
-                "CIBlendWithMask",
-                parameters: [
-                    kCIInputBackgroundImageKey: CIImage.empty(),
-                    kCIInputMaskImageKey: gradientOutput,
-                ])
+        guard let mask = cameraMask(side: overlaySize, shape: camera.shape) else { return nil }
+        cameraImage = cameraImage.applyingFilter(
+            "CIBlendWithMask",
+            parameters: [
+                kCIInputBackgroundImageKey: CIImage.empty(),
+                kCIInputMaskImageKey: mask,
+            ])
+        if let shadow = cameraShadow(mask: mask, side: overlaySize, shape: camera.shape, scale: camera.pixelsPerPoint) {
+            cameraImage = cameraImage.composited(over: shadow)
         }
 
         // Same normalized-position mapping the preview window uses for
@@ -494,6 +491,71 @@ final class FrameCompositor: @unchecked Sendable {
         )
 
         return cameraImage.transformed(by: CGAffineTransform(translationX: origin.x, y: origin.y))
+    }
+
+    /// The shadow macOS draws under the on-screen bubble's window, so the
+    /// recording shows the bubble the way it looked while recording.
+    private func cameraShadow(
+        mask: CIImage,
+        side: CGFloat,
+        shape: AppSettings.CameraOverlayShape,
+        scale: CGFloat
+    ) -> CIImage? {
+        guard scale > 0 else { return nil }
+        let blur = CameraShadowLayout.blurPoints * scale
+        let offset = CameraShadowLayout.offsetPoints * scale
+        let cacheKey = "\(shape.rawValue)-\(Int(side))-\(Int(blur))" as NSString
+        if let cached = cameraShadowCache.object(forKey: cacheKey) {
+            return cached
+        }
+
+        let reach = (blur * 3).rounded(.up)
+        let blackAtOpacity: [String: Any] = [
+            "inputRVector": CIVector(x: 0, y: 0, z: 0, w: 0),
+            "inputGVector": CIVector(x: 0, y: 0, z: 0, w: 0),
+            "inputBVector": CIVector(x: 0, y: 0, z: 0, w: 0),
+            "inputAVector": CIVector(x: 0, y: 0, z: 0, w: CameraShadowLayout.opacity),
+        ]
+        let shadow =
+            mask
+            .applyingFilter("CIColorMatrix", parameters: blackAtOpacity)
+            .transformed(by: CGAffineTransform(translationX: 0, y: -offset))
+            .applyingFilter("CIGaussianBlur", parameters: [kCIInputRadiusKey: blur])
+            .cropped(to: CGRect(x: 0, y: 0, width: side, height: side).insetBy(dx: -reach, dy: -reach))
+        cameraShadowCache.setObject(shadow, forKey: cacheKey)
+        return shadow
+    }
+
+    /// White where the camera bubble shows, for either shape.
+    private func cameraMask(side: CGFloat, shape: AppSettings.CameraOverlayShape) -> CIImage? {
+        let cacheKey = "\(shape.rawValue)-\(Int(side))" as NSString
+        if let cached = cameraMaskCache.object(forKey: cacheKey) {
+            return cached
+        }
+
+        let bounds = CGRect(x: 0, y: 0, width: side, height: side)
+        let mask: CIImage?
+        switch shape {
+        case .circle:
+            let radius = side / 2
+            guard let radialGradient = CIFilter(name: "CIRadialGradient") else { return nil }
+            radialGradient.setValue(CIVector(x: radius, y: radius), forKey: "inputCenter")
+            radialGradient.setValue(radius - 1, forKey: "inputRadius0")
+            radialGradient.setValue(radius, forKey: "inputRadius1")
+            radialGradient.setValue(CIColor.white, forKey: "inputColor0")
+            radialGradient.setValue(CIColor.clear, forKey: "inputColor1")
+            mask = radialGradient.outputImage?.cropped(to: bounds)
+        case .roundedSquare:
+            mask = roundedRectangle(
+                size: bounds.size,
+                cornerRadius: CameraOverlayLayout.cornerRadius(side: side, shape: shape),
+                color: .white
+            )
+        }
+
+        guard let mask else { return nil }
+        cameraMaskCache.setObject(mask, forKey: cacheKey)
+        return mask
     }
 
     /// A soft filled disc marking where the pointer was pressed. Drawn only

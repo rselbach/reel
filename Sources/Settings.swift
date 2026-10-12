@@ -597,14 +597,24 @@ class AppSettings: ObservableObject {
     }
 
     enum CameraOverlayShape: String, StoredAppSetting {
-        case rectangle
+        /// Stored as "rectangle", its name before it was called what it is.
+        case roundedSquare = "rectangle"
         case circle
 
         var displayName: String {
             switch self {
-            case .rectangle: return "Rectangle"
+            case .roundedSquare: return "Rounded Square"
             case .circle: return "Circle"
             }
+        }
+
+        /// Older builds stored the label, which read "Rectangle".
+        static func fromStored(_ stored: String?) -> CameraOverlayShape? {
+            guard let stored else { return nil }
+            if stored == "Rectangle" {
+                return .roundedSquare
+            }
+            return Self(rawValue: stored) ?? allCases.first { $0.displayName == stored }
         }
     }
 

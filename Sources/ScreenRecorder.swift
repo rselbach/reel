@@ -282,6 +282,8 @@ private struct FrameWriter {
     let highlightClicks: Bool
     /// Non-nil when the captured window is drawn inset on a background.
     let windowFrame: FrameCompositor.WindowFrame?
+    /// Output pixels per screen point of the captured content.
+    let pixelsPerPoint: CGFloat
     var hasWriteFailure = false
     var pauses = PauseTimeline()
     /// Output time of the last frame written. ScreenCaptureKit stamps frames
@@ -769,6 +771,9 @@ class ScreenRecorder: NSObject, ObservableObject {
         let filter: SCContentFilter
         var captureWidth: Int
         var captureHeight: Int
+        // Width of what is captured in screen points, to size effects that
+        // copy on-screen ones, such as the camera bubble's shadow.
+        let capturePointWidth: CGFloat
 
         switch recordingMode {
         case .display:
@@ -784,6 +789,7 @@ class ScreenRecorder: NSObject, ObservableObject {
                 for: display, maxHeight: options.resolutionMaxHeight, codec: options.videoCodec)
             captureWidth = dimensions.width
             captureHeight = dimensions.height
+            capturePointWidth = CGFloat(display.width)
 
         case .window:
             guard let window = selectedWindow else {
@@ -794,6 +800,7 @@ class ScreenRecorder: NSObject, ObservableObject {
                 for: window, maxHeight: options.resolutionMaxHeight, codec: options.videoCodec)
             captureWidth = dimensions.width
             captureHeight = dimensions.height
+            capturePointWidth = window.frame.width
 
         case .region:
             guard let region = selectedRegion,
@@ -814,6 +821,7 @@ class ScreenRecorder: NSObject, ObservableObject {
             )
             captureWidth = dimensions.width
             captureHeight = dimensions.height
+            capturePointWidth = region.rect.width
         }
 
         guard captureWidth > 0, captureHeight > 0 else {
@@ -833,6 +841,8 @@ class ScreenRecorder: NSObject, ObservableObject {
             captureWidth = dimensions.width
             captureHeight = dimensions.height
         }
+
+        let pixelsPerPoint = capturePointWidth > 0 ? CGFloat(captureWidth) / capturePointWidth : 1
 
         // Framing draws the window inset on a larger canvas, so the file is
         // bigger than the capture. The stream still captures at capture size.
@@ -912,7 +922,8 @@ class ScreenRecorder: NSObject, ObservableObject {
                 height: outputHeight,
                 options: options,
                 estimatedBitrate: estimatedBitrate,
-                windowFrame: windowFrame
+                windowFrame: windowFrame,
+                pixelsPerPoint: pixelsPerPoint
             )
             let initialCursorState = currentCursorState()
             withFrameLock {
@@ -1176,7 +1187,8 @@ class ScreenRecorder: NSObject, ObservableObject {
         height: Int,
         options: RecordingOptions,
         estimatedBitrate: Int,
-        windowFrame: FrameCompositor.WindowFrame?
+        windowFrame: FrameCompositor.WindowFrame?,
+        pixelsPerPoint: CGFloat
     ) throws {
         let outputURL = try makeOutputURL(options: options)
         let assetWriter = try AVAssetWriter(outputURL: outputURL, fileType: .mp4)
@@ -1215,7 +1227,8 @@ class ScreenRecorder: NSObject, ObservableObject {
             assetWriter: assetWriter,
             bufferPool: bufferPool,
             options: options,
-            windowFrame: windowFrame
+            windowFrame: windowFrame,
+            pixelsPerPoint: pixelsPerPoint
         )
 
         self.outputURL = outputURL
@@ -1367,7 +1380,8 @@ class ScreenRecorder: NSObject, ObservableObject {
         assetWriter: AVAssetWriter,
         bufferPool: CVPixelBufferPool?,
         options: RecordingOptions,
-        windowFrame: FrameCompositor.WindowFrame?
+        windowFrame: FrameCompositor.WindowFrame?,
+        pixelsPerPoint: CGFloat
     ) {
         let initialPos = options.cameraPosition.normalizedCoordinates
         withFrameLock {
@@ -1387,7 +1401,8 @@ class ScreenRecorder: NSObject, ObservableObject {
                 mirrorCamera: options.mirrorCamera,
                 textOverlay: options.textOverlay,
                 highlightClicks: options.highlightClicks,
-                windowFrame: windowFrame
+                windowFrame: windowFrame,
+                pixelsPerPoint: pixelsPerPoint
             )
         }
     }
@@ -2118,7 +2133,8 @@ extension ScreenRecorder: SCStreamOutput {
                     y: cameraY,
                     sizeFraction: cameraSizeFraction,
                     shape: snapshot.cameraShape,
-                    mirrored: snapshot.mirrorCamera
+                    mirrored: snapshot.mirrorCamera,
+                    pixelsPerPoint: snapshot.pixelsPerPoint
                 )
             }
             if cameraOverlay != nil || snapshot.textOverlay != nil || click != nil || snapshot.windowFrame != nil {
