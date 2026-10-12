@@ -1562,6 +1562,18 @@ final class AppSettingsTests: XCTestCase {
         )
     }
 
+    func testPreviewsCascadeInsteadOfStacking() {
+        let visible = CGRect(x: 0, y: 0, width: 1440, height: 900)
+        let centered = CGRect(x: 330, y: 100, width: 780, height: 700)
+
+        XCTAssertEqual(
+            PreviewPlacement.cascadedFrame(centered, after: centered, within: visible),
+            CGRect(x: 354, y: 76, width: 780, height: 700)
+        )
+        let nearBottom = CGRect(x: 330, y: 10, width: 780, height: 700)
+        XCTAssertEqual(PreviewPlacement.cascadedFrame(centered, after: nearBottom, within: visible), centered)
+    }
+
     func testStatusItemGivesAPausedTakeItsOwnSymbol() {
         XCTAssertEqual(StatusItemState(isRecording: false, isPaused: false), .idle)
         XCTAssertEqual(StatusItemState(isRecording: false, isPaused: true), .idle)

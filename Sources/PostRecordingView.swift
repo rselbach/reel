@@ -162,8 +162,19 @@ enum PostRecordingLogic {
     }
 }
 
+/// Lets the Edit menu's Undo and Redo reach a preview's timeline, whose
+/// history lives in SwiftUI state. The preview fills in the closures.
+@MainActor
+final class PreviewUndoCommands {
+    var canUndo: () -> Bool = { false }
+    var canRedo: () -> Bool = { false }
+    var undo: () -> Void = {}
+    var redo: () -> Void = {}
+}
+
 struct PostRecordingView: View {
     let videoURL: URL
+    let undoCommands: PreviewUndoCommands
     let onDismiss: () -> Void
     let onRevealInFinder: () -> Void
     let onRecordAgain: () -> Void
@@ -336,6 +347,7 @@ struct PostRecordingView: View {
         }
         .onAppear {
             setupPlayer()
+            connectUndoCommands()
         }
         .onChange(of: edit) { previousEdit, changedEdit in
             lastExportURL = nil
@@ -382,7 +394,7 @@ struct PostRecordingView: View {
             }
             .keyboardShortcut("z", modifiers: .command)
             .help(PostRecordingText.undoHelp)
-            .disabled(!history.canUndo || isExporting)
+            .disabled(!canUndo)
 
             Button(action: redoEdit) {
                 Label(PostRecordingText.redo, systemImage: "arrow.uturn.forward")
@@ -390,7 +402,7 @@ struct PostRecordingView: View {
             }
             .keyboardShortcut("z", modifiers: [.command, .shift])
             .help(PostRecordingText.redoHelp)
-            .disabled(!history.canRedo || isExporting)
+            .disabled(!canRedo)
         }
     }
 
@@ -750,6 +762,21 @@ struct PostRecordingView: View {
     private func redoEdit() {
         guard let edit, let next = history.redo(from: edit) else { return }
         showRestoredEdit(next)
+    }
+
+    private var canUndo: Bool {
+        history.canUndo && !isExporting
+    }
+
+    private var canRedo: Bool {
+        history.canRedo && !isExporting
+    }
+
+    private func connectUndoCommands() {
+        undoCommands.canUndo = { canUndo }
+        undoCommands.canRedo = { canRedo }
+        undoCommands.undo = undoEdit
+        undoCommands.redo = redoEdit
     }
 
     private func showRestoredEdit(_ restored: TimelineEdit) {

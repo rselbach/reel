@@ -53,6 +53,9 @@ enum AppMenuText {
 }
 
 enum MainMenuText {
+    static let hideReel = "Hide Reel"
+    static let hideOthers = "Hide Others"
+    static let showAll = "Show All"
     static let edit = "Edit"
     static let undo = "Undo"
     static let redo = "Redo"
@@ -61,7 +64,53 @@ enum MainMenuText {
     static let paste = "Paste"
     static let selectAll = "Select All"
     static let window = "Window"
+    static let minimize = "Minimize"
+    static let zoom = "Zoom"
+    static let bringAllToFront = "Bring All to Front"
     static let close = "Close"
+}
+
+enum PreviewPlacement {
+    static let cascadeOffset: CGFloat = 24
+
+    /// Places a new preview down and to the right of the last one, so a
+    /// second preview never lands exactly on top of the first. Keeps the
+    /// frame it was given when the step would leave the screen.
+    static func cascadedFrame(_ frame: CGRect, after previous: CGRect, within visibleFrame: CGRect) -> CGRect {
+        let cascaded = CGRect(
+            x: previous.minX + cascadeOffset,
+            y: previous.maxY - cascadeOffset - frame.height,
+            width: frame.width,
+            height: frame.height
+        )
+        return visibleFrame.contains(cascaded) ? cascaded : frame
+    }
+}
+
+/// A preview's window. The Edit menu's Undo and Redo travel the responder
+/// chain to the window, which answers them from the preview's own history
+/// instead of from its empty undo manager.
+final class PreviewWindow: NSWindow {
+    var undoCommands = PreviewUndoCommands()
+
+    @objc func undo(_ sender: Any?) {
+        undoCommands.undo()
+    }
+
+    @objc func redo(_ sender: Any?) {
+        undoCommands.redo()
+    }
+
+    override func validateMenuItem(_ menuItem: NSMenuItem) -> Bool {
+        switch menuItem.action {
+        case #selector(undo(_:)):
+            return undoCommands.canUndo()
+        case #selector(redo(_:)):
+            return undoCommands.canRedo()
+        default:
+            return super.validateMenuItem(menuItem)
+        }
+    }
 }
 
 enum StatusItemClickLogic {
@@ -379,6 +428,19 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         appMenu.addItem(.separator())
         appMenu.addItem(withTitle: AppMenuText.settings, action: #selector(openPreferences), keyEquivalent: ",")
         appMenu.addItem(.separator())
+        appMenu.addItem(withTitle: MainMenuText.hideReel, action: #selector(NSApplication.hide(_:)), keyEquivalent: "h")
+        let hideOthers = appMenu.addItem(
+            withTitle: MainMenuText.hideOthers,
+            action: #selector(NSApplication.hideOtherApplications(_:)),
+            keyEquivalent: "h"
+        )
+        hideOthers.keyEquivalentModifierMask = [.command, .option]
+        appMenu.addItem(
+            withTitle: MainMenuText.showAll,
+            action: #selector(NSApplication.unhideAllApplications(_:)),
+            keyEquivalent: ""
+        )
+        appMenu.addItem(.separator())
         appMenu.addItem(
             withTitle: AppMenuText.quitReel, action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
 
@@ -395,7 +457,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
         let windowMenu = NSMenu(title: MainMenuText.window)
         windowMenu.addItem(
+            withTitle: MainMenuText.minimize, action: #selector(NSWindow.performMiniaturize(_:)), keyEquivalent: "m")
+        windowMenu.addItem(withTitle: MainMenuText.zoom, action: #selector(NSWindow.performZoom(_:)), keyEquivalent: "")
+        windowMenu.addItem(
             withTitle: MainMenuText.close, action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
+        windowMenu.addItem(.separator())
+        windowMenu.addItem(
+            withTitle: MainMenuText.bringAllToFront,
+            action: #selector(NSApplication.arrangeInFront(_:)),
+            keyEquivalent: ""
+        )
 
         let mainMenu = NSMenu()
         for submenu in [appMenu, editMenu, windowMenu] {
@@ -404,6 +475,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             mainMenu.addItem(item)
         }
         NSApp.mainMenu = mainMenu
+        // AppKit lists Reel's open windows at the end of this menu.
+        NSApp.windowsMenu = windowMenu
     }
 
     private func showWelcome() {
@@ -741,13 +814,22 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         styleMask: NSWindow.StyleMask,
         contentViewController: NSViewController
     ) -> NSWindow {
-        let window = NSWindow(contentViewController: contentViewController)
+        configure(NSWindow(contentViewController: contentViewController), title: title, styleMask: styleMask)
+    }
+
+    private func configure<Window: NSWindow>(_ window: Window, title: String, styleMask: NSWindow.StyleMask) -> Window {
         window.title = title
         window.styleMask = styleMask
         window.center()
         window.isReleasedWhenClosed = false
         window.delegate = self
         return window
+    }
+
+    /// Reel's own windows. While any is open, Reel shows in the Dock and
+    /// Command-Tab like any app, so a window behind others can be found.
+    private var openWindows: [NSWindow] {
+        [settingsWindow, recordingDialogWindow, aboutWindow, welcomeWindow].compactMap { $0 } + previewWindows
     }
 
     /// The close button and Command-W reach previews here; Done and the other
@@ -775,12 +857,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             welcomeWindow = nil
             AppSettings.shared.hasShownWelcome = true
         }
+
+        if openWindows.isEmpty {
+            NSApp.setActivationPolicy(.accessory)
+        }
     }
 
     private func presentWindow(_ window: NSWindow?) {
         guard let window else { return }
 
-        NSApp.setActivationPolicy(.accessory)
+        NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
         window.orderFrontRegardless()
         window.makeKeyAndOrderFront(nil)
@@ -950,8 +1036,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         // Each preview's buttons act on their own window, never on whichever
         // preview opened last.
         weak var window: NSWindow?
+        let undoCommands = PreviewUndoCommands()
         let previewView = PostRecordingView(
             videoURL: url,
+            undoCommands: undoCommands,
             onDismiss: { [weak self] in
                 self?.closePreview(window)
             },
@@ -1000,11 +1088,18 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             }
         )
 
-        let previewWindow = makeWindow(
+        let previewWindow = configure(
+            PreviewWindow(contentViewController: NSHostingController(rootView: previewView)),
             title: AppMenuText.recordingPreviewTitle,
-            styleMask: [.titled, .closable, .resizable],
-            rootView: previewView
+            styleMask: [.titled, .closable, .miniaturizable, .resizable]
         )
+        previewWindow.undoCommands = undoCommands
+        if let previous = previewWindows.last, let visibleFrame = previous.screen?.visibleFrame {
+            previewWindow.setFrame(
+                PreviewPlacement.cascadedFrame(previewWindow.frame, after: previous.frame, within: visibleFrame),
+                display: false
+            )
+        }
         window = previewWindow
         previewWindows.append(previewWindow)
         presentWindow(previewWindow)
@@ -1367,7 +1462,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if settingsWindow == nil {
             settingsWindow = makeWindow(
                 title: AppMenuText.settingsWindowTitle,
-                styleMask: [.titled, .closable],
+                styleMask: [.titled, .closable, .miniaturizable],
                 contentViewController: SettingsPane.makeTabViewController()
             )
         }
