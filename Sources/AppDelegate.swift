@@ -19,6 +19,8 @@ enum AppMenuText {
     static let pauseRecording = "Pause Recording"
     static let resumeRecording = "Resume Recording"
     static let recordingPaused = "❚❚ Paused"
+    static let recordingToolTip = "Reel — click to stop recording"
+    static let pausedToolTip = "Reel — paused, click to stop recording"
     static let discardConfirmationTitle = "Discard this recording?"
     static let discardConfirmationMessage = "The take will be moved to the Trash."
     static let discard = "Discard"
@@ -152,6 +154,38 @@ enum QuickRecordTitle {
             let width = Int(regionOutputSize.width.rounded())
             let height = Int(regionOutputSize.height.rounded())
             return "\(prefix)Area (\(width) × \(height) px)"
+        }
+    }
+}
+
+/// What the status item shows. A paused take gets its own symbol and color,
+/// so a forgotten pause does not pass for a live recording.
+enum StatusItemState: Equatable {
+    case idle
+    case recording
+    case paused
+
+    init(isRecording: Bool, isPaused: Bool) {
+        switch (isRecording, isPaused) {
+        case (false, _): self = .idle
+        case (true, false): self = .recording
+        case (true, true): self = .paused
+        }
+    }
+
+    var symbolName: String {
+        switch self {
+        case .idle: return "record.circle"
+        case .recording: return "record.circle.fill"
+        case .paused: return "pause.circle.fill"
+        }
+    }
+
+    var tint: NSColor? {
+        switch self {
+        case .idle: return nil
+        case .recording: return .red
+        case .paused: return .systemOrange
         }
     }
 }
@@ -299,11 +333,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
 
         if let button = statusItem.button {
-            button.image = NSImage(systemSymbolName: "record.circle", accessibilityDescription: "Reel")
+            button.imagePosition = .imageLeft
             button.target = self
             button.action = #selector(statusItemClicked)
             button.sendAction(on: [.leftMouseUp, .rightMouseUp])
         }
+        applyStatusItemAppearance()
 
         AppSettings.shared.checkLaunchAtLoginStatus()
         setupHotkey()
@@ -315,6 +350,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         ) { [weak self] _ in
             Task { @MainActor in
                 self?.rebuildMenu()
+                self?.applyStatusItemAppearance()
             }
         }
 
@@ -323,6 +359,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 await screenRecorder.requestPermission()
                 screenRecorder.restoreRememberedTarget()
                 rebuildMenu()
+                applyStatusItemAppearance()
             }
         } else {
             // First launch: explain the menu bar icon and ask for the screen
@@ -807,8 +844,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         screenRecorder.togglePause()
     }
 
-    /// Freezes the elapsed readout and marks the status item while paused, so
-    /// a forgotten pause is visible rather than looking like a live recording.
+    /// Freezes the elapsed readout while paused, so it reflects what is in
+    /// the file.
     private func updatePauseState(_ isPaused: Bool) {
         if isPaused {
             pausedAt = Date()
@@ -817,7 +854,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             self.pausedAt = nil
         }
 
-        statusItem.button?.contentTintColor = isPaused ? .systemGray : .red
+        applyStatusItemAppearance()
         updateElapsedTitle()
         rebuildMenu()
     }
@@ -1327,17 +1364,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             hideCaptureBounds()
         }
 
-        if let button = statusItem.button {
-            let symbolName = isRecording ? "record.circle.fill" : "record.circle"
-            button.image = NSImage(systemSymbolName: symbolName, accessibilityDescription: "Reel")
-            button.contentTintColor = isRecording ? .red : nil
-            button.imagePosition = .imageLeft
-            button.toolTip =
-                isRecording
-                ? "Reel — click to stop recording"
-                : quickRecordTitle.map { "Reel — \($0) (\(AppSettings.shared.recordingHotkey.displayString))" }
-                    ?? "Reel"
-        }
+        applyStatusItemAppearance()
 
         if isRecording {
             startRecordingTimer()
@@ -1345,6 +1372,29 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             stopRecordingTimer()
         }
         rebuildMenu()
+    }
+
+    private func applyStatusItemAppearance() {
+        guard let button = statusItem.button else { return }
+        let state = StatusItemState(isRecording: screenRecorder.isRecording, isPaused: screenRecorder.isPaused)
+        var image = NSImage(systemSymbolName: state.symbolName, accessibilityDescription: "Reel")
+        // The menu bar draws template images in its own color and ignores
+        // contentTintColor, so a colored state needs a non-template image.
+        if let tint = state.tint, let colored = image?.withSymbolConfiguration(.init(paletteColors: [.white, tint])) {
+            colored.isTemplate = false
+            image = colored
+        }
+        button.image = image
+        switch state {
+        case .idle:
+            button.toolTip =
+                quickRecordTitle.map { "Reel — \($0) (\(AppSettings.shared.recordingHotkey.displayString))" }
+                ?? "Reel"
+        case .recording:
+            button.toolTip = AppMenuText.recordingToolTip
+        case .paused:
+            button.toolTip = AppMenuText.pausedToolTip
+        }
     }
 
     /// Shows elapsed time next to the status icon while recording, so the

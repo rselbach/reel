@@ -1437,6 +1437,23 @@ final class AppSettingsTests: XCTestCase {
         )
     }
 
+    func testStatusItemGivesAPausedTakeItsOwnSymbol() {
+        XCTAssertEqual(StatusItemState(isRecording: false, isPaused: false), .idle)
+        XCTAssertEqual(StatusItemState(isRecording: false, isPaused: true), .idle)
+        XCTAssertEqual(StatusItemState(isRecording: true, isPaused: false), .recording)
+        XCTAssertEqual(StatusItemState(isRecording: true, isPaused: true), .paused)
+
+        let states: [StatusItemState] = [.idle, .recording, .paused]
+        XCTAssertEqual(Set(states.map(\.symbolName)).count, states.count)
+        for state in states {
+            XCTAssertNotNil(
+                NSImage(systemSymbolName: state.symbolName, accessibilityDescription: nil),
+                state.symbolName
+            )
+        }
+        XCTAssertNotEqual(StatusItemState.paused.tint, StatusItemState.recording.tint)
+    }
+
     func testMenuShortcutShowsTheGlobalCombination() throws {
         let toggle = try XCTUnwrap(MenuShortcut(.default))
         XCTAssertEqual(toggle.key, "r")
