@@ -762,6 +762,9 @@ class AppSettings: ObservableObject {
         }
     }
 
+    /// Named for what each level produces. The encoder targets a quality
+    /// rather than a bitrate, so file size follows the frame size and how
+    /// much changes on screen.
     enum VideoQuality: String, StoredAppSetting {
         case low
         case medium
@@ -770,20 +773,51 @@ class AppSettings: ObservableObject {
 
         var displayName: String {
             switch self {
-            case .low: return "Low (5 Mbps)"
-            case .medium: return "Medium (10 Mbps)"
-            case .high: return "High (20 Mbps)"
-            case .maximum: return "Maximum (50 Mbps)"
+            case .low: return "Smaller file"
+            case .medium: return "Balanced"
+            case .high: return "High"
+            case .maximum: return "Best"
             }
         }
 
-        var bitrate: Int {
+        /// AVVideoQualityKey value. Balanced matches what the old fixed
+        /// 10 Mbps produced on a Retina display.
+        var encoderQuality: Double {
             switch self {
-            case .low: return 5_000_000
-            case .medium: return 10_000_000
-            case .high: return 20_000_000
-            case .maximum: return 50_000_000
+            case .low: return 0.5
+            case .medium: return 0.75
+            case .high: return 0.85
+            case .maximum: return 0.95
             }
+        }
+
+        /// About twice what scrolling text needs at this quality, so disk
+        /// space checks err toward stopping early.
+        private var estimatedBitsPerPixel: Double {
+            switch self {
+            case .low: return 0.08
+            case .medium: return 0.12
+            case .high: return 0.17
+            case .maximum: return 0.3
+            }
+        }
+
+        /// A generous bitrate estimate for planning disk space, and the
+        /// bitrate given to an encoder that cannot target a quality.
+        func estimatedBitrate(width: Int, height: Int, frameRate: Int) -> Int {
+            Int((Double(max(0, width) * max(0, height) * max(0, frameRate)) * estimatedBitsPerPixel).rounded())
+        }
+
+        /// Older builds stored labels that named a fixed bitrate.
+        static func fromStored(_ stored: String?) -> VideoQuality? {
+            guard let stored else { return nil }
+            let legacyLabels: [String: VideoQuality] = [
+                "Low (5 Mbps)": .low,
+                "Medium (10 Mbps)": .medium,
+                "High (20 Mbps)": .high,
+                "Maximum (50 Mbps)": .maximum,
+            ]
+            return Self(rawValue: stored) ?? legacyLabels[stored] ?? allCases.first { $0.displayName == stored }
         }
     }
 

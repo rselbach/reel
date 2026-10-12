@@ -134,7 +134,7 @@ final class AppSettingsTests: XCTestCase {
 
         XCTAssertEqual(options.frameRate, settings.frameRate)
         XCTAssertEqual(options.showCursor, settings.showCursor)
-        XCTAssertEqual(options.videoBitrate, settings.videoQuality.bitrate)
+        XCTAssertEqual(options.videoQuality, settings.videoQuality)
         XCTAssertEqual(options.outputDirectory, settings.outputDirectory)
         XCTAssertEqual(options.askWhereToSave, settings.askWhereToSave)
         XCTAssertEqual(options.recordAudio, settings.recordAudio)
@@ -161,7 +161,7 @@ final class AppSettingsTests: XCTestCase {
         settings.videoQuality = .maximum
         settings.showCursor = false
 
-        XCTAssertEqual(options.videoBitrate, AppSettings.VideoQuality.low.bitrate)
+        XCTAssertEqual(options.videoQuality, .low)
         XCTAssertTrue(options.showCursor)
     }
 
@@ -181,8 +181,8 @@ final class AppSettingsTests: XCTestCase {
 
     @MainActor
     func testDiskSpaceRequirementScalesWithBitrate() {
-        let medium = AppSettings.VideoQuality.medium.bitrate
-        let maximum = AppSettings.VideoQuality.maximum.bitrate
+        let medium = 10_000_000
+        let maximum = 50_000_000
 
         XCTAssertEqual(RecordingDiskSpace.bytesPerSecond(bitrate: medium), 1_375_000)
         XCTAssertGreaterThan(
@@ -197,7 +197,7 @@ final class AppSettingsTests: XCTestCase {
 
     @MainActor
     func testDiskSpaceShortfallOnlyReportedBelowTheFloor() {
-        let bitrate = AppSettings.VideoQuality.medium.bitrate
+        let bitrate = 10_000_000
         let required = RecordingDiskSpace.requiredBytes(bitrate: bitrate)
         let directory = URL(fileURLWithPath: "/Users/troy/Movies", isDirectory: true)
 
@@ -228,7 +228,7 @@ final class AppSettingsTests: XCTestCase {
 
     @MainActor
     func testDiskSpaceRecordableSecondsHandlesEmptyVolume() {
-        let bitrate = AppSettings.VideoQuality.high.bitrate
+        let bitrate = 20_000_000
         XCTAssertEqual(
             RecordingDiskSpace.recordableSeconds(availableBytes: 0, bitrate: bitrate),
             0
@@ -249,7 +249,7 @@ final class AppSettingsTests: XCTestCase {
 
     @MainActor
     func testLowSpaceStopTriggersBeforeTheWriterRunsOut() {
-        let bitrate = AppSettings.VideoQuality.medium.bitrate
+        let bitrate = 10_000_000
         let perSecond = RecordingDiskSpace.bytesPerSecond(bitrate: bitrate)
 
         XCTAssertFalse(
@@ -928,11 +928,37 @@ final class AppSettingsTests: XCTestCase {
     }
 
     @MainActor
-    func testVideoQualityBitrates() {
-        XCTAssertEqual(AppSettings.VideoQuality.low.bitrate, 5_000_000)
-        XCTAssertEqual(AppSettings.VideoQuality.medium.bitrate, 10_000_000)
-        XCTAssertEqual(AppSettings.VideoQuality.high.bitrate, 20_000_000)
-        XCTAssertEqual(AppSettings.VideoQuality.maximum.bitrate, 50_000_000)
+    func testVideoQualityIsNamedByOutcomeAndScalesWithTheFrame() {
+        let levels = AppSettings.VideoQuality.allCases
+        XCTAssertEqual(levels.map(\.displayName), ["Smaller file", "Balanced", "High", "Best"])
+        XCTAssertEqual(levels.map(\.encoderQuality), levels.map(\.encoderQuality).sorted())
+
+        let balanced = AppSettings.VideoQuality.medium
+        let at1080p = balanced.estimatedBitrate(width: 1920, height: 1080, frameRate: 30)
+        XCTAssertEqual(balanced.estimatedBitrate(width: 3840, height: 2160, frameRate: 30), at1080p * 4)
+        XCTAssertEqual(balanced.estimatedBitrate(width: 1920, height: 1080, frameRate: 60), at1080p * 2)
+        XCTAssertLessThan(
+            AppSettings.VideoQuality.low.estimatedBitrate(width: 1920, height: 1080, frameRate: 30),
+            at1080p
+        )
+        XCTAssertEqual(balanced.estimatedBitrate(width: 0, height: 1080, frameRate: 30), 0)
+    }
+
+    func testVideoEncoderSettingsTargetQualityWithABitrateFallback() throws {
+        let targeted = VideoEncoderSettings.output(
+            width: 1920, height: 1080, codec: .h264, quality: .high, estimatedBitrate: 9_000_000, targetsQuality: true)
+        let targetedCompression = try XCTUnwrap(targeted[AVVideoCompressionPropertiesKey] as? [String: Any])
+        XCTAssertEqual(targetedCompression[AVVideoQualityKey] as? Double, AppSettings.VideoQuality.high.encoderQuality)
+        XCTAssertNil(targetedCompression[AVVideoAverageBitRateKey])
+        XCTAssertEqual(targetedCompression[AVVideoProfileLevelKey] as? String, AVVideoProfileLevelH264HighAutoLevel)
+
+        let fallback = VideoEncoderSettings.output(
+            width: 1920, height: 1080, codec: .hevc, quality: .high, estimatedBitrate: 9_000_000, targetsQuality: false)
+        let fallbackCompression = try XCTUnwrap(fallback[AVVideoCompressionPropertiesKey] as? [String: Any])
+        XCTAssertEqual(fallbackCompression[AVVideoAverageBitRateKey] as? Int, 9_000_000)
+        XCTAssertNil(fallbackCompression[AVVideoQualityKey])
+        XCTAssertNil(fallbackCompression[AVVideoProfileLevelKey])
+        XCTAssertEqual(fallback[AVVideoWidthKey] as? Int, 1920)
     }
 
     @MainActor
@@ -949,6 +975,8 @@ final class AppSettingsTests: XCTestCase {
     func testStoredSettingDecodingAcceptsStableKeysAndLegacyLabels() {
         XCTAssertEqual(AppSettings.VideoQuality.fromStored("medium"), .medium)
         XCTAssertEqual(AppSettings.VideoQuality.fromStored("Medium (10 Mbps)"), .medium)
+        XCTAssertEqual(AppSettings.VideoQuality.fromStored("Low (5 Mbps)"), .low)
+        XCTAssertEqual(AppSettings.VideoQuality.fromStored("Best"), .maximum)
         XCTAssertNil(AppSettings.VideoQuality.fromStored("bogus"))
         XCTAssertNil(AppSettings.VideoQuality.fromStored(nil))
 

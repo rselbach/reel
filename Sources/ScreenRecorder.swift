@@ -155,6 +155,34 @@ struct RecordingOverrides: Equatable {
     var isEmpty: Bool { self == .none }
 }
 
+/// Output settings for the screen track. Quality-targeted encoding lets the
+/// file follow how much changes on screen; an encoder that rejects it gets
+/// the estimated bitrate instead.
+enum VideoEncoderSettings {
+    static func output(
+        width: Int,
+        height: Int,
+        codec: AppSettings.VideoCodec,
+        quality: AppSettings.VideoQuality,
+        estimatedBitrate: Int,
+        targetsQuality: Bool
+    ) -> [String: Any] {
+        var compression: [String: Any] =
+            targetsQuality
+            ? [AVVideoQualityKey: quality.encoderQuality]
+            : [AVVideoAverageBitRateKey: estimatedBitrate]
+        if let profileLevel = codec.profileLevel {
+            compression[AVVideoProfileLevelKey] = profileLevel
+        }
+        return [
+            AVVideoCodecKey: codec.avCodec,
+            AVVideoWidthKey: width,
+            AVVideoHeightKey: height,
+            AVVideoCompressionPropertiesKey: compression,
+        ]
+    }
+}
+
 /// What the app needs to put in front of the user to pick a destination.
 struct SaveDestinationRequest {
     let suggestedName: String
@@ -172,7 +200,7 @@ struct TextOverlay {
 struct RecordingOptions {
     var frameRate: Int
     var showCursor: Bool
-    var videoBitrate: Int
+    var videoQuality: AppSettings.VideoQuality
     /// Output height cap in pixels, or nil to keep the captured size.
     var resolutionMaxHeight: CGFloat?
     var videoCodec: AppSettings.VideoCodec
@@ -207,7 +235,7 @@ struct RecordingOptions {
     init(settings: AppSettings, overrides: RecordingOverrides = .none) {
         frameRate = settings.frameRate
         showCursor = settings.showCursor
-        videoBitrate = settings.videoQuality.bitrate
+        videoQuality = settings.videoQuality
         resolutionMaxHeight = settings.videoResolution.maxHeight
         videoCodec = settings.videoCodec
         highlightClicks = settings.highlightClicks
@@ -442,6 +470,8 @@ class ScreenRecorder: NSObject, ObservableObject {
     private var outputURL: URL?
     /// Settings snapshot for the recording currently in flight.
     private var activeOptions: RecordingOptions?
+    /// Bitrate estimate for the recording in flight, for the low-space stop.
+    private var activeBitrateEstimate: Int?
     private var lowSpaceTimer: Timer?
     private var cursorTimer: Timer?
     private let captureSessionQueue = DispatchQueue(label: "com.rselbach.reel.capture")
@@ -790,12 +820,6 @@ class ScreenRecorder: NSObject, ObservableObject {
             return failStart("Invalid recording dimensions")
         }
 
-        // A writer that fails mid-recording cannot be finalized, so a full
-        // disk destroys the whole take. Refuse up front instead.
-        if let shortfall = diskSpaceShortfall(options: options) {
-            return failStart(shortfall)
-        }
-
         if recordingMode == .window, options.frameWindowRecordings {
             var framedMaxSize = options.videoCodec.maxDimensions
             if let maxHeight = options.resolutionMaxHeight {
@@ -820,6 +844,18 @@ class ScreenRecorder: NSObject, ObservableObject {
         )
         let outputWidth = windowFrame.map { Int($0.canvasSize.width) } ?? captureWidth
         let outputHeight = windowFrame.map { Int($0.canvasSize.height) } ?? captureHeight
+        let estimatedBitrate = options.videoQuality.estimatedBitrate(
+            width: outputWidth,
+            height: outputHeight,
+            frameRate: options.frameRate
+        )
+
+        // A writer that fails mid-recording cannot be finalized, so a full
+        // disk destroys the whole take. Refuse up front instead.
+        if let shortfall = diskSpaceShortfall(in: options.outputDirectory, bitrate: estimatedBitrate) {
+            return failStart(shortfall)
+        }
+        activeBitrateEstimate = estimatedBitrate
 
         do {
             let config = SCStreamConfiguration()
@@ -875,6 +911,7 @@ class ScreenRecorder: NSObject, ObservableObject {
                 width: outputWidth,
                 height: outputHeight,
                 options: options,
+                estimatedBitrate: estimatedBitrate,
                 windowFrame: windowFrame
             )
             let initialCursorState = currentCursorState()
@@ -1138,14 +1175,17 @@ class ScreenRecorder: NSObject, ObservableObject {
         width: Int,
         height: Int,
         options: RecordingOptions,
+        estimatedBitrate: Int,
         windowFrame: FrameCompositor.WindowFrame?
     ) throws {
         let outputURL = try makeOutputURL(options: options)
         let assetWriter = try AVAssetWriter(outputURL: outputURL, fileType: .mp4)
         let videoInput = makeVideoInput(
+            assetWriter: assetWriter,
             width: width,
             height: height,
-            bitrate: options.videoBitrate,
+            quality: options.videoQuality,
+            estimatedBitrate: estimatedBitrate,
             codec: options.videoCodec
         )
 
@@ -1193,12 +1233,11 @@ class ScreenRecorder: NSObject, ObservableObject {
         }
     }
 
-    private func diskSpaceShortfall(options: RecordingOptions) -> String? {
-        let directory = options.outputDirectory
+    private func diskSpaceShortfall(in directory: URL, bitrate: Int) -> String? {
         guard let available = RecordingFileStore.availableCapacity(at: directory) else { return nil }
         return RecordingDiskSpace.shortfallMessage(
             availableBytes: available,
-            bitrate: options.videoBitrate,
+            bitrate: bitrate,
             directory: directory
         )
     }
@@ -1225,22 +1264,29 @@ class ScreenRecorder: NSObject, ObservableObject {
     }
 
     private func makeVideoInput(
+        assetWriter: AVAssetWriter,
         width: Int,
         height: Int,
-        bitrate: Int,
+        quality: AppSettings.VideoQuality,
+        estimatedBitrate: Int,
         codec: AppSettings.VideoCodec
     ) -> AVAssetWriterInput {
-        var compression: [String: Any] = [AVVideoAverageBitRateKey: bitrate]
-        if let profileLevel = codec.profileLevel {
-            compression[AVVideoProfileLevelKey] = profileLevel
+        func settings(targetsQuality: Bool) -> [String: Any] {
+            VideoEncoderSettings.output(
+                width: width,
+                height: height,
+                codec: codec,
+                quality: quality,
+                estimatedBitrate: estimatedBitrate,
+                targetsQuality: targetsQuality
+            )
         }
 
-        let videoSettings: [String: Any] = [
-            AVVideoCodecKey: codec.avCodec,
-            AVVideoWidthKey: width,
-            AVVideoHeightKey: height,
-            AVVideoCompressionPropertiesKey: compression,
-        ]
+        var videoSettings = settings(targetsQuality: true)
+        if !assetWriter.canApply(outputSettings: videoSettings, forMediaType: .video) {
+            logger.info("Encoder cannot target a quality; using \(estimatedBitrate) bps instead")
+            videoSettings = settings(targetsQuality: false)
+        }
 
         let input = AVAssetWriterInput(mediaType: .video, outputSettings: videoSettings)
         input.expectsMediaDataInRealTime = true
@@ -1608,6 +1654,7 @@ class ScreenRecorder: NSObject, ObservableObject {
         stream = nil
         outputURL = nil
         activeOptions = nil
+        activeBitrateEstimate = nil
         assetWriter = nil
         videoInput = nil
         audioInput = nil
@@ -1770,14 +1817,14 @@ class ScreenRecorder: NSObject, ObservableObject {
     }
 
     private func stopIfSpaceCriticallyLow() async {
-        guard isRecording, !isStopping else { return }
+        guard isRecording, !isStopping, let bitrate = activeBitrateEstimate else { return }
 
         let options = activeOptions ?? RecordingOptions(settings: settings)
         let directory = outputURL?.deletingLastPathComponent() ?? options.outputDirectory
         guard let available = RecordingFileStore.availableCapacity(at: directory),
             RecordingDiskSpace.isCriticallyLow(
                 availableBytes: available,
-                bitrate: options.videoBitrate
+                bitrate: bitrate
             )
         else {
             return

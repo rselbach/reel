@@ -43,7 +43,8 @@ Preconditions:
   `Choose...` only for the fixed choice. Restore the original value.
 - **Video tab.** Click `Video`. Require `Countdown`, `Show cursor in
   recording`, and `Highlight clicks` under `Capture`, and `Resolution`, `Frame
-  rate`, `Codec`, and `Video quality` under `Format`. Capture `settings-video`.
+  rate`, `Codec`, and `Video quality` under `Format`, with quality choices
+  `Smaller file`, `Balanced`, `High`, and `Best`. Capture `settings-video`.
 - **Overlays tab.** Click `Overlays`. Turn on window framing and require
   `Background` with swatch buttons `Charcoal`, `Slate`, `Linen`, `Dusk
   (gradient)`, and `Mist (gradient)`. Click `Dusk (gradient)`, require it to be

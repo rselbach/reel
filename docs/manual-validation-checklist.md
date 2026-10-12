@@ -595,7 +595,7 @@ Notes:
 
 User story: As a user, I want Reel to refuse to start a recording it cannot store so a full disk does not destroy the take.
 
-Expected behavior: Before allocating any capture resources, startRecording reads the output volume's available capacity for important usage and compares it against two minutes of recording at the configured video quality bitrate. Below that floor the recording is refused with a message naming the free space, the approximate recordable duration, and the two ways out. When the volume cannot be queried the recording proceeds.
+Expected behavior: Before allocating any capture resources, startRecording reads the output volume's available capacity for important usage and compares it against two minutes of recording at the video quality's estimated bitrate for the output size and frame rate, a deliberate overestimate of what the quality-targeted encoder writes. Below that floor the recording is refused with a message naming the free space, the approximate recordable duration, and the two ways out. When the volume cannot be queried the recording proceeds.
 
 Manual steps:
 
@@ -614,7 +614,7 @@ Notes:
 
 User story: As a user recording a long demo, I want Reel to end the take while the file can still be saved rather than losing everything when the disk fills.
 
-Expected behavior: While recording, a timer re-checks the destination volume every ten seconds. Once free space falls below thirty seconds of capture at the configured bitrate, the recording ends through the shared automatic-stop path: the stream is stopped, captured frames are finalized into a playable file, and the message explains the disk was almost full and how much space was left. Recordings that had captured no frames yet are discarded instead. The monitor is torn down on every recording teardown path.
+Expected behavior: While recording, a timer re-checks the destination volume every ten seconds. Once free space falls below thirty seconds of capture at the recording's estimated bitrate, the recording ends through the shared automatic-stop path: the stream is stopped, captured frames are finalized into a playable file, and the message explains the disk was almost full and how much space was left. Recordings that had captured no frames yet are discarded instead. The monitor is torn down on every recording teardown path.
 
 Manual steps:
 

@@ -25,6 +25,7 @@ enum SettingsText {
     static let windowBackgroundLabel = "Background"
     static let frameRate = "Frame rate"
     static let videoQuality = "Video quality"
+    static let videoQualityFooter = "File size grows with the frame size and with how much changes on screen."
     static let videoResolution = "Resolution"
     static let videoCodec = "Codec"
     static let countdown = "Countdown"
@@ -292,7 +293,7 @@ struct VideoPane: View {
                 Toggle(SettingsText.highlightClicks, isOn: $settings.highlightClicks)
             }
 
-            Section(SettingsText.format) {
+            Section {
                 Picker(SettingsText.videoResolution, selection: $settings.videoResolution) {
                     ForEach(AppSettings.VideoResolution.allCases, id: \.self) { resolution in
                         Text(resolution.displayName).tag(resolution)
@@ -316,6 +317,10 @@ struct VideoPane: View {
                         Text(quality.displayName).tag(quality)
                     }
                 }
+            } header: {
+                Text(SettingsText.format)
+            } footer: {
+                CaptionText(SettingsText.videoQualityFooter)
             }
         }
     }
