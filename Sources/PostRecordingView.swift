@@ -52,7 +52,6 @@ enum PostRecordingText {
     static let trimStart = "Trim start"
     static let trimEnd = "Trim end"
     static let trimHandleHelp = "Drag to trim. Trimmed footage stays on the timeline so you can restore it."
-    static let sourceTimeline = "Source timeline"
     static let clearSelection = "Clear Selection"
     static let splitClipAtPlayhead = "Split Clip at Playhead"
     static let deleteClip = "Delete Clip"

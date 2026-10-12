@@ -271,16 +271,6 @@ struct PostRecordingTimelineView: View {
                 }
             }
             .frame(height: timelineContentHeight + 14)
-
-            HStack {
-                Text(PostRecordingTimelineMath.formattedTime(0))
-                Spacer()
-                Text("Source \(PostRecordingTimelineMath.formattedTime(currentSourceTime))")
-                Spacer()
-                Text(PostRecordingTimelineMath.formattedTime(edit.sourceDuration))
-            }
-            .font(.caption.monospacedDigit())
-            .foregroundStyle(.secondary)
         }
         .alert(PostRecordingText.editClipFailedTitle, isPresented: $showsEditError) {
             Button("OK") {}
@@ -351,13 +341,19 @@ struct PostRecordingTimelineView: View {
 
     private var selectionDescription: String {
         if case .zoomScene(let id) = selection, let scene = edit.zoomScene(id: id) {
-            return "Selected \(scene.settings.level.label) zoom scene, source \(formattedRange(scene.span))."
+            return
+                "\(scene.settings.level.label) zoom, \(formattedLength(scene.span)). Drag the circle in the video to aim it."
         }
         guard case .clip(let id) = selection, let clip = edit.clip(id: id) else {
             return PostRecordingText.timelineHelp
         }
-        let prefix = clip.isDeleted ? "Deleted clip" : "Selected clip"
-        return "\(prefix) source \(formattedRange(clip.span))."
+        if clip.isDeleted {
+            return "Deleted clip, \(formattedLength(clip.span)). Restore it to keep it."
+        }
+        guard edit.canDeleteClip(id: id) else {
+            return "Clip, \(formattedLength(clip.span))."
+        }
+        return "Clip, \(formattedLength(clip.span)). Press Delete to remove it."
     }
 
     @ViewBuilder
@@ -407,7 +403,7 @@ struct PostRecordingTimelineView: View {
                     }
             )
             .accessibilityElement()
-            .accessibilityLabel(PostRecordingText.sourceTimeline)
+            .accessibilityLabel(PostRecordingText.timeline)
             .accessibilityValue(selectionDescription)
             .accessibilityHint(PostRecordingText.timelineHelp)
             .accessibilityAction(named: Text(PostRecordingText.splitClipAtPlayhead)) {
@@ -534,7 +530,7 @@ struct PostRecordingTimelineView: View {
         .accessibilityElement(children: .contain)
         .accessibilityLabel(PostRecordingText.zoomScene)
         .accessibilityValue(
-            "\(scene.settings.level.accessibilityLabel), source \(formattedRange(span))"
+            "\(scene.settings.level.accessibilityLabel), \(formattedLength(span))"
         )
         .accessibilityHint("Select to adjust zoom and focal point. Drag either edge to resize.")
         .accessibilityFocused($focusedZoomSceneID, equals: scene.id)
@@ -606,11 +602,7 @@ struct PostRecordingTimelineView: View {
         .gesture(zoomResizeGesture(scene: scene, edge: edge, width: width))
         .accessibilityElement()
         .accessibilityLabel(edge == .leading ? "Zoom start" : "Zoom end")
-        .accessibilityValue(
-            PostRecordingTimelineMath.formattedTime(
-                edge == .leading ? span.start : span.end
-            )
-        )
+        .accessibilityValue(formattedEditedTime(edge == .leading ? span.start : span.end))
         .accessibilityHint("Drag horizontally to resize the zoom scene.")
         .accessibilityAdjustableAction { direction in
             adjustZoomEdge(scene: scene, edge: edge, direction: direction)
@@ -871,7 +863,7 @@ struct PostRecordingTimelineView: View {
         .allowsHitTesting(false)
         .accessibilityElement()
         .accessibilityLabel(clip.isDeleted ? PostRecordingText.deletedClip : PostRecordingText.clip)
-        .accessibilityValue("Source \(formattedRange(clip.span))")
+        .accessibilityValue(formattedLength(clip.span))
         .accessibilityHint(PostRecordingText.clipHint)
         .accessibilityFocused($focusedClipID, equals: clip.id)
         .accessibilityAction {
@@ -1010,7 +1002,7 @@ struct PostRecordingTimelineView: View {
         .gesture(playheadGesture(width: timelineWidth))
         .accessibilityElement()
         .accessibilityLabel(PostRecordingText.playhead)
-        .accessibilityValue("Source \(PostRecordingTimelineMath.formattedTime(currentSourceTime))")
+        .accessibilityValue(formattedEditedTime(currentSourceTime))
         .accessibilityHint(PostRecordingText.playheadHint)
         .accessibilityAdjustableAction { direction in
             onSeek(currentSourceTime + adjustment(for: direction, amount: 1))
@@ -1128,8 +1120,16 @@ struct PostRecordingTimelineView: View {
         )
     }
 
-    private func formattedRange(_ span: TimelineSpan) -> String {
-        "\(PostRecordingTimelineMath.formattedTime(span.start)) to \(PostRecordingTimelineMath.formattedTime(span.end))"
+    /// Times read as the preview's clock does, in the edited recording, so
+    /// the timeline never shows a second clock in source time.
+    private func formattedEditedTime(_ sourceTime: Double) -> String {
+        PostRecordingTimelineMath.formattedTime(
+            PostRecordingTimelineMath.editedTime(forSourceTime: sourceTime, edit: edit)
+        )
+    }
+
+    private func formattedLength(_ span: TimelineSpan) -> String {
+        "\(PostRecordingTimelineMath.formattedTime(span.duration)) long"
     }
 }
 
