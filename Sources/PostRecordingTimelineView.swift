@@ -121,6 +121,14 @@ private enum ZoomResizeEdge: Equatable {
     case trailing
 }
 
+/// A trim handle being dragged. The timeline shows `draft` until the drag
+/// ends, so the whole drag becomes a single edit.
+private struct TrimDrag {
+    let edge: TrimEdge
+    let original: TimelineEdit
+    var draft: TimelineEdit
+}
+
 private struct ZoomResizeState {
     let sceneID: ZoomScene.ID
     let edge: ZoomResizeEdge
@@ -185,9 +193,13 @@ struct PostRecordingTimelineView: View {
     let currentSourceTime: Double
     @Binding var selection: TimelineSelection
     let onSeek: (Double) -> Void
+    /// Shows a source frame without moving it to kept footage, so a trim
+    /// handle can show the frame it is moving over. Nil ends the scrub.
+    let onScrub: (Double?) -> Void
     let onSelectZoomScene: (ZoomScene.ID) -> Void
 
     @State private var playheadDragOrigin: Double?
+    @State private var trimDrag: TrimDrag?
     @State private var zoomDraftStart: Double?
     @State private var zoomDraftSpan: TimelineSpan?
     @State private var zoomResizeState: ZoomResizeState?
@@ -197,7 +209,8 @@ struct PostRecordingTimelineView: View {
     @AccessibilityFocusState private var focusedClipID: TimelineClip.ID?
     @AccessibilityFocusState private var focusedZoomSceneID: ZoomScene.ID?
 
-    private let timelineGutter: CGFloat = 8
+    private let timelineGutter: CGFloat = 14
+    private let trimHandleWidth: CGFloat = 12
     private let zoomLaneHeight: CGFloat = 30
     private let laneSpacing: CGFloat = 6
     private let filmstripHeight: CGFloat = 104
@@ -226,7 +239,7 @@ struct PostRecordingTimelineView: View {
                     .offset(x: timelineGutter, y: zoomLaneHeight + laneSpacing)
                     .accessibilityHidden(true)
 
-                    ForEach(edit.clips) { clip in
+                    ForEach(displayedEdit.clips) { clip in
                         clipSegment(
                             clip,
                             timelineWidth: timelineWidth,
@@ -238,7 +251,17 @@ struct PostRecordingTimelineView: View {
                     timelineGestureTarget(width: timelineWidth)
                         .offset(x: timelineGutter, y: zoomLaneHeight + laneSpacing)
 
+                    keptFrame(timelineWidth: timelineWidth, gutter: timelineGutter)
+                        .offset(y: zoomLaneHeight + laneSpacing)
+
                     playhead(timelineWidth: timelineWidth, gutter: timelineGutter)
+
+                    // Above the playhead, which starts on the start handle;
+                    // the playhead stays reachable by its knob.
+                    trimHandle(.start, timelineWidth: timelineWidth, gutter: timelineGutter)
+                        .offset(y: zoomLaneHeight + laneSpacing)
+                    trimHandle(.end, timelineWidth: timelineWidth, gutter: timelineGutter)
+                        .offset(y: zoomLaneHeight + laneSpacing)
                 }
                 .contextMenu {
                     timelineContextMenu
@@ -849,6 +872,106 @@ struct PostRecordingTimelineView: View {
         }
     }
 
+    /// The edit as shown, including a trim still being dragged.
+    private var displayedEdit: TimelineEdit {
+        trimDrag?.draft ?? edit
+    }
+
+    private func keptEdge(_ edge: TrimEdge, of edit: TimelineEdit) -> Double {
+        switch edge {
+        case .start:
+            return edit.firstKeptTime ?? 0
+        case .end:
+            return edit.lastKeptTime ?? edit.sourceDuration
+        }
+    }
+
+    /// Outlines the kept recording from the start handle to the end handle.
+    private func keptFrame(timelineWidth: CGFloat, gutter: CGFloat) -> some View {
+        let start = position(keptEdge(.start, of: displayedEdit), in: timelineWidth)
+        let end = position(keptEdge(.end, of: displayedEdit), in: timelineWidth)
+        return VStack(spacing: 0) {
+            Rectangle().frame(height: 3)
+            Spacer(minLength: 0)
+            Rectangle().frame(height: 3)
+        }
+        .foregroundStyle(Color.yellow)
+        .frame(width: max(0, end - start), height: filmstripHeight)
+        .offset(x: gutter + start)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+    }
+
+    private func trimHandle(_ edge: TrimEdge, timelineWidth: CGFloat, gutter: CGFloat) -> some View {
+        let x = gutter + position(keptEdge(edge, of: displayedEdit), in: timelineWidth)
+        let trimmed =
+            edge == .start
+            ? keptEdge(.start, of: edit)
+            : edit.sourceDuration - keptEdge(.end, of: edit)
+        let radius: CGFloat = 5
+
+        return UnevenRoundedRectangle(
+            topLeadingRadius: edge == .start ? radius : 0,
+            bottomLeadingRadius: edge == .start ? radius : 0,
+            bottomTrailingRadius: edge == .end ? radius : 0,
+            topTrailingRadius: edge == .end ? radius : 0
+        )
+        .fill(Color.yellow)
+        .overlay {
+            Image(systemName: edge == .start ? "chevron.compact.left" : "chevron.compact.right")
+                .font(.system(size: 13, weight: .heavy))
+                .foregroundStyle(.black.opacity(0.65))
+        }
+        .frame(width: trimHandleWidth, height: filmstripHeight)
+        .contentShape(Rectangle())
+        .offset(x: edge == .start ? x - trimHandleWidth : x)
+        .gesture(trimGesture(edge, width: timelineWidth))
+        .help(PostRecordingText.trimHandleHelp)
+        .accessibilityElement()
+        .accessibilityLabel(edge == .start ? PostRecordingText.trimStart : PostRecordingText.trimEnd)
+        .accessibilityValue("\(PostRecordingTimelineMath.formattedTime(trimmed)) trimmed")
+        .accessibilityHint(PostRecordingText.trimHandleHelp)
+        .accessibilityAdjustableAction { direction in
+            let inward = edge == .start ? 0.1 : -0.1
+            trim(edge, to: keptEdge(edge, of: edit) + adjustment(for: direction, amount: inward))
+        }
+    }
+
+    private func trimGesture(_ edge: TrimEdge, width: CGFloat) -> some Gesture {
+        DragGesture(minimumDistance: 0)
+            .onChanged { value in
+                let original = trimDrag?.original ?? edit
+                var draft = original
+                draft.trim(
+                    edge,
+                    to: PostRecordingTimelineMath.translatedSourceTime(
+                        origin: keptEdge(edge, of: original),
+                        translation: value.translation.width,
+                        duration: original.sourceDuration,
+                        width: width
+                    )
+                )
+                trimDrag = TrimDrag(edge: edge, original: original, draft: draft)
+                onScrub(keptEdge(edge, of: draft))
+            }
+            .onEnded { _ in
+                guard let trimDrag else { return }
+                self.trimDrag = nil
+                onScrub(nil)
+                if trimDrag.draft != edit {
+                    edit = trimDrag.draft
+                    selection = selection.validated(for: edit)
+                }
+                onSeek(keptEdge(edge, of: edit))
+            }
+    }
+
+    private func trim(_ edge: TrimEdge, to time: Double) {
+        edit.trim(edge, to: time)
+        selection = selection.validated(for: edit)
+        onSeek(keptEdge(edge, of: edit))
+    }
+
     private func playhead(timelineWidth: CGFloat, gutter: CGFloat) -> some View {
         VStack(spacing: 0) {
             Circle()
@@ -1074,8 +1197,14 @@ private struct TimelineClipHatch: Shape {
         let spacing: CGFloat = 14
         var x = rect.minX - rect.height
         while x < rect.maxX {
-            path.move(to: CGPoint(x: x, y: rect.maxY))
-            path.addLine(to: CGPoint(x: x + rect.height, y: rect.minY))
+            // Each 45-degree line is cut to the clip's width, so it never
+            // stripes the kept footage beside a deleted clip.
+            let start = max(0, rect.minX - x)
+            let end = min(rect.height, rect.maxX - x)
+            if start < end {
+                path.move(to: CGPoint(x: x + start, y: rect.maxY - start))
+                path.addLine(to: CGPoint(x: x + end, y: rect.maxY - end))
+            }
             x += spacing
         }
         return path

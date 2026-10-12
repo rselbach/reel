@@ -105,6 +105,126 @@ final class PostRecordingTimelineTests: XCTestCase {
         XCTAssertEqual(edit.editedDuration, 5)
     }
 
+    func testTrimmingAnEndDeletesFootageBeyondItAndGivesItBackWhenMovedOut() throws {
+        let initialID = UUID()
+        let trimmedID = UUID()
+        var edit = try XCTUnwrap(TimelineEdit(sourceDuration: 10, initialClipID: initialID))
+
+        edit.trim(.start, to: 2, trimmedClipID: trimmedID)
+        XCTAssertEqual(edit.clips.map(\.id), [trimmedID, initialID])
+        XCTAssertEqual(edit.deletedClips.map(\.span), [TimelineSpan(start: 0, end: 2)])
+        XCTAssertEqual(edit.keptRanges, [TimelineSpan(start: 2, end: 10)])
+        XCTAssertTrue(edit.hasMeaningfulChanges)
+
+        edit.trim(.start, to: 1)
+        XCTAssertEqual(edit.clips.map(\.id), [trimmedID, initialID])
+        XCTAssertEqual(edit.keptRanges, [TimelineSpan(start: 1, end: 10)])
+
+        edit.trim(.end, to: 7, trimmedClipID: trimmedID)
+        XCTAssertEqual(edit.keptRanges, [TimelineSpan(start: 1, end: 7)])
+        XCTAssertEqual(edit.clips.last?.span, TimelineSpan(start: 7, end: 10))
+
+        edit.trim(.start, to: 0)
+        edit.trim(.end, to: 10)
+        XCTAssertEqual(edit.clips.map(\.id), [initialID])
+        XCTAssertEqual(edit.keptRanges, [TimelineSpan(start: 0, end: 10)])
+        XCTAssertFalse(edit.hasMeaningfulChanges)
+    }
+
+    func testTrimmingThroughSplitsKeepsLaterClipsAndTakesWholeDeletedClips() throws {
+        let initialID = UUID()
+        var edit = try XCTUnwrap(TimelineEdit(sourceDuration: 10, initialClipID: initialID))
+        let secondID = try XCTUnwrap(edit.splitClip(at: 2))
+        let deletedID = try XCTUnwrap(edit.splitClip(at: 4))
+        let lastID = try XCTUnwrap(edit.splitClip(at: 6))
+        XCTAssertTrue(edit.deleteClip(id: deletedID))
+
+        var throughSecond = edit
+        throughSecond.trim(.start, to: 3)
+        XCTAssertEqual(throughSecond.clips.dropFirst().map(\.id), [secondID, deletedID, lastID])
+        XCTAssertEqual(
+            throughSecond.keptRanges,
+            [TimelineSpan(start: 3, end: 4), TimelineSpan(start: 6, end: 10)]
+        )
+
+        var intoDeleted = edit
+        intoDeleted.trim(.start, to: 5)
+        XCTAssertEqual(
+            intoDeleted.clips.map(\.span),
+            [TimelineSpan(start: 0, end: 6), TimelineSpan(start: 6, end: 10)]
+        )
+        XCTAssertEqual(intoDeleted.clips.last?.id, lastID)
+
+        var fromTheEnd = edit
+        fromTheEnd.trim(.end, to: 5)
+        XCTAssertEqual(fromTheEnd.clips.map(\.id).prefix(2), [initialID, secondID])
+        XCTAssertEqual(fromTheEnd.keptRanges, [TimelineSpan(start: 0, end: 4)])
+        XCTAssertEqual(fromTheEnd.deletedClips.map(\.span), [TimelineSpan(start: 4, end: 10)])
+    }
+
+    func testTrimsKeepTheMinimumDurationAndIgnoreInvalidTimes() throws {
+        var edit = try XCTUnwrap(TimelineEdit(sourceDuration: 10))
+
+        edit.trim(.start, to: 4)
+        XCTAssertEqual(edit.trimLimit(for: .end), 4.5, accuracy: 0.0001)
+        edit.trim(.end, to: 1)
+        XCTAssertEqual(edit.keptRanges, [TimelineSpan(start: 4, end: 4.5)])
+        XCTAssertEqual(edit.trimLimit(for: .start), 4, accuracy: 0.0001)
+
+        var lateStart = try XCTUnwrap(TimelineEdit(sourceDuration: 10))
+        lateStart.trim(.start, to: 20)
+        XCTAssertEqual(lateStart.editedDuration, TimelineEdit.minimumDuration, accuracy: 0.0001)
+
+        let unchanged = lateStart
+        for tc in [Double.nan, .infinity, -.infinity] {
+            lateStart.trim(.start, to: tc)
+            lateStart.trim(.end, to: tc)
+        }
+        XCTAssertEqual(lateStart, unchanged)
+    }
+
+    func testTrimsSnapToClipEdgesInsteadOfLeavingSlivers() throws {
+        let initialID = UUID()
+        var edit = try XCTUnwrap(TimelineEdit(sourceDuration: 10, initialClipID: initialID))
+        let secondID = try XCTUnwrap(edit.splitClip(at: 2))
+
+        for tc in [1.97, 2.02] {
+            var trimmed = edit
+            trimmed.trim(.start, to: tc)
+            XCTAssertEqual(trimmed.keptRanges, [TimelineSpan(start: 2, end: 10)], "time \(tc)")
+            XCTAssertEqual(trimmed.clips.last?.id, secondID, "time \(tc)")
+        }
+
+        var nearZero = edit
+        nearZero.trim(.start, to: 0.03)
+        XCTAssertEqual(nearZero, edit)
+
+        var nearEnd = edit
+        nearEnd.trim(.end, to: 9.98)
+        XCTAssertEqual(nearEnd, edit)
+    }
+
+    func testTrimOnlyMergesDeletedClipsWhenTheKeptFootageChanges() throws {
+        let initialID = UUID()
+        var edit = try XCTUnwrap(TimelineEdit(sourceDuration: 10, initialClipID: initialID))
+        let secondID = try XCTUnwrap(edit.splitClip(at: 2))
+        XCTAssertNotNil(edit.splitClip(at: 4))
+        XCTAssertTrue(edit.deleteClip(id: initialID))
+        XCTAssertTrue(edit.deleteClip(id: secondID))
+
+        var untouched = edit
+        untouched.trim(.start, to: 4)
+        XCTAssertEqual(untouched, edit)
+
+        edit.trim(.start, to: 3)
+        XCTAssertEqual(edit.clips.first?.id, initialID)
+        XCTAssertEqual(edit.clips.first?.span, TimelineSpan(start: 0, end: 3))
+        XCTAssertEqual(edit.keptRanges, [TimelineSpan(start: 3, end: 10)])
+
+        edit.restoreClip(id: initialID)
+        XCTAssertEqual(edit.keptRanges, [TimelineSpan(start: 0, end: 10)])
+    }
+
     func testMappingsCrossDeletedClipBoundaries() throws {
         let initialID = UUID()
         var edit = try XCTUnwrap(TimelineEdit(sourceDuration: 10, initialClipID: initialID))

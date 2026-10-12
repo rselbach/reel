@@ -7,6 +7,11 @@ struct TimelineSpan: Equatable, Sendable {
     var duration: Double { end - start }
 }
 
+enum TrimEdge: Equatable, Sendable {
+    case start
+    case end
+}
+
 struct TimelineClip: Identifiable, Equatable, Sendable {
     let id: UUID
     let span: TimelineSpan
@@ -342,6 +347,139 @@ struct TimelineEdit: Equatable, Sendable {
     mutating func restoreClip(id: TimelineClip.ID) {
         guard let index = clips.firstIndex(where: { $0.id == id }) else { return }
         clips[index].isDeleted = false
+    }
+
+    /// How far a trim can move each end: the start no later, and the end no
+    /// earlier, than leaves the minimum duration kept.
+    func trimLimit(for edge: TrimEdge) -> Double {
+        let minimum = min(Self.minimumDuration, sourceDuration)
+        switch edge {
+        case .start:
+            return sourceTime(forEditedTime: max(0, editedDuration - minimum)) ?? 0
+        case .end:
+            return sourceTime(forEditedTime: min(minimum, editedDuration)) ?? sourceDuration
+        }
+    }
+
+    /// Moves one end of the kept recording to `time`. Everything beyond it
+    /// becomes a single deleted clip at that end, so a trim shows, restores,
+    /// and exports like any other deleted clip. Moving an end back out
+    /// returns footage to the nearest kept clip.
+    mutating func trim(_ edge: TrimEdge, to time: Double, trimmedClipID: UUID = UUID()) {
+        guard time.isFinite else { return }
+        let trimmedClips: [TimelineClip]?
+        switch edge {
+        case .start:
+            trimmedClips = clipsTrimmingStart(to: time, trimmedClipID: trimmedClipID)
+        case .end:
+            trimmedClips = clipsTrimmingEnd(to: time, trimmedClipID: trimmedClipID)
+        }
+        guard let trimmedClips else { return }
+
+        // Leave the clips alone when the kept footage does not change, rather
+        // than merging deleted clips at that end for nothing.
+        let previousClips = clips
+        let previousRanges = keptRanges
+        clips = trimmedClips
+        if keptRanges == previousRanges {
+            clips = previousClips
+        }
+    }
+
+    private func clipsTrimmingStart(to time: Double, trimmedClipID: UUID) -> [TimelineClip]? {
+        guard let firstKeptIndex = clips.firstIndex(where: { !$0.isDeleted }) else { return nil }
+        var cut = min(max(0, time), trimLimit(for: .start))
+        var remaining = Array(clips[firstKeptIndex...])
+
+        if cut <= remaining[0].span.start {
+            if cut < Self.minimumClipDuration {
+                cut = 0
+            }
+            remaining[0] = TimelineClip(
+                id: remaining[0].id,
+                span: TimelineSpan(start: cut, end: remaining[0].span.end),
+                isDeleted: false
+            )
+        } else {
+            remaining.removeAll { $0.span.end <= cut }
+            if let clip = remaining.first, !clip.isDeleted, clip.span.start < cut {
+                // Never leave a sliver too short to split on either side of
+                // the cut; move the cut to the clip's edge instead.
+                if cut - clip.span.start < Self.minimumClipDuration {
+                    cut = clip.span.start
+                } else if clip.span.end - cut < Self.minimumClipDuration,
+                    Self.keptDuration(of: remaining.dropFirst()) >= min(Self.minimumDuration, sourceDuration)
+                {
+                    cut = clip.span.end
+                    remaining.removeFirst()
+                } else {
+                    remaining[0] = TimelineClip(
+                        id: clip.id,
+                        span: TimelineSpan(start: cut, end: clip.span.end),
+                        isDeleted: false
+                    )
+                }
+            }
+            // A cut inside deleted footage takes all of it.
+            while let clip = remaining.first, clip.isDeleted {
+                cut = clip.span.end
+                remaining.removeFirst()
+            }
+        }
+        guard !remaining.isEmpty else { return nil }
+
+        guard cut > 0 else { return remaining }
+        let id = clips[0].isDeleted ? clips[0].id : trimmedClipID
+        return [TimelineClip(id: id, span: TimelineSpan(start: 0, end: cut), isDeleted: true)] + remaining
+    }
+
+    private func clipsTrimmingEnd(to time: Double, trimmedClipID: UUID) -> [TimelineClip]? {
+        guard let lastKeptIndex = clips.lastIndex(where: { !$0.isDeleted }) else { return nil }
+        var cut = max(min(sourceDuration, time), trimLimit(for: .end))
+        var remaining = Array(clips[...lastKeptIndex])
+        let lastIndex = remaining.count - 1
+
+        if cut >= remaining[lastIndex].span.end {
+            if sourceDuration - cut < Self.minimumClipDuration {
+                cut = sourceDuration
+            }
+            remaining[lastIndex] = TimelineClip(
+                id: remaining[lastIndex].id,
+                span: TimelineSpan(start: remaining[lastIndex].span.start, end: cut),
+                isDeleted: false
+            )
+        } else {
+            remaining.removeAll { $0.span.start >= cut }
+            if let clip = remaining.last, !clip.isDeleted, clip.span.end > cut {
+                if clip.span.end - cut < Self.minimumClipDuration {
+                    cut = clip.span.end
+                } else if cut - clip.span.start < Self.minimumClipDuration,
+                    Self.keptDuration(of: remaining.dropLast()) >= min(Self.minimumDuration, sourceDuration)
+                {
+                    cut = clip.span.start
+                    remaining.removeLast()
+                } else {
+                    remaining[remaining.count - 1] = TimelineClip(
+                        id: clip.id,
+                        span: TimelineSpan(start: clip.span.start, end: cut),
+                        isDeleted: false
+                    )
+                }
+            }
+            while let clip = remaining.last, clip.isDeleted {
+                cut = clip.span.start
+                remaining.removeLast()
+            }
+        }
+        guard !remaining.isEmpty else { return nil }
+
+        guard cut < sourceDuration, let lastClip = clips.last else { return remaining }
+        let id = lastClip.isDeleted ? lastClip.id : trimmedClipID
+        return remaining + [TimelineClip(id: id, span: TimelineSpan(start: cut, end: sourceDuration), isDeleted: true)]
+    }
+
+    private static func keptDuration(of clips: some Sequence<TimelineClip>) -> Double {
+        clips.filter { !$0.isDeleted }.reduce(0) { $0 + $1.span.duration }
     }
 
     func playableSourceTime(atOrAfter time: Double) -> Double? {

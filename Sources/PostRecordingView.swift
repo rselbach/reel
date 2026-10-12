@@ -46,7 +46,11 @@ enum PostRecordingText {
     static let delete = "Move to Trash"
     static let saveEdited = "Save Edited..."
     static let timeline = "Timeline"
-    static let timelineHelp = "Drag the playhead to seek. Right-click the timeline to split at the playhead."
+    static let timelineHelp =
+        "Drag the yellow handles to trim the ends. Right-click the timeline to split at the playhead."
+    static let trimStart = "Trim start"
+    static let trimEnd = "Trim end"
+    static let trimHandleHelp = "Drag to trim. Trimmed footage stays on the timeline so you can restore it."
     static let sourceTimeline = "Source timeline"
     static let clearSelection = "Clear Selection"
     static let splitClipAtPlayhead = "Split Clip at Playhead"
@@ -172,6 +176,9 @@ struct PostRecordingView: View {
     @State private var exportedVideo: ExportedVideo?
     @State private var currentTime: Double = 0
     @State private var playbackIntent: PlaybackIntent = .paused
+    /// While a trim handle shows frames from footage that may be deleted,
+    /// playback must not move the playhead back onto kept footage.
+    @State private var isScrubbing = false
     @State private var timelineSelection: TimelineSelection = .none
     @State private var isExporting = false
     @State private var exportTask: Task<Void, Never>?
@@ -225,6 +232,7 @@ struct PostRecordingView: View {
                     currentSourceTime: currentTime,
                     selection: $timelineSelection,
                     onSeek: seekPlayer,
+                    onScrub: scrub,
                     onSelectZoomScene: selectZoomScene
                 )
                 .padding(.horizontal)
@@ -495,7 +503,7 @@ struct PostRecordingView: View {
         timeObserver = newPlayer.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak newPlayer] time in
             guard newPlayer != nil else { return }
             Task { @MainActor [self] in
-                guard !isCleanedUp else { return }
+                guard !isCleanedUp, !isScrubbing else { return }
                 let seconds = CMTimeGetSeconds(time)
                 guard seconds.isFinite, let edit else { return }
                 guard seconds < edit.sourceDuration else {
@@ -600,6 +608,23 @@ struct PostRecordingView: View {
         currentTime = playableTime
         player?.seek(
             to: CMTime(seconds: playableTime, preferredTimescale: 600),
+            toleranceBefore: .zero,
+            toleranceAfter: .zero
+        )
+    }
+
+    private func scrub(to time: Double?) {
+        guard let time else {
+            isScrubbing = false
+            return
+        }
+        if !isScrubbing {
+            pausePlayback()
+            isScrubbing = true
+        }
+        currentTime = time
+        player?.seek(
+            to: CMTime(seconds: time, preferredTimescale: 600),
             toleranceBefore: .zero,
             toleranceAfter: .zero
         )
