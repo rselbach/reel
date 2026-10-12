@@ -626,35 +626,50 @@ final class AppSettingsTests: XCTestCase {
         )
     }
 
-    func testAudioWaitsForVideoToCommitTheResumeOffset() {
-        XCTAssertTrue(
-            RecordingTimeline.canAppendAudio(
-                captureStopped: false,
-                paused: false,
-                sessionStarted: true,
-                awaitingResumeFrame: false
-            ))
-        XCTAssertFalse(
-            RecordingTimeline.canAppendAudio(
-                captureStopped: false,
-                paused: true,
-                sessionStarted: true,
-                awaitingResumeFrame: false
-            ))
-        XCTAssertFalse(
-            RecordingTimeline.canAppendAudio(
-                captureStopped: false,
-                paused: false,
-                sessionStarted: true,
-                awaitingResumeFrame: true
-            ))
-        XCTAssertFalse(
-            RecordingTimeline.canAppendAudio(
-                captureStopped: true,
-                paused: false,
-                sessionStarted: true,
-                awaitingResumeFrame: false
-            ))
+    func testPauseTimelineCutsThePauseEvenWhenNoFramesArriveDuringIt() {
+        var pauses = PauseTimeline()
+        XCTAssertEqual(pauses.outputTime(forCaptureTime: seconds(5)), seconds(5))
+
+        // A still screen delivers no frames between these presses.
+        pauses.pause(at: seconds(10))
+        pauses.resume(at: seconds(20))
+
+        XCTAssertEqual(pauses.outputTime(forCaptureTime: seconds(20)), seconds(10))
+        XCTAssertEqual(pauses.outputTime(forCaptureTime: seconds(30)), seconds(20))
+    }
+
+    func testPauseTimelineDropsSamplesCapturedWhilePaused() {
+        var pauses = PauseTimeline()
+        pauses.pause(at: seconds(10))
+
+        XCTAssertEqual(pauses.outputTime(forCaptureTime: seconds(9)), seconds(9))
+        XCTAssertNil(pauses.outputTime(forCaptureTime: seconds(10)))
+        XCTAssertNil(pauses.outputTime(forCaptureTime: seconds(15)))
+
+        pauses.resume(at: seconds(20))
+
+        XCTAssertNil(pauses.outputTime(forCaptureTime: seconds(9)))
+        XCTAssertNil(pauses.outputTime(forCaptureTime: seconds(15)))
+    }
+
+    func testPauseTimelineAccumulatesPausesAndIgnoresRepeatedPresses() {
+        var pauses = PauseTimeline()
+        pauses.resume(at: seconds(1))
+        XCTAssertEqual(pauses.pausedDuration, .zero)
+
+        pauses.pause(at: seconds(10))
+        pauses.pause(at: seconds(12))
+        pauses.resume(at: seconds(20))
+        pauses.resume(at: seconds(25))
+        pauses.pause(at: seconds(30))
+        pauses.resume(at: seconds(35))
+
+        XCTAssertEqual(pauses.pausedDuration, seconds(15))
+        XCTAssertEqual(pauses.outputTime(forCaptureTime: seconds(40)), seconds(25))
+    }
+
+    private func seconds(_ value: Double) -> CMTime {
+        CMTime(seconds: value, preferredTimescale: 600)
     }
 
     @MainActor

@@ -56,14 +56,40 @@ enum RecordingSourceError: LocalizedError, Equatable {
     }
 }
 
-enum RecordingTimeline {
-    static func canAppendAudio(
-        captureStopped: Bool,
-        paused: Bool,
-        sessionStarted: Bool,
-        awaitingResumeFrame: Bool
-    ) -> Bool {
-        !captureStopped && !paused && sessionStarted && !awaitingResumeFrame
+/// Cuts paused stretches out of the output timeline. Pause and resume are
+/// stamped on the capture clock when they are pressed. ScreenCaptureKit
+/// delivers frames only when the screen changes, so timing the cut from frame
+/// arrivals left still-screen pauses in the file and dropped audio after a
+/// resume until something on screen moved.
+struct PauseTimeline: Equatable {
+    private(set) var pausedDuration: CMTime = .zero
+    private(set) var pausedAt: CMTime?
+    private(set) var resumedAt: CMTime?
+
+    mutating func pause(at time: CMTime) {
+        guard pausedAt == nil else { return }
+        pausedAt = time
+    }
+
+    mutating func resume(at time: CMTime) {
+        guard let pausedAt else { return }
+        pausedDuration = CMTimeAdd(pausedDuration, CMTimeMaximum(.zero, CMTimeSubtract(time, pausedAt)))
+        self.pausedAt = nil
+        resumedAt = time
+    }
+
+    /// Where a sample captured at `captureTime` lands in the output, or nil
+    /// when it was captured during a pause. Samples captured before the
+    /// latest resume that arrive after it are dropped too, so output times
+    /// never run backwards.
+    func outputTime(forCaptureTime captureTime: CMTime) -> CMTime? {
+        if let pausedAt, captureTime >= pausedAt {
+            return nil
+        }
+        if let resumedAt, captureTime < resumedAt {
+            return nil
+        }
+        return CMTimeSubtract(captureTime, pausedDuration)
     }
 }
 
@@ -209,11 +235,13 @@ private struct FrameWriter {
     /// Non-nil when the captured window is drawn inset on a background.
     let windowFrame: FrameCompositor.WindowFrame?
     var hasWriteFailure = false
-    /// Total time spent paused so far. Subtracted from every sample's
-    /// timestamp so the output has no gap where the pauses were.
-    var pausedDuration: CMTime = .zero
-    /// Presentation time of the first frame seen during the current pause.
-    var pauseStartTime: CMTime?
+    var pauses = PauseTimeline()
+    /// Output time of the last frame written. ScreenCaptureKit stamps frames
+    /// a few milliseconds ahead of delivery, so a frame stamped just after a
+    /// pause press can already be written; a frame from just after the
+    /// resume would then land before it, and AVAssetWriter fails the whole
+    /// file on a frame that does not move forward.
+    var lastVideoOutputTime: CMTime?
 }
 
 private final class FrameCaptureState {
@@ -223,7 +251,6 @@ private final class FrameCaptureState {
     var currentCameraX: CGFloat = 1.0
     var currentCameraY: CGFloat = 0.0
     var currentCameraSizeFraction: CGFloat = 0.2
-    var isPaused = false
     /// Pointer state over the captured content, sampled on the main actor.
     var cursorState = CursorMetadataTrack.CapturedState.outside
 }
@@ -910,16 +937,18 @@ class ScreenRecorder: NSObject, ObservableObject {
     /// resuming is instant; the gap is removed from the output timeline.
     func pauseRecording() {
         guard isRecording, !isStopping, !isPaused else { return }
-        withFrameLock { frameState.isPaused = true }
+        let now = CMClockGetTime(CMClockGetHostTimeClock())
+        withFrameLock { frameState.frameWriter?.pauses.pause(at: now) }
         isPaused = true
     }
 
     func resumeRecording() {
         guard isRecording, isPaused else { return }
         let resumedCursorState = currentCursorState()
+        let now = CMClockGetTime(CMClockGetHostTimeClock())
         withFrameLock {
             frameState.cursorState = resumedCursorState
-            frameState.isPaused = false
+            frameState.frameWriter?.pauses.resume(at: now)
         }
         isPaused = false
     }
@@ -1540,7 +1569,6 @@ class ScreenRecorder: NSObject, ObservableObject {
         withFrameLock {
             frameState.latestCameraPixelBuffer = nil
             frameState.frameWriter = nil
-            frameState.isPaused = false
             frameState.cursorState = .outside
         }
     }
@@ -1938,28 +1966,10 @@ extension ScreenRecorder: SCStreamOutput {
                 guard !frameState.isCaptureStopped else { return }
                 guard var writer = frameState.frameWriter else { return }
                 guard !writer.hasWriteFailure else { return }
-
-                // Paused: remember where the gap started and drop the frame.
-                if frameState.isPaused {
-                    if writer.pauseStartTime == nil {
-                        writer.pauseStartTime = presentationTime
-                        frameState.frameWriter = writer
-                    }
-                    return
-                }
-
-                // First frame after a resume: fold the gap into the running
-                // offset so the output timeline stays continuous.
-                if let pauseStart = writer.pauseStartTime {
-                    writer.pausedDuration = CMTimeAdd(
-                        writer.pausedDuration,
-                        CMTimeSubtract(presentationTime, pauseStart)
-                    )
-                    writer.pauseStartTime = nil
-                    frameState.frameWriter = writer
-                }
-
-                adjustedTime = CMTimeSubtract(presentationTime, writer.pausedDuration)
+                guard let outputTime = writer.pauses.outputTime(forCaptureTime: presentationTime),
+                    writer.lastVideoOutputTime.map({ outputTime > $0 }) ?? true
+                else { return }
+                adjustedTime = outputTime
 
                 cameraBuffer = frameState.latestCameraPixelBuffer
 
@@ -2072,6 +2082,9 @@ extension ScreenRecorder: SCStreamOutput {
                     frameState.isCaptureStopped = true
                     return
                 }
+
+                writer.lastVideoOutputTime = adjustedTime
+                frameState.frameWriter = writer
             }
         }
     }
@@ -2157,13 +2170,11 @@ extension ScreenRecorder: AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptur
     private nonisolated func appendAudioSampleBuffer(_ sampleBuffer: CMSampleBuffer) {
         withFrameLock {
             guard var writer = frameState.frameWriter else { return }
-            guard
-                RecordingTimeline.canAppendAudio(
-                    captureStopped: frameState.isCaptureStopped,
-                    paused: frameState.isPaused,
-                    sessionStarted: writer.startTime != nil,
-                    awaitingResumeFrame: writer.pauseStartTime != nil
-                ),
+            guard !frameState.isCaptureStopped,
+                writer.startTime != nil,
+                writer.pauses.outputTime(
+                    forCaptureTime: CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
+                ) != nil,
                 let audio = writer.audioInput,
                 audio.isReadyForMoreMediaData
             else {
@@ -2172,7 +2183,7 @@ extension ScreenRecorder: AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptur
 
             // Audio carries its own timestamps, so the pause offset has to be
             // applied to the buffer rather than passed alongside it.
-            guard let sampleBuffer = retimed(sampleBuffer, by: writer.pausedDuration) else {
+            guard let sampleBuffer = retimed(sampleBuffer, by: writer.pauses.pausedDuration) else {
                 logger.warning("Could not retime audio sample for pause offset; dropping it")
                 return
             }

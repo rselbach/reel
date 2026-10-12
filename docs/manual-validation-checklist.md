@@ -707,7 +707,7 @@ Notes:
 
 User story: As a user recording a demo, I want to pause while I set up the next step so the dead time is not in the finished video.
 
-Expected behavior: Pausing keeps the stream and capture sessions running but stops writing: video frames and audio samples are dropped while paused. The presentation time of the first frame seen during a pause is remembered, and on resume the elapsed gap is added to a running offset that is subtracted from every subsequent video timestamp and applied to audio sample buffers through a retimed copy, so the output has no gap. The menu offers Pause and Resume, a global shortcut toggles it, the status item dims and its elapsed readout excludes paused time, and pause state is cleared on every path that ends a recording.
+Expected behavior: Pausing keeps the stream and capture sessions running but stops writing. Pause and resume are stamped on the host capture clock when they are pressed, so the cut is exact even when the screen is still and ScreenCaptureKit delivers no frames: samples captured between the two stamps are dropped, the paused time is added to a running offset that is subtracted from every later video timestamp and applied to audio sample buffers through a retimed copy, and audio resumes immediately rather than waiting for the screen to change. Samples captured before a resume that arrive after it are dropped, and a frame that would not move the video timeline forward is skipped, so output times never run backwards. The menu offers Pause and Resume, a global shortcut toggles it, the status item dims and its elapsed readout excludes paused time, and pause state is cleared on every path that ends a recording.
 
 Manual steps:
 
@@ -716,8 +716,9 @@ Manual steps:
 3. verify the playback has no ten-second gap and that audio stays in sync with video after the resume
 4. verify the menu bar elapsed time stops advancing while paused and the icon dims
 5. pause and resume several times in one take and verify sync still holds
-6. pause and then stop without resuming and verify the file is valid
-7. pause and then discard and verify nothing is written.
+6. pause while nothing on screen moves, wait ten seconds, resume, and speak immediately without moving the pointer, then verify the pause is fully removed and the speech after the resume is kept
+7. pause and then stop without resuming and verify the file is valid
+8. pause and then discard and verify nothing is written.
 
 Current status: Partial automated evidence passed; manual UI validation still pending. Validate manually using the listed steps.
 
