@@ -591,7 +591,8 @@ final class FrameCompositor: @unchecked Sendable {
             )
             return CTParagraphStyleCreate(&paragraphSetting, 1)
         }
-        let font = CTFontCreateWithName("HelveticaNeue-Bold" as CFString, fontSize, nil)
+        // The system font, so the caption reads like the rest of macOS.
+        guard let font = CTFontCreateUIFontForLanguage(.emphasizedSystem, fontSize, nil) else { return nil }
         let attributes: [CFString: Any] = [
             kCTFontAttributeName: font,
             kCTForegroundColorAttributeName: CGColor(red: 1, green: 1, blue: 1, alpha: 0.95),
