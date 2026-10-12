@@ -2295,6 +2295,28 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertFalse(PostRecordingLogic.canExport(edit: edit, isExporting: true))
     }
 
+    func testPostRecordingLogicSharesOnlyAFileMatchingTheEdit() throws {
+        let original = URL(fileURLWithPath: "/tmp/Greendale/Reel-Test.mp4")
+        let exportedURL = URL(fileURLWithPath: "/tmp/Greendale/Reel-Test-720p.mp4")
+        var edit = try XCTUnwrap(TimelineEdit(sourceDuration: 10))
+
+        XCTAssertEqual(PostRecordingLogic.shareURL(original: original, edit: nil, exportedVideo: nil), original)
+        XCTAssertEqual(PostRecordingLogic.shareURL(original: original, edit: edit, exportedVideo: nil), original)
+
+        let tailID = try XCTUnwrap(edit.splitClip(at: 8))
+        XCTAssertTrue(edit.deleteClip(id: tailID))
+        XCTAssertNil(PostRecordingLogic.shareURL(original: original, edit: edit, exportedVideo: nil))
+
+        let exported = ExportedVideo(edit: edit, url: exportedURL)
+        XCTAssertEqual(
+            PostRecordingLogic.shareURL(original: original, edit: edit, exportedVideo: exported),
+            exportedURL
+        )
+
+        try edit.addZoomScene(span: TimelineSpan(start: 1, end: 3))
+        XCTAssertNil(PostRecordingLogic.shareURL(original: original, edit: edit, exportedVideo: exported))
+    }
+
     func testPostRecordingLogicTracksEditsUntilTheyAreExported() throws {
         var edit = try XCTUnwrap(TimelineEdit(sourceDuration: 10))
         XCTAssertFalse(PostRecordingLogic.hasUnsavedEdits(edit: nil, exportedEdit: nil))

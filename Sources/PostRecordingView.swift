@@ -40,6 +40,9 @@ enum PostRecordingText {
     static let copy = "Copy"
     static let copied = "Copied!"
     static let dragHint = "Drag this recording into Slack, Mail, or Finder"
+    static let exportToShare = "Export edits to share"
+    static let exportToShareHelp =
+        "Drag and Copy share a file. Choose Save Edited... or Smaller Copy... to make one from your edits."
     static let delete = "Move to Trash"
     static let saveEdited = "Save Edited..."
     static let timeline = "Timeline"
@@ -117,10 +120,25 @@ enum ExportFileNaming {
     }
 }
 
+struct ExportedVideo: Equatable {
+    let edit: TimelineEdit
+    let url: URL
+}
+
 enum PostRecordingLogic {
     static func canExport(edit: TimelineEdit?, isExporting: Bool) -> Bool {
         guard let edit else { return false }
         return edit.editedDuration > 0 && !isExporting
+    }
+
+    /// The file drag and Copy hand out: the recording itself until the
+    /// timeline is edited, then the latest video exported from exactly this
+    /// edit. Nil while the edits exist only in the preview, since the
+    /// original would not match what the preview shows.
+    static func shareURL(original: URL, edit: TimelineEdit?, exportedVideo: ExportedVideo?) -> URL? {
+        guard let edit, edit.hasMeaningfulChanges else { return original }
+        guard let exportedVideo, exportedVideo.edit == edit else { return nil }
+        return exportedVideo.url
     }
 
     /// Edits live only in the preview until something is exported from
@@ -151,6 +169,7 @@ struct PostRecordingView: View {
     @State private var edit: TimelineEdit?
     /// The edit as of the last successful export, in any format.
     @State private var exportedEdit: TimelineEdit?
+    @State private var exportedVideo: ExportedVideo?
     @State private var currentTime: Double = 0
     @State private var playbackIntent: PlaybackIntent = .paused
     @State private var timelineSelection: TimelineSelection = .none
@@ -225,29 +244,12 @@ struct PostRecordingView: View {
             }
 
             HStack(spacing: 12) {
-                HStack(spacing: 6) {
-                    Image(systemName: "film")
-                    Text(videoURL.lastPathComponent)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                        .frame(maxWidth: 220)
-                }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 5)
-                .background(
-                    RoundedRectangle(cornerRadius: 6)
-                        .fill(Color(nsColor: .controlBackgroundColor))
-                )
-                .onDrag {
-                    NSItemProvider(contentsOf: videoURL) ?? NSItemProvider()
-                }
-                .allowsHitTesting(!isExporting)
-                .help(PostRecordingText.dragHint)
+                fileChip
 
                 Button(justCopied ? PostRecordingText.copied : PostRecordingText.copy) {
                     copyToPasteboard()
                 }
-                .disabled(isExporting)
+                .disabled(isExporting || shareURL == nil)
 
                 Spacer()
 
@@ -364,6 +366,40 @@ struct PostRecordingView: View {
         edit?.hasMeaningfulChanges == true
     }
 
+    private var shareURL: URL? {
+        PostRecordingLogic.shareURL(original: videoURL, edit: edit, exportedVideo: exportedVideo)
+    }
+
+    @ViewBuilder
+    private var fileChip: some View {
+        let chip = HStack(spacing: 6) {
+            Image(systemName: "film")
+            Text(shareURL?.lastPathComponent ?? PostRecordingText.exportToShare)
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .frame(maxWidth: 220)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(Color(nsColor: .controlBackgroundColor))
+        )
+
+        if let shareURL {
+            chip
+                .onDrag {
+                    NSItemProvider(contentsOf: shareURL) ?? NSItemProvider()
+                }
+                .allowsHitTesting(!isExporting)
+                .help(PostRecordingText.dragHint)
+        } else {
+            chip
+                .foregroundStyle(.secondary)
+                .help(PostRecordingText.exportToShareHelp)
+        }
+    }
+
     private var hasUnsavedEdits: Bool {
         PostRecordingLogic.hasUnsavedEdits(edit: edit, exportedEdit: exportedEdit)
     }
@@ -383,9 +419,10 @@ struct PostRecordingView: View {
     }
 
     private func copyToPasteboard() {
+        guard let shareURL else { return }
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
-        guard pasteboard.writeObjects([videoURL as NSURL]) else {
+        guard pasteboard.writeObjects([shareURL as NSURL]) else {
             exportError = "Could not copy the recording to the clipboard."
             justCopied = false
             return
@@ -655,6 +692,7 @@ struct PostRecordingView: View {
             let warning = try await exportVideo(to: outputURL, quality: quality, edit: edit)
             try Task.checkCancellation()
             exportedEdit = edit
+            exportedVideo = ExportedVideo(edit: edit, url: outputURL)
             if let warning {
                 exportError = warning.localizedDescription
             }

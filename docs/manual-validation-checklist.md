@@ -262,7 +262,7 @@ Notes:
 
 User story: As a user, I want a preview window after capture so I can inspect, edit, reveal, delete, or finish with the recording.
 
-Expected behavior: When enabled, a preview window opens after each recording with playback, a draggable playhead, split clips, a draggable file chip, copy, reveal, delete, Record Again, and export actions. Right-clicking the timeline splits at the playhead. Any retained clip can be deleted and any deleted clip can be restored. Record Again closes the preview and starts another take with the remembered target. While cuts or zoom scenes have not been exported in any format, the close button shows the unsaved-changes dot, and Done, Record Again, Change Target, the close button, Command-W, and Quit ask before discarding them.
+Expected behavior: When enabled, a preview window opens after each recording with playback, a draggable playhead, split clips, a draggable file chip, copy, reveal, delete, Record Again, and export actions. Right-clicking the timeline splits at the playhead. The file chip and Copy share the recording until the timeline is edited, then the latest video exported from exactly that edit; while edits exist only in the preview, the chip reads Export edits to share and Copy is disabled. Any retained clip can be deleted and any deleted clip can be restored. Record Again closes the preview and starts another take with the remembered target. While cuts or zoom scenes have not been exported in any format, the close button shows the unsaved-changes dot, and Done, Record Again, Change Target, the close button, Command-W, and Quit ask before discarding them.
 
 Manual steps:
 
@@ -273,9 +273,11 @@ Manual steps:
 5. verify playback skips deleted clips
 6. press Record Again and verify countdown starts for the remembered target
 7. verify Done closes the preview without deleting the file
-8. delete a clip, press Done, and verify Reel asks before discarding the edit
-9. cancel, export a Smaller Copy, press Done, and verify the preview closes without asking
-10. delete a clip and quit Reel, and verify it asks before quitting.
+8. delete a clip and verify the file chip reads Export edits to share and Copy is disabled
+9. export a Smaller Copy and verify the chip names the exported file and dragging it into Finder copies the edited video
+10. delete a clip, press Done, and verify Reel asks before discarding the edit
+11. cancel, export a Smaller Copy, press Done, and verify the preview closes without asking
+12. delete a clip and quit Reel, and verify it asks before quitting.
 
 Current status: Partial automated evidence passed; manual UI and accessibility interaction validation still pending. Validate manually using the listed steps.
 
