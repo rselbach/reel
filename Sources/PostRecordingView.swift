@@ -122,6 +122,13 @@ enum PostRecordingLogic {
         guard let edit else { return false }
         return edit.editedDuration > 0 && !isExporting
     }
+
+    /// Edits live only in the preview until something is exported from
+    /// them, so closing the preview before that throws them away.
+    static func hasUnsavedEdits(edit: TimelineEdit?, exportedEdit: TimelineEdit?) -> Bool {
+        guard let edit, edit.hasMeaningfulChanges else { return false }
+        return edit != exportedEdit
+    }
 }
 
 struct PostRecordingView: View {
@@ -131,6 +138,7 @@ struct PostRecordingView: View {
     let onRecordAgain: () -> Void
     let onChangeTarget: () -> Void
     let onDelete: () -> Void
+    let onUnsavedEditsChanged: (Bool) -> Void
 
     @State private var player: AVPlayer?
     /// Loaded with the preview so future cursor-aware effects can use the
@@ -141,6 +149,8 @@ struct PostRecordingView: View {
     @State private var zoomCompositionTask: Task<Void, Never>?
     @State private var isCleanedUp = false
     @State private var edit: TimelineEdit?
+    /// The edit as of the last successful export, in any format.
+    @State private var exportedEdit: TimelineEdit?
     @State private var currentTime: Double = 0
     @State private var playbackIntent: PlaybackIntent = .paused
     @State private var timelineSelection: TimelineSelection = .none
@@ -332,6 +342,9 @@ struct PostRecordingView: View {
                 refreshZoomPreviewComposition(scenes: changedEdit.zoomScenes)
             }
         }
+        .onChange(of: hasUnsavedEdits) { _, unsaved in
+            onUnsavedEditsChanged(unsaved)
+        }
         .onChange(of: timelineSelection) { previousSelection, changedSelection in
             if case .zoomScene = previousSelection, case .zoomScene = changedSelection {
                 return
@@ -349,6 +362,10 @@ struct PostRecordingView: View {
 
     private var hasEdits: Bool {
         edit?.hasMeaningfulChanges == true
+    }
+
+    private var hasUnsavedEdits: Bool {
+        PostRecordingLogic.hasUnsavedEdits(edit: edit, exportedEdit: exportedEdit)
     }
 
     private var canExport: Bool {
@@ -637,6 +654,7 @@ struct PostRecordingView: View {
         do {
             let warning = try await exportVideo(to: outputURL, quality: quality, edit: edit)
             try Task.checkCancellation()
+            exportedEdit = edit
             if let warning {
                 exportError = warning.localizedDescription
             }
@@ -661,6 +679,7 @@ struct PostRecordingView: View {
         do {
             let warning = try await exportGIF(to: outputURL, edit: edit)
             try Task.checkCancellation()
+            exportedEdit = edit
             if let warning {
                 exportError = warning.localizedDescription
             }

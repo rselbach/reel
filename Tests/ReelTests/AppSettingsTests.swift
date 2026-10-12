@@ -2295,6 +2295,26 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertFalse(PostRecordingLogic.canExport(edit: edit, isExporting: true))
     }
 
+    func testPostRecordingLogicTracksEditsUntilTheyAreExported() throws {
+        var edit = try XCTUnwrap(TimelineEdit(sourceDuration: 10))
+        XCTAssertFalse(PostRecordingLogic.hasUnsavedEdits(edit: nil, exportedEdit: nil))
+        XCTAssertFalse(PostRecordingLogic.hasUnsavedEdits(edit: edit, exportedEdit: nil))
+
+        let tailID = try XCTUnwrap(edit.splitClip(at: 8))
+        XCTAssertTrue(edit.deleteClip(id: tailID))
+        XCTAssertTrue(PostRecordingLogic.hasUnsavedEdits(edit: edit, exportedEdit: nil))
+
+        let exported = edit
+        XCTAssertFalse(PostRecordingLogic.hasUnsavedEdits(edit: edit, exportedEdit: exported))
+
+        try edit.addZoomScene(span: TimelineSpan(start: 1, end: 3))
+        XCTAssertTrue(PostRecordingLogic.hasUnsavedEdits(edit: edit, exportedEdit: exported))
+
+        edit.removeZoomScene(id: try XCTUnwrap(edit.zoomScenes.first?.id))
+        edit.restoreClip(id: tailID)
+        XCTAssertFalse(PostRecordingLogic.hasUnsavedEdits(edit: edit, exportedEdit: exported))
+    }
+
     @MainActor
     func testTextOverlayLayoutCapsImageHeightForLongText() {
         let layout = TextOverlayLayout.imageSize(
