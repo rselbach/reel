@@ -988,11 +988,13 @@ struct PostRecordingTimelineView: View {
                 .shadow(color: .black.opacity(0.7), radius: 1)
         }
         .frame(width: 18)
+        // Shaped before the offset so the grab area moves with the playhead
+        // instead of staying where the timeline starts.
+        .contentShape(Rectangle())
         .offset(
             x: gutter + position(currentSourceTime, in: timelineWidth) - 9,
             y: -8
         )
-        .contentShape(Rectangle())
         .gesture(playheadGesture(width: timelineWidth))
         .accessibilityElement()
         .accessibilityLabel(PostRecordingText.playhead)
