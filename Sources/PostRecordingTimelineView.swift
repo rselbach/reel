@@ -313,8 +313,12 @@ struct PostRecordingTimelineView: View {
                         restoreClip(id: id)
                     }
                 } else {
+                    // SwiftUI keeps the action from when a keyboard shortcut
+                    // was registered, so an ID captured here would still name
+                    // the first clip selected; deleteSelection reads the
+                    // selection when the key is pressed.
                     Button(PostRecordingText.deleteClip, role: .destructive) {
-                        deleteClip(id: id)
+                        deleteSelection()
                     }
                     .keyboardShortcut(.delete, modifiers: [])
                     .disabled(!edit.canDeleteClip(id: id))
@@ -326,7 +330,7 @@ struct PostRecordingTimelineView: View {
                 .keyboardShortcut(.cancelAction)
 
                 Button(PostRecordingText.deleteZoomScene, role: .destructive) {
-                    removeZoomScene(id: id)
+                    deleteSelection()
                 }
                 .keyboardShortcut(.delete, modifiers: [])
             }
