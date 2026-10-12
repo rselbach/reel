@@ -10,10 +10,6 @@ struct AboutView: View {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "Unknown"
     }
 
-    private var buildNumber: String {
-        Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "Unknown"
-    }
-
     private var commitSHA: String {
         Bundle.main.object(forInfoDictionaryKey: "GitCommit") as? String ?? "dev"
     }
@@ -47,11 +43,6 @@ struct AboutView: View {
                         .foregroundStyle(.secondary)
                         .gridColumnAlignment(.trailing)
                     Text(appVersion)
-                }
-                GridRow {
-                    Text("Build")
-                        .foregroundStyle(.secondary)
-                    Text(buildNumber)
                 }
                 GridRow {
                     Text("Commit")
