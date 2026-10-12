@@ -27,7 +27,7 @@ enum AppMenuText {
     static let cancel = "Cancel"
     static let discardEditsTitle = "Discard your edits?"
     static let discardEditsMessage =
-        "The cuts and zoom scenes in this preview have not been exported. To keep them, choose Save Edited... first."
+        "The cuts and zoom scenes in this preview have not been exported. To keep them, choose Export first."
     static let discardEdits = "Discard Edits"
     static let quitDiscardingEditsTitle = "Quit and discard your edits?"
     static let quitDiscardingEditsMessage =
