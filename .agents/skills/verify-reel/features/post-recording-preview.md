@@ -64,7 +64,13 @@ Preconditions:
 - **Undo.** Press Command-Z until `Undo` is disabled, requiring each press to
   step back one change. Press Shift-Command-Z once and require the last undone
   change to return. Drag a zoom scene's focus twice with a pause between and
-  require each drag to undo separately.
+  require each drag to undo separately. Trim again, open the `Edit` menu in
+  Reel's menu bar, require `Undo` enabled, choose it, and require the trim to
+  return.
+- **Windows.** While the preview is open, require Reel in the Dock and
+  Command-Tab with `Reel`, `Edit`, and `Window` menus. Start another take with
+  the global shortcut and require the second preview 24 points right of and
+  below the first. Close both and require Reel to leave the Dock.
 - **Smaller copy.** Choose `Export`, then `Smaller Copy (720p)...`, and save
   inside the isolated Movies directory. While it writes, require text
   `Exporting` with a percentage, a progress indicator, and `Cancel`. Then

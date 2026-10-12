@@ -4,7 +4,7 @@ Source of truth: `docs/feature-status.csv`.
 
 Generated from the canonical tracker. This checklist is a companion artifact for executing the remaining manual validation pass; update the CSV after validation.
 
-Manual validation required: 45 stories.
+Manual validation required: 46 stories.
 No further manual validation required: 2 stories.
 
 ## Recommended Order
@@ -21,13 +21,17 @@ No further manual validation required: 2 stories.
 
 User story: As a user, I want Reel to live in the macOS menu bar so I can control recording without a main window.
 
-Expected behavior: On launch, Reel creates a variable-length status item with the record.circle symbol and no default app window content.
+Expected behavior: On launch, Reel creates a variable-length status item with the record.circle symbol and no default app window content. While one of its windows is open (a preview, Settings, the picker, About, or the welcome), Reel runs as a regular app with a Dock icon, a place in Command-Tab, and a menu bar with Reel, Edit, and Window menus, including Hide, Minimize, Bring All to Front, and a list of open windows; it returns to living only in the menu bar when the last window closes. Windows open centered on the screen.
 
 Manual steps:
 
 1. Launch .build/Reel.app
 2. verify only a menu-bar status item appears with Reel icon and no main app window
-3. quit from menu.
+3. open Settings and verify Reel appears in the Dock and Command-Tab with Reel, Edit, and Window menus
+4. minimize Settings and restore it from the Window menu
+5. close it and verify Reel leaves the Dock
+6. verify the picker and a preview open centered
+7. quit from menu.
 
 Current status: Partial automated evidence passed; manual UI validation still pending. Validate manually using the listed steps.
 
@@ -39,17 +43,18 @@ Notes:
 
 User story: As a first-time user, I want clear guidance when screen recording permission is missing so I can enable the app.
 
-Expected behavior: The first-run welcome window explains the menu bar icon and the recording shortcut, then requests screen recording permission with context. Until access is in effect, Grant Screen Recording Access is the prominent default button and Get Started is secondary. Once access has been requested and is still not in effect, the window shows the two steps, turning Reel on in System Settings and relaunching, with Open System Settings and Relaunch Reel buttons; Relaunch Reel starts a fresh instance and quits the current one, and failures are surfaced in an alert. Get Started becomes the prominent default only once access is in effect. While permission is missing, the status item menu shows the requirement, Open System Settings, and Relaunch Reel, and leaves out the raw ScreenCaptureKit error.
+Expected behavior: The first-run welcome window explains the menu bar icon and the recording shortcut, then requests screen recording permission with context. Until access is in effect, Grant Screen Recording Access is the prominent default button and Get Started is secondary. Once access has been requested and is still not in effect, the window shows the two steps, turning Reel on in System Settings and relaunching, with Open System Settings and Relaunch Reel buttons; Relaunch Reel starts a fresh instance and quits the current one, and failures are surfaced in an alert. Get Started becomes the prominent default only once access is in effect. Launch checks access without prompting, and the welcome returns on every launch until access is in effect, so a skipped welcome never leads to the bare system prompt. While permission is missing, the status item menu shows the requirement, Open System Settings, and Relaunch Reel, and leaves out the raw ScreenCaptureKit error.
 
 Manual steps:
 
 1. Launch Reel with screen recording permission revoked
 2. verify the welcome window explains the permission, that Grant Screen Recording Access is the highlighted default, and that Get Started is not
-3. press Grant Screen Recording Access and verify the window switches to the two steps with Open System Settings and Relaunch Reel
-4. grant access in System Settings
-5. press Relaunch Reel and verify a new instance starts and the old one quits
-6. verify the relaunched welcome window shows access granted with Get Started as the highlighted default
-7. verify recording works after the relaunch.
+3. press Get Started without granting, quit, relaunch, and verify the welcome appears again rather than the system prompt
+4. press Grant Screen Recording Access and verify the window switches to the two steps with Open System Settings and Relaunch Reel
+5. grant access in System Settings
+6. press Relaunch Reel and verify a new instance starts and the old one quits
+7. verify the relaunched welcome window shows access granted with Get Started as the highlighted default
+8. verify recording works after the relaunch.
 
 Current status: Partial automated evidence passed; manual UI validation still pending. Validate manually using the listed steps.
 
@@ -99,12 +104,14 @@ Notes:
 
 User story: As a user, I want to select a full display so the recording captures that screen.
 
-Expected behavior: The dialog lists available displays with thumbnails. Selecting or double-clicking a display sets recordingMode to display and selectedDisplayIndex before countdown and capture. Oversized H.264 capture dimensions are downscaled within a 4096x2304 bounding box while preserving aspect ratio.
+Expected behavior: The picker's Display tab lists available displays as large thumbnails named as System Settings names them, such as Built-in Retina Display, numbering two displays that share a name. Selecting a display and pressing Start Recording, or double-clicking it, sets recordingMode to display before countdown and capture. The menu's quick-record item says Record Entire Screen on a Mac with one display and names the display when there are several. Oversized H.264 capture dimensions are downscaled within a 4096x2304 bounding box while preserving aspect ratio.
 
 Manual steps:
 
-1. Record a single display and, if available, each external display
-2. verify selected display is captured, file plays, and oversized displays produce valid MP4 dimensions.
+1. Open the picker and verify each display card shows its System Settings name
+2. on a single-display Mac verify the menu reads Record Entire Screen after a display take
+3. record a single display and, if available, each external display
+4. verify selected display is captured, file plays, and oversized displays produce valid MP4 dimensions.
 
 Current status: Partial automated evidence passed; manual UI validation still pending. Validate manually using the listed steps.
 
@@ -116,14 +123,17 @@ Notes:
 
 User story: As a user, I want to select a specific window so the recording captures only that window.
 
-Expected behavior: The dialog lists on-screen app windows on the normal window layer larger than 100x100, excluding Reel and system surfaces such as the desktop, wallpaper, and Notification Centre widgets, supports search by app/title, and uses SCContentFilter(desktopIndependentWindow:) for capture. Oversized H.264 capture dimensions are downscaled within a 4096x2304 bounding box while preserving aspect ratio.
+Expected behavior: The picker's Window tab lists on-screen app windows on the normal window layer larger than 100x100, excluding Reel and system surfaces such as the desktop, wallpaper, and Notification Centre widgets, supports search by app/title, and uses SCContentFilter(desktopIndependentWindow:) for capture. Start Recording stays disabled until a window is picked. Oversized H.264 capture dimensions are downscaled within a 4096x2304 bounding box while preserving aspect ratio.
 
 Manual steps:
 
 1. Open window picker
-2. verify no desktop
+2. verify no desktop, wallpaper, Unknown, or Notification Centre widget cards appear
+3. search by app/title
+4. select and double-click a window
+5. verify only that window is captured and large windows produce valid MP4 output.
 
-Current status: wallpaper
+Current status: Partial automated evidence passed; manual UI validation still pending. Validate manually using the listed steps.
 
 Result: [ ] Pass  [ ] Fail  [ ] Blocked
 
@@ -150,7 +160,7 @@ Notes:
 
 User story: As a user, I want a countdown before recording starts so I can prepare the screen.
 
-Expected behavior: CountdownOverlay shows a non-activating HUD panel centered over the target frame counting 3, 2, 1, then starts recording only if not cancelled. The panel never becomes key and never activates Reel, so the window being demoed keeps focus; cancellation is by clicking the HUD or pressing the recording shortcut again. Both hotkey and recording-dialog start paths prevent overlapping countdowns.
+Expected behavior: CountdownOverlay shows a non-activating HUD panel centered over the target frame counting 3, 2, 1, then starts recording only if not cancelled. The HUD uses the blurred dark material macOS uses for its own overlays, darkened so white text reads over a white document, with a rounded numeral that rolls down and a ring that empties over each second; cancelling shows a cross. The panel never becomes key and never activates Reel, so the window being demoed keeps focus; cancellation is by clicking the HUD, which takes the first click, or pressing the recording shortcut again. Both hotkey and recording-dialog start paths prevent overlapping countdowns.
 
 Manual steps:
 
@@ -206,13 +216,15 @@ Notes:
 
 User story: As a user, I want recordings saved to a valid writable location with unique names.
 
-Expected behavior: Recorder creates the configured output directory, verifies it is a writable directory, falls back to Movies if unavailable, and names files Reel-<timestamp>-<random>.mp4. Cancelled saves and unexpected stream errors discard temporary output instead of leaving orphan files.
+Expected behavior: Recordings go to a Reel folder inside Movies unless another folder is chosen in Settings. Recorder creates the output directory, verifies it is a writable directory, and falls back to Movies/Reel if unavailable. Files are named the way macOS names its own screen recordings, in local time and the user's 12- or 24-hour clock, such as Reel 2026-10-11 at 7.58.07 PM.mp4, with a plain space before AM or PM and (2) added for a second take in the same second. Open Recordings Folder creates the folder if it does not exist yet. Cancelled saves and unexpected stream errors discard temporary output instead of leaving orphan files.
 
 Manual steps:
 
-1. Set fixed output folder, record, verify unique Reel timestamp MP4
-2. test unwritable/missing output folder fallback
-3. verify cancelled saves and stream errors leave no orphan temp output.
+1. Record with the default folder and verify the file lands in Movies/Reel named with today's date and local time
+2. record twice within a second, if possible, and verify the second gets (2)
+3. set a fixed output folder and verify it is used
+4. test unwritable/missing output folder fallback
+5. verify cancelled saves and stream errors leave no orphan temp output.
 
 Current status: Partial automated evidence passed; manual UI validation still pending. Validate manually using the listed steps.
 
@@ -263,7 +275,7 @@ Notes:
 
 User story: As a user, I want a preview window after capture so I can inspect, edit, reveal, delete, or finish with the recording.
 
-Expected behavior: When enabled, a preview window opens after each recording with playback, Undo and Redo, a timeline with trim handles and a Split button, a draggable file chip, Copy, Share, reveal, delete, Record Again, and one Export menu. The file chip, Copy, and Share hand out the recording until the timeline is edited, then the latest video exported from exactly that edit; while edits exist only in the preview, the chip reads Export edits to share and Copy and Share are disabled. Any retained clip can be deleted and any deleted clip can be restored, and Delete always acts on the current selection. Undo and Redo, also Command-Z and Shift-Command-Z, step through every timeline change; a quick run of changes to one zoom scene's focus or settings undoes as one step. The preview shows one clock, edited time beside the playback controls, and describes selections by length. The playhead can be dragged by its knob wherever it is. Record Again closes the preview and starts another take with the remembered target. While cuts or zoom scenes have not been exported in any format, the close button shows the unsaved-changes dot, and Done, Record Again, Change Target, the close button, Command-W, and Quit ask before discarding them.
+Expected behavior: When enabled, a preview window opens after each recording with playback, Undo and Redo, a timeline with trim handles and a Split button, a draggable file chip, Copy, Share, reveal, delete, Record Again, and one Export menu. The file chip, Copy, and Share hand out the recording until the timeline is edited, then the latest video exported from exactly that edit; while edits exist only in the preview, the chip reads Export edits to share and Copy and Share are disabled. Any retained clip can be deleted and any deleted clip can be restored, and Delete always acts on the current selection. Undo and Redo, also Command-Z and Shift-Command-Z, step through every timeline change; a quick run of changes to one zoom scene's focus or settings undoes as one step. The preview shows one clock, edited time beside the playback controls, and describes selections by length. The playhead can be dragged by its knob wherever it is. Record Again closes the preview and starts another take with the remembered target. While cuts or zoom scenes have not been exported in any format, the close button shows the unsaved-changes dot, and Done, Record Again, Change Target, the close button, Command-W, and Quit ask before discarding them. Previews can be minimized; each new preview opens down and to the right of the last one; and Edit > Undo and Redo in Reel's menu bar act on the preview's timeline.
 
 Manual steps:
 
@@ -394,7 +406,7 @@ Notes:
 
 User story: As a user, I want optional camera overlay with configurable camera, position, size, and shape.
 
-Expected behavior: With camera overlay enabled, the camera session is started before the countdown so the user can frame and position the bubble ahead of the take rather than on camera; the same session and the overlay the user positioned carry straight into the recording. Cancelling the countdown tears the preview session down. The overlay window is excluded from capture and the bubble is composited into the file from the camera frames, mirrored only for front-facing cameras.
+Expected behavior: With camera overlay enabled, the camera session is started before the countdown so the user can frame and position the bubble ahead of the take rather than on camera; the same session and the overlay the user positioned carry straight into the recording. Cancelling the countdown tears the preview session down. The overlay window is excluded from capture and the bubble is composited into the file from the camera frames, mirrored only for front-facing cameras. The bubble is a circle or a rounded square, rounded the same way in the floating preview and in the file, and the file draws the same soft shadow macOS draws under the floating window, sized in screen points.
 
 Manual steps:
 
@@ -402,7 +414,7 @@ Manual steps:
 2. start a recording and verify the camera bubble appears during the countdown
 3. drag and resize it during the countdown and verify the recording starts with the bubble where it was left
 4. cancel a countdown and verify the camera turns off
-5. verify the composited bubble in the file matches the on-screen position.
+5. verify the composited bubble in the file matches the on-screen position. Try both shapes and verify the recorded bubble's corners and shadow match the floating one.
 
 Current status: Partial automated evidence passed; manual UI validation still pending. Validate manually using the listed steps.
 
@@ -414,7 +426,7 @@ Notes:
 
 User story: As a user, I want optional text overlay so I can watermark or label recordings.
 
-Expected behavior: When enabled with non-empty trimmed text, Reel renders a centered white text overlay on a translucent dark rounded background at top, center, or bottom and composites it into frames. Long overlay text is capped to a reasonable fraction of capture height and placement is clamped so the overlay remains visible.
+Expected behavior: When enabled with non-empty trimmed text, Reel renders a centered white text overlay in the bold system font on a translucent dark rounded background at top, center, or bottom and composites it into frames. Long overlay text is capped to a reasonable fraction of capture height and placement is clamped so the overlay remains visible.
 
 Manual steps:
 
@@ -477,12 +489,12 @@ Notes:
 
 User story: As a user, I want to see app version/build/commit and reach the project page.
 
-Expected behavior: About window displays app icon, Reel title, tagline, version, build, commit or commit link when valid, and a GitHub button. Closing the window clears AppDelegate state so About can be reopened.
+Expected behavior: About window displays app icon, Reel title, tagline, version, commit or commit link when valid, and a GitHub button. Closing the window clears AppDelegate state so About can be reopened.
 
 Manual steps:
 
 1. Open About
-2. verify icon/version/build/commit link/GitHub button
+2. verify icon/version/commit link/GitHub button and that the version appears once
 3. close via title bar and reopen
 4. verify links open expected targets.
 
@@ -496,12 +508,13 @@ Notes:
 
 User story: As a user, I want to manually check for app updates from the menu.
 
-Expected behavior: Menu item Check for Updates invokes SPUStandardUpdaterController.checkForUpdates. The menu label is centralized in AppMenuText. Info.plist points Sparkle at https://rselbach.github.io/reel/appcast.xml and includes a non-placeholder public EdDSA key.
+Expected behavior: Menu item Check for Updates invokes SPUStandardUpdaterController.checkForUpdates. The menu label is centralized in AppMenuText. Info.plist points Sparkle at https://rselbach.github.io/reel/appcast.xml, includes a non-placeholder public EdDSA key, and sets SUEnableAutomaticChecks so Sparkle checks automatically without asking on the second launch.
 
 Manual steps:
 
-1. Choose Check for Updates
-2. verify Sparkle UI opens and handles no-update/update/error states using configured appcast and public key.
+1. Launch a fresh install twice and verify Sparkle does not ask whether to check automatically
+2. choose Check for Updates
+3. verify Sparkle UI opens and handles no-update/update/error states using configured appcast and public key.
 
 Current status: Partial automated evidence passed; manual UI validation still pending. Validate manually using the listed steps.
 
@@ -513,7 +526,7 @@ Notes:
 
 User story: As a recorder using the camera overlay, I want to drag the live camera preview during recording so I can keep it away from important screen content.
 
-Expected behavior: When camera recording starts and a camera session is active, Reel creates a floating borderless overlay window sized as a fraction of the recording bounds, clips it to the selected shape, excludes the overlay window from screen capture, clamps drags inside the recorded bounds, and reports normalized x/y coordinates back to the recorder for compositing.
+Expected behavior: When camera recording starts and a camera session is active, Reel creates a floating borderless overlay window sized as a fraction of the recording bounds, clips it to the selected shape, excludes the overlay window from screen capture, clamps drags inside the recorded bounds, and reports normalized x/y coordinates back to the recorder for compositing. The window's own shadow follows the bubble's shape; there is no extra SwiftUI shadow filling the square window's corners.
 
 Manual steps:
 
@@ -562,11 +575,11 @@ Notes:
 
 User story: As a user viewing About Reel, I want to see build provenance and open the project repository or exact commit when available.
 
-Expected behavior: The About window displays app version, build number, and Git commit. Valid non-dev commit hashes are normalized and rendered as GitHub commit links; invalid or dev commits render as plain text. The GitHub button opens the Reel repository URL.
+Expected behavior: The About window displays the app version once and the Git commit. Valid non-dev commit hashes are normalized and rendered as GitHub commit links; invalid or dev commits render as plain text. The GitHub button opens the Reel repository URL.
 
 Manual steps:
 
-1. Open About Reel, confirm version/build/commit display, click GitHub and confirm the project repository opens, and if the build has a valid commit hash click the commit link and confirm the exact GitHub commit opens.
+1. Open About Reel, confirm version and commit display, click GitHub and confirm the project repository opens, and if the build has a valid commit hash click the commit link and confirm the exact GitHub commit opens.
 
 Current status: Partial automated evidence passed; manual UI validation still pending. Validate manually using the listed steps.
 
@@ -578,18 +591,19 @@ Notes:
 
 User story: As a user, I want to refresh the recording picker and understand why it is empty so I can recover without closing and reopening it.
 
-Expected behavior: RecordingDialog shows the refresh control whenever it lists displays, including when no windows are listed, and preselects the target the recorder is currently pointed at. Thumbnails are buttons, so selection is immediate and reachable from the keyboard, and arrow keys move between displays and windows in the order shown — one step for left and right, one row for up and down, using the same column count the adaptive grid lays out, clamped at both ends. Area recording offers both drawing a fresh area and reusing the remembered one. When ScreenCaptureKit lists no displays, which in practice means the permission is not in effect, the picker replaces its whole content with a permission state that explains turning Reel on in System Settings and relaunching, offers Open System Settings and Relaunch Reel, and keeps only Cancel; the no-open-windows empty state stays separate.
+Expected behavior: The picker shows one kind of target at a time through a Display, Window, Area switcher, and every tab works the same way: pick a card, then press the main button or double-click. Each tab keeps its own pick, and the picker opens on the tab of the target the recorder is pointed at, including the Area tab with Last Area after an area take. The Area tab offers New Area and, once an area is remembered, Last Area with its size; the main button reads Select Area... when an area still has to be drawn. Cancel sits beside the main button. The refresh control stays available on the Display and Window tabs. The picker takes keyboard focus, so arrow keys move between the current tab's cards, one step for left and right and one row for up and down, clamped at both ends; the search field keeps its own arrow keys while typing. When ScreenCaptureKit lists no displays, which in practice means the permission is not in effect, the picker replaces its whole content with a permission state that explains turning Reel on in System Settings and relaunching, offers Open System Settings and Relaunch Reel, and keeps only Cancel; the no-open-windows empty state stays separate.
 
 Manual steps:
 
 1. Open the recording picker with screen recording permission revoked
-2. verify the picker shows only the permission state with Open System Settings, Relaunch Reel, and Cancel, and that Open System Settings opens the privacy pane
-3. grant permission, press Relaunch Reel, reopen the picker, and verify displays and windows appear
-4. record a window, reopen the picker, and verify that window is preselected
-5. move through the cards with the arrow keys and verify left and right step one card and up and down step one row without wrapping
-6. press Return and verify recording starts with the highlighted card
-7. double-click a card and verify it starts immediately
-8. record an area and verify Use Last Area appears with the right dimensions.
+2. verify the picker shows only the permission state with Open System Settings, Relaunch Reel, and Cancel
+3. grant permission, relaunch, reopen the picker, and verify the Display, Window, and Area tabs
+4. record a window, reopen the picker, and verify it opens on the Window tab with that window selected
+5. record an area and verify the picker reopens on the Area tab with Last Area selected and its size shown
+6. move through the cards with the arrow keys on each tab
+7. press Return and verify recording starts with the highlighted card, or area drawing for New Area
+8. double-click a card and verify it starts immediately
+9. verify Cancel sits beside the main button.
 
 Current status: Partial automated evidence passed; manual UI validation still pending. Validate manually using the listed steps.
 
@@ -802,7 +816,7 @@ Notes:
 
 User story: As a user recording narration, I want to see that my microphone is live before I start so I do not lose a ten-minute take to a muted input.
 
-Expected behavior: With microphone audio selected, the Audio & Camera settings tab shows a live level meter fed by a metering-only capture session on the chosen device. Levels come from the capture connection's audio channel power reading, mapped from decibels onto 0 to 1 with a floor at -60 dB, and the bar turns green once the input is clearly audible. The session runs only while the tab is visible and the microphone source is selected, and restarts when the device changes. Missing devices, denied permission, and inputs that cannot be opened each surface their own message.
+Expected behavior: With a source that includes the microphone, the Audio & Camera settings tab shows a live level meter fed by a metering-only capture session on the chosen device. Levels come from the capture connection's audio channel power reading, mapped from decibels onto 0 to 1 with a floor at -60 dB, and the bar turns green once the input is clearly audible. The session runs only while the tab is visible and such a source is selected, and restarts when the device changes. Missing devices, denied permission, and inputs that cannot be opened each surface their own message.
 
 Manual steps:
 
@@ -823,7 +837,7 @@ Notes:
 
 User story: As a user, I want to turn the microphone or camera on or off for one take without opening Settings and changing my defaults.
 
-Expected behavior: The recording picker carries microphone and camera toggles under a For this recording heading, seeded from the saved defaults, plus a compact input meter while the microphone is on. Their state is published to the recorder as overrides that apply to the next take only and are cleared once it starts, leaving the saved settings untouched. An override that is unset falls through to the setting. Turning the camera off means no camera is opened, including for the countdown preview. Starting from the global shortcut skips the picker and therefore uses the saved defaults.
+Expected behavior: The recording picker carries microphone and camera toggles under a For this recording heading, seeded from the saved defaults, plus a compact input meter while the audio toggle is on and its source includes the microphone; the audio toggle is named after the source in Settings. Their state is published to the recorder as overrides that apply to the next take only and are cleared once it starts, leaving the saved settings untouched. An override that is unset falls through to the setting. Turning the camera off means no camera is opened, including for the countdown preview. Starting from the global shortcut skips the picker and therefore uses the saved defaults.
 
 Manual steps:
 
@@ -897,6 +911,26 @@ Manual steps:
 3. verify the native cursor appearance is unchanged, each MP4 is playable, and Recording Preview opens without an error. Inspect each MP4 with CursorMetadataTrack.load and verify positions exist only during unpaused video time and stay within normalized final-frame coordinates.
 
 Current status: Partial automated evidence and packaged launch checks passed; Computer Use accessibility was blocked, so live recording validation remains pending.
+
+Result: [ ] Pass  [ ] Fail  [ ] Blocked
+
+Notes:
+
+## US-048 - Microphone and system audio together
+
+User story: As a user narrating a demo of an app that makes sound, I want my voice and the app's sound in the same recording.
+
+Expected behavior: Settings offers Microphone and System Audio as a third audio source. It needs microphone permission and the selected input device. While recording, the microphone and the system audio are written to separate tracks so neither source's timing can disturb the other; when the take ends, Reel mixes them into one 48 kHz stereo AAC track, because Slack, browsers, and most players play only an MP4's first audio track. Video and cursor metadata are copied as they are, and the original file is replaced only once the mixed file is complete. If mixing fails, the recording keeps both tracks and the menu says so.
+
+Manual steps:
+
+1. In Settings, Audio & Camera, choose Microphone and System Audio
+2. play a video with sound and talk over it while recording
+3. stop and verify the file has one audio track with both your voice and the video's sound in sync
+4. drag it into Slack or open it in a browser and verify both are heard
+5. record with Microphone only and System Audio only and verify each still works.
+
+Current status: Partial automated evidence passed; manual UI validation still pending. Validate manually using the listed steps.
 
 Result: [ ] Pass  [ ] Fail  [ ] Blocked
 

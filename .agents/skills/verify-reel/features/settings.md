@@ -52,10 +52,12 @@ Preconditions:
   and require `Text` and `Position`. Require the window to grow for each.
   Restore all values, including `Charcoal`.
 - **Audio & Camera tab.** Click `Audio & Camera`. Turn on `Record camera
-  overlay` and require `Camera`, `Position`, `Size`, and `Shape`. If microphone
-  permission already exists, turn on `Record audio` and require `Source`,
-  `Microphone`, and an `Input level` meter that reacts to sound. Restore the
-  values.
+  overlay` and require `Camera`, `Position`, `Size`, and `Shape`, with shapes
+  `Rounded Square` and `Circle`. If microphone permission already exists, turn
+  on `Record audio` and require `Source` with `Microphone`, `System Audio`,
+  and `Microphone and System Audio`, plus `Microphone` and an `Input level`
+  meter that reacts to sound whenever the source includes the microphone.
+  Restore the values.
 - **Shortcuts tab.** Click `Shortcuts`. Require rows for `Toggle recording`,
   `Discard recording`, and `Pause and resume`, each with a `Turn Off Shortcut`
   button, plus `Restore Default Shortcuts`. To test turning one off, click

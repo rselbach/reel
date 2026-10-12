@@ -36,9 +36,9 @@ Preconditions:
 
 - **Before state.** Save a recursive file listing of the isolated Movies
   directory as `recording-files-before.txt`.
-- **Countdown.** Choose `Start Recording`. Require the countdown overlay to show
-  each configured number and allow Escape to cancel. After cancellation,
-  require no new MP4.
+- **Countdown.** Choose `Start Recording`. Require the countdown HUD, a dark
+  rounded panel with a ring that empties each second, to show each configured
+  number. Click it to cancel and require a cross, then no new MP4.
 - **Active state.** Start again and wait for the start cue. Right-click the
   `Reel` menu-bar item so it opens rather than stops. Require `Recording...`,
   `Pause Recording`, `Stop Recording`, and `Discard Recording`. Capture
@@ -50,9 +50,10 @@ Preconditions:
 - **Stop.** Either click `Stop Recording` in the menu or left-click the status
   item. Require a `Recording Preview` window when preview is enabled.
 - **File proof.** Find the new MP4 only under the isolated Movies directory.
-  Save `stat` and `mdls` output. Require a nonzero file size, MPEG-4 content
-  type, and a playable duration. Play it in Preview and check that the paused
-  interval is absent.
+  With the default folder it is in `Movies/Reel` and named like
+  `Reel 2026-10-11 at 7.58.07 PM.mp4` in local time. Save `stat` and `mdls`
+  output. Require a nonzero file size, MPEG-4 content type, and a playable
+  duration. Play it in Preview and check that the paused interval is absent.
 - **Discard.** Start another take, choose `Discard Recording`, and require the
   alert `Discard this recording?`. Click `Cancel` and require recording to
   continue. Repeat, click `Discard`, and require no new MP4 or recent-recording
@@ -69,6 +70,10 @@ Preconditions:
   state. Pause and ask before changing them.
 - Start and stop cues can enter a microphone recording if the machine routes
   speaker output back into the selected input. Keep audio off for baseline runs.
+- With `Microphone and System Audio`, the stopped file must have one audio
+  track: Reel mixes the two sources when the take ends.
+- A copy started with `open` has its own screen-recording permission. Running
+  its executable directly from a terminal inherits the terminal's instead.
 - A preview window is not enough proof. Inspect the MP4 and play it.
 - Discard is destructive by design. Use only files created inside this run.
 - Quitting during a take finalizes it. Do not use process termination to test

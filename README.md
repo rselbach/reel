@@ -21,13 +21,14 @@ A lightweight macOS screen recording app built with Swift and ScreenCaptureKit.
 - Window recordings can be framed on a background with rounded corners and a
   shadow, in solid or gradient presets
 - Click highlighting, so viewers can see clicks and drags
-- Optional camera overlay (circle or rectangle, positioned and sized during the
-  countdown, before the take starts)
+- Optional camera overlay (circle or rounded square, positioned and sized
+  during the countdown, before the take starts)
 - Optional text overlay for watermark-style labels
 
 **Audio**
 
-- Microphone or system audio capture
+- Microphone, system audio, or both, mixed into one track that every player
+  plays
 - Live input meter, so a muted microphone is obvious before recording
 
 **After the take**
@@ -42,7 +43,10 @@ A lightweight macOS screen recording app built with Swift and ScreenCaptureKit.
 
 - Global shortcuts for start/stop, pause, and discard
 - Refuses to start, and stops cleanly, rather than losing a take to a full disk
-- Menu bar app with minimal UI
+- Menu bar app with minimal UI; it joins the Dock and Command-Tab only while
+  one of its windows is open
+- Recordings land in Movies/Reel, named in local time like macOS screen
+  recordings
 - Automatic updates via Sparkle
 
 ## Requirements
