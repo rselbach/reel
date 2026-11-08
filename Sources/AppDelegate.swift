@@ -841,14 +841,22 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
     }
 
+    /// Opens the recording in Reel's own preview, where its saved edits
+    /// come back, rather than in the default video app.
     @objc private func openRecentRecording(_ sender: NSMenuItem) {
         guard let url = sender.representedObject as? URL else { return }
-        if !NSWorkspace.shared.open(url) {
+        guard FileManager.default.fileExists(atPath: url.path(percentEncoded: false)) else {
             showErrorAlert(
                 title: AppMenuText.couldNotOpenRecording,
                 message: "Could not open \(url.path(percentEncoded: false)). The file may have been moved or deleted."
             )
+            return
         }
+        if let open = previewWindows.first(where: { $0.representedURL == url }) {
+            presentWindow(open)
+            return
+        }
+        showPreview(for: url)
     }
 
     private func addErrorItems(to menu: NSMenu) {
