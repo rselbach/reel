@@ -46,8 +46,8 @@ helper verifies the copied bundle's signature before launch. It does not change
 
 The app is ready when `launch` reports `ready`, `doctor` passes, and Computer
 Use can read either the `Welcome to Reel` window or Reel's menu-bar item. The
-first launch does not request screen-recording permission until the user chooses
-`Grant Screen Recording Access`.
+first launch requests no permission until the user chooses a `Grant...` button
+in the welcome window.
 
 Do not start a second run. If launch reports another Reel process, leave that
 process alone and ask the user to quit it.

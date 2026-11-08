@@ -4,6 +4,12 @@ import AppKit
 // AppDelegate-managed NSWindows; the previous SwiftUI App lifecycle existed
 // only to satisfy the Scene requirement and registered an empty Settings
 // scene — a second, blank settings window if ever triggered.
+// A copy of Reel started this way only reports whether screen recording is
+// allowed; see ScreenRecordingProbe.
+if CommandLine.arguments.contains(ScreenRecordingProbe.argument) {
+    exit(CGPreflightScreenCaptureAccess() ? 0 : 1)
+}
+
 let delegate = AppDelegate()
 let app = NSApplication.shared
 app.delegate = delegate

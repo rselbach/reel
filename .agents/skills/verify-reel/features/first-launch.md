@@ -1,7 +1,7 @@
 # First launch
 
 First launch explains why Reel has no Dock window, shows the global recording
-shortcut, names the required permission, and remembers when the user dismisses
+shortcut, lists the permissions Reel uses, and remembers when the user dismisses
 the welcome window.
 
 ## Sub-features
@@ -9,8 +9,9 @@ the welcome window.
 - `first-launch-welcome` opens the welcome window on fresh preferences.
 - `first-launch-menu-bar-explainer` tells the user where Reel lives.
 - `first-launch-shortcut` shows the current recording shortcut.
-- `first-launch-permission-explainer` names screen-recording access without
-  requesting it automatically.
+- `first-launch-permission-list` lists Microphone, Camera, and Screen & System
+  Audio Recording, in that order, each with `Grant...`, without requesting
+  any of them automatically.
 - `first-launch-dismiss` closes the welcome window and remembers the choice.
 
 ## How to get to it (user POV)
@@ -25,12 +26,12 @@ Preconditions:
 - Start a fresh verification run. Its isolated preferences must not contain
   `hasShownWelcome`.
 - `verify-reel doctor <run-id>` passes.
-- Do not click `Grant Screen Recording Access` in this recipe.
+- Do not click any `Grant...` button in this recipe.
 
 - **Welcome state.** Capture `first-launch-before`. Require a window named
   `Welcome to Reel`, text explaining that Reel lives in the menu bar, the
-  current shortcut, the screen-recording permission explanation, and buttons
-  named `Grant Screen Recording Access` and `Get Started`.
+  current shortcut, the three permission rows in order, three buttons named
+  `Grant...`, and a button named `Get Started`.
 - **No unsolicited prompt.** Before clicking either button, require that the
   accessibility tree contains no macOS screen-recording permission dialog.
 - **Dismiss.** Click the current element whose accessible name is `Get Started`.
@@ -53,5 +54,9 @@ Preconditions:
 - Closing the welcome window with its title-bar close button also sets
   `hasShownWelcome`; use `Get Started` for this recipe.
 - `Get Started` does not grant permission. It only closes the welcome window.
+- `Grant...` on screen recording opens System Settings, moves the welcome
+  window beside it, and floats Reel's icon into the app list. Finishing the
+  grant takes the user's drag and authentication; report it as blocked rather
+  than granting it silently.
 - The menu-bar item is not part of an app-window screenshot. Verify status-menu
   behavior through the feature recipe that led to it, not this first-run proof.

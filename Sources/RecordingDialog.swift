@@ -224,7 +224,7 @@ private enum AppIconCache {
 struct RecordingDialog: View {
     let onStart: (RecordingSelection, RecordingOverrides) -> Void
     let onCancel: () -> Void
-    let onOpenSystemSettings: @MainActor () async throws -> Void
+    let onGrantAccess: () -> Void
     let onRefresh:
         @MainActor () async -> (
             displays: [SCDisplay],
@@ -262,7 +262,7 @@ struct RecordingDialog: View {
         initialOverrides: RecordingOverrides,
         onStart: @escaping (RecordingSelection, RecordingOverrides) -> Void,
         onCancel: @escaping () -> Void,
-        onOpenSystemSettings: @escaping @MainActor () async throws -> Void,
+        onGrantAccess: @escaping () -> Void,
         onRefresh:
             @escaping @MainActor () async -> (
                 displays: [SCDisplay],
@@ -272,7 +272,7 @@ struct RecordingDialog: View {
     ) {
         self.onStart = onStart
         self.onCancel = onCancel
-        self.onOpenSystemSettings = onOpenSystemSettings
+        self.onGrantAccess = onGrantAccess
         self.onRefresh = onRefresh
         self.lastRegionOutputSize = lastRegionOutputSize
         _recordAudio = State(initialValue: initialOverrides.recordAudio ?? false)
@@ -400,7 +400,13 @@ struct RecordingDialog: View {
                 Text(PermissionText.required)
                     .font(.title3)
                     .fontWeight(.semibold)
-                ScreenRecordingPermissionSteps(onOpenSystemSettings: onOpenSystemSettings)
+                Text(PermissionText.pickerExplainer)
+                    .multilineTextAlignment(.center)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                Button(PermissionText.grantAccess, action: onGrantAccess)
+                    .buttonStyle(.borderedProminent)
+                    .keyboardShortcut(.defaultAction)
             }
             .padding(.horizontal, 48)
             Spacer()

@@ -58,7 +58,7 @@ H2 sections in this order.
 ## Features
 
 - [First launch](./first-launch.md) covers the welcome window, menu-bar and
-  shortcut explanations, permission explanation, and persisted dismissal.
+  shortcut explanations, permission list, and persisted dismissal.
 - [Choose a recording target](./choose-recording-target.md) covers display,
   window, and area entry points, refresh, search, and per-take device toggles.
 - [Recording lifecycle](./recording-lifecycle.md) covers countdown, active,

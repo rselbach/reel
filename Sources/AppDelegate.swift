@@ -6,11 +6,6 @@ import os.log
 
 private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "com.rselbach.reel", category: "AppDelegate")
 
-enum SystemSettingsLink {
-    static let screenCapturePrivacy = URL(
-        string: "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")
-}
-
 enum AppMenuText {
     static let startRecording = "Start Recording..."
     static let recordingInProgress = "● Recording..."
@@ -315,6 +310,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var previewWindows: [NSWindow] = []
     private var aboutWindow: NSWindow?
     private var welcomeWindow: NSWindow?
+    private var permissionCenter: PermissionCenter!
     private var isCountdownActive = false
     private var activeCountdown: CountdownOverlay?
     private var recordingStartTask: Task<Void, Never>?
@@ -376,6 +372,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
         screenRecorder.requestSaveDestination = { [weak self] request in
             await self?.promptForSaveDestination(request)
+        }
+        permissionCenter = PermissionCenter(recorder: screenRecorder)
+        permissionCenter.onChange = { [weak self] in
+            self?.rebuildMenu()
+            self?.applyStatusItemAppearance()
         }
 
         if Bundle.main.bundleIdentifier != nil {
@@ -493,15 +494,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private func showWelcome() {
         if welcomeWindow == nil {
             let welcomeView = WelcomeView(
-                recorder: screenRecorder,
-                onRequestPermission: { [weak self] in
-                    Task { @MainActor in
-                        guard let self else { return }
-                        await self.screenRecorder.requestPermission()
-                        self.rebuildMenu()
-                    }
+                permissions: permissionCenter,
+                onGrant: { [weak self] permission in
+                    self?.grant(permission)
                 },
-                onOpenSystemSettings: openScreenRecordingSettings,
                 onDismiss: { [weak self] in
                     self?.welcomeWindow?.close()
                 }
@@ -514,6 +510,29 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
 
         presentWindow(welcomeWindow)
+        permissionCenter.startMonitoring()
+    }
+
+    private func grant(_ permission: PrivacyPermission) {
+        guard permissionCenter.state(of: permission) != .needsRelaunch else {
+            relaunchFromMenu()
+            return
+        }
+        Task { @MainActor in
+            do {
+                try await permissionCenter.grant(permission, beside: welcomeWindow)
+            } catch {
+                showErrorAlert(title: PermissionText.openSettingsFailedTitle, message: error.localizedDescription)
+            }
+        }
+    }
+
+    /// The menu and the picker send a missing screen recording permission
+    /// here, where the welcome window guides the user through System
+    /// Settings.
+    @objc private func grantScreenRecordingAccess() {
+        showWelcome()
+        grant(.screenRecording)
     }
 
     private func setupHotkey() {
@@ -670,8 +689,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
         menu.addItem(
             NSMenuItem(
-                title: PermissionText.openSystemSettings,
-                action: #selector(openScreenRecordingSettingsFromMenu),
+                title: PermissionText.grantAccess,
+                action: #selector(grantScreenRecordingAccess),
                 keyEquivalent: ""
             ))
         if AppRelauncher.isAvailable {
@@ -872,6 +891,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             aboutWindow = nil
         } else if window === welcomeWindow {
             welcomeWindow = nil
+            permissionCenter.stopMonitoring()
             AppSettings.shared.hasShownWelcome = true
         }
 
@@ -910,28 +930,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     @objc private func checkForUpdates() {
         updaterController?.checkForUpdates(nil)
-    }
-
-    /// Requests access before opening the pane: macOS lists Reel under
-    /// Screen & System Audio Recording only once Reel has asked, and asking
-    /// again shows no prompt.
-    func openScreenRecordingSettings() async throws {
-        await screenRecorder.requestPermission()
-        rebuildMenu()
-        guard !screenRecorder.hasPermission else { return }
-        guard let url = SystemSettingsLink.screenCapturePrivacy, NSWorkspace.shared.open(url) else {
-            throw PermissionError.systemSettingsUnavailable
-        }
-    }
-
-    @objc private func openScreenRecordingSettingsFromMenu() {
-        Task { @MainActor in
-            do {
-                try await openScreenRecordingSettings()
-            } catch {
-                showErrorAlert(title: PermissionText.openSettingsFailedTitle, message: error.localizedDescription)
-            }
-        }
     }
 
     @objc private func relaunchFromMenu() {
@@ -1188,7 +1186,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                     self?.recordingDialogWindow?.close()
                     self?.recordingDialogWindow = nil
                 },
-                onOpenSystemSettings: openScreenRecordingSettings,
+                onGrantAccess: { [weak self] in
+                    self?.recordingDialogWindow?.close()
+                    self?.recordingDialogWindow = nil
+                    self?.grantScreenRecordingAccess()
+                },
                 onRefresh: { [weak self] in
                     guard let self else { return ([], [], []) }
                     await self.screenRecorder.refreshWindows()

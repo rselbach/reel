@@ -43,20 +43,21 @@ Notes:
 
 User story: As a first-time user, I want clear guidance when screen recording permission is missing so I can enable the app.
 
-Expected behavior: The first-run welcome window explains the menu bar icon and the recording shortcut, then requests screen recording permission with context. Until access is in effect, Grant Screen Recording Access is the prominent default button and Get Started is secondary. Once access has been requested and is still not in effect, the window shows the two steps, turning Reel on in System Settings and relaunching, with Open System Settings and Relaunch Reel buttons; Relaunch Reel starts a fresh instance and quits the current one, and failures are surfaced in an alert. Get Started becomes the prominent default only once access is in effect. Launch checks access without prompting, and the welcome returns on every launch until access is in effect, so a skipped welcome never leads to the bare system prompt. While permission is missing, the status item menu shows the requirement, Open System Settings, and Relaunch Reel, and leaves out the raw ScreenCaptureKit error.
+Expected behavior: The welcome window explains the menu bar icon and the recording shortcut, then lists Microphone, Camera (optional), and Screen & System Audio Recording, each with a Grant... button that becomes a green Granted label once allowed. Screen recording comes last because macOS may need Reel to relaunch before it applies. Grant... on microphone or camera shows the macOS prompt. For screen recording, and for a microphone or camera prompt the user already declined, it opens the matching Privacy & Security pane, moves the welcome window beside System Settings and keeps it floating, and replaces the row's description with what to do there. For screen recording, a copy of Reel's icon then floats from the welcome window into the app list to show that the icon can be dragged there; the icon at the top of the welcome window is a drag source for Reel's bundle, and the animation is skipped with Reduce Motion. While the window is open, Reel checks each permission every second; screen recording is checked by a fresh Reel process started with --probe-screen-recording, since a running process does not see a new grant. Once the grant is seen, Reel asks ScreenCaptureKit again and shows Granted if that works, or Relaunch if macOS needs a restart. Get Started becomes the prominent default only once screen recording is in effect. Launch checks access without prompting, and the welcome returns on every launch until access is in effect. While permission is missing, the status item menu shows the requirement, Grant Access..., and Relaunch Reel, and the recording picker shows Grant Access...; both open the welcome window and start the System Settings guide.
 
 Manual steps:
 
-1. Launch Reel with screen recording permission revoked
-2. verify the welcome window explains the permission, that Grant Screen Recording Access is the highlighted default, and that Get Started is not
-3. press Get Started without granting, quit, relaunch, and verify the welcome appears again rather than the system prompt
-4. press Grant Screen Recording Access and verify the window switches to the two steps with Open System Settings and Relaunch Reel
-5. grant access in System Settings
-6. press Relaunch Reel and verify a new instance starts and the old one quits
-7. verify the relaunched welcome window shows access granted with Get Started as the highlighted default
-8. verify recording works after the relaunch.
+1. Launch Reel with screen recording, microphone, and camera access reset
+2. verify the welcome lists Microphone, Camera, and Screen & System Audio Recording in that order, each with Grant..., and that Get Started is not the highlighted default
+3. press Grant... on Microphone and verify the macOS prompt, then Granted after allowing
+4. press Grant... on Screen & System Audio Recording and verify System Settings opens that pane, the welcome window moves beside it, and Reel's icon floats into the list
+5. drag the welcome window's icon into the list and authenticate
+6. verify the row shows Granted or Relaunch
+7. relaunch if asked and verify Get Started is the highlighted default and recording works
+8. close the welcome without granting, quit, relaunch, and verify the welcome returns rather than the system prompt
+9. without access, verify Grant Access... in the status menu and in the picker opens the welcome and starts the same guide.
 
-Current status: Partial automated evidence passed; manual UI validation still pending. Validate manually using the listed steps.
+Current status: Guided screen recording grant validated manually on 2026-11-07 in a signed verification copy; microphone, camera, picker, and menu entry points still pending.
 
 Result: [ ] Pass  [ ] Fail  [ ] Blocked
 
@@ -66,14 +67,14 @@ Notes:
 
 User story: As a user without permission, I want one menu action to open macOS Screen Recording privacy settings.
 
-Expected behavior: Open System Settings uses the x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture deep link and shows an alert if opening fails. It requests access first, because macOS lists an app under Screen & System Audio Recording only after the app has asked; if access is already in effect, it opens nothing. The deep-link URL is centralized in SystemSettingsLink and covered by a unit test.
+Expected behavior: Each permission's Privacy & Security deep link (Privacy_ScreenCapture, Privacy_Microphone, Privacy_Camera under x-apple.systempreferences:com.apple.preference.security) lives on PrivacyPermission.settingsURL and is covered by a unit test. Grant Access... in the status menu opens the welcome window and the System Settings guide (US-002) on the screen recording pane, and an alert names the pane to open by hand if the link fails. Reel no longer asks ScreenCaptureKit first to get listed: the user drags Reel's icon into the list or turns on an existing entry.
 
 Manual steps:
 
-1. With permission missing and Reel never having asked, choose Open System Settings and verify Reel appears in the Screen & System Audio Recording list
-2. choose Relaunch Reel from the menu and verify a new instance starts and the old one quits
-3. verify System Settings opens Privacy & Security > Screen & System Audio Recording or equivalent Screen Capture pane
-4. verify failure alert if URL cannot open.
+1. With screen recording access missing, choose Grant Access... from the status menu
+2. verify the welcome window opens, System Settings opens Privacy & Security > Screen & System Audio Recording, and the welcome window moves beside it
+3. verify the failure alert names the pane if the URL cannot open
+4. choose Relaunch Reel from the menu and verify a new instance starts and the old one quits.
 
 Current status: Partial automated evidence passed; manual UI validation still pending. Validate manually using the listed steps.
 

@@ -1241,24 +1241,26 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(url?.absoluteString, "https://github.com/rselbach/reel/commit/deadbeef")
     }
 
-    func testScreenCapturePrivacySettingsLinkTargetsExpectedPane() {
-        let url = SystemSettingsLink.screenCapturePrivacy
-        XCTAssertEqual(url?.scheme, "x-apple.systempreferences")
-        XCTAssertEqual(
-            url?.absoluteString,
-            "x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture"
-        )
+    func testPrivacySettingsLinksTargetEachPane() {
+        let prefix = "x-apple.systempreferences:com.apple.preference.security?"
+        XCTAssertEqual(PrivacyPermission.screenRecording.settingsURL?.absoluteString, prefix + "Privacy_ScreenCapture")
+        XCTAssertEqual(PrivacyPermission.microphone.settingsURL?.absoluteString, prefix + "Privacy_Microphone")
+        XCTAssertEqual(PrivacyPermission.camera.settingsURL?.absoluteString, prefix + "Privacy_Camera")
+        XCTAssertEqual(PrivacyPermission.allCases.filter(\.acceptsDroppedApp), [.screenRecording])
     }
 
-    func testPermissionTextOffersBothStepsOutOfAMissingPermission() {
+    func testPermissionTextNamesEachWayOutOfAMissingPermission() {
         XCTAssertEqual(PermissionText.required, "Screen Recording Permission Required")
-        XCTAssertEqual(PermissionText.openSystemSettings, "Open System Settings...")
+        XCTAssertEqual(PermissionText.grantAccess, "Grant Access...")
+        XCTAssertEqual(PermissionText.grant, "Grant...")
         XCTAssertEqual(PermissionText.relaunch, "Relaunch Reel")
+        XCTAssertTrue(PermissionText.dragHint.contains("Drag the Reel icon"))
+        XCTAssertTrue(PermissionText.relaunchHint.contains("Relaunch Reel"))
         XCTAssertEqual(PermissionText.openSettingsFailedTitle, "Could not open System Settings")
         XCTAssertEqual(PermissionText.relaunchFailedTitle, "Could not relaunch Reel")
         XCTAssertEqual(
-            PermissionError.systemSettingsUnavailable.errorDescription,
-            "Open System Settings, then go to Privacy & Security → Screen & System Audio Recording."
+            PermissionError.systemSettingsUnavailable(.microphone).errorDescription,
+            "Open System Settings, then go to Privacy & Security → Microphone."
         )
     }
 
@@ -1324,13 +1326,36 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(SettingsText.restoreDefaultShortcuts, "Restore Default Shortcuts")
     }
 
-    func testWelcomeStepFollowsTheRequestUntilAccessIsInEffect() {
+    func testPermissionStateFollowsWhatTheUserMustDoNext() {
         XCTAssertTrue(WelcomeText.menuBarExplainer.contains("choose what to record"))
-        XCTAssertEqual(WelcomeStep.current(hasPermission: false, hasRequestedPermission: false), .requestAccess)
-        XCTAssertEqual(WelcomeStep.current(hasPermission: false, hasRequestedPermission: true), .finishInSettings)
-        XCTAssertEqual(WelcomeStep.current(hasPermission: true, hasRequestedPermission: false), .ready)
-        XCTAssertEqual(WelcomeStep.current(hasPermission: true, hasRequestedPermission: true), .ready)
-        XCTAssertTrue(PermissionText.relaunchStep.contains("Relaunch Reel"))
+        XCTAssertEqual(PermissionState.screenRecording(inEffect: true, allowedInSettings: false), .granted)
+        XCTAssertEqual(PermissionState.screenRecording(inEffect: true, allowedInSettings: true), .granted)
+        XCTAssertEqual(PermissionState.screenRecording(inEffect: false, allowedInSettings: true), .needsRelaunch)
+        XCTAssertEqual(PermissionState.screenRecording(inEffect: false, allowedInSettings: false), .missing)
+        XCTAssertEqual(PermissionState(.authorized), .granted)
+        XCTAssertEqual(PermissionState(.notDetermined), .notRequested)
+        XCTAssertEqual(PermissionState(.denied), .missing)
+        XCTAssertEqual(PermissionState(.restricted), .missing)
+    }
+
+    func testGuidePlacesTheWindowBesideSystemSettings() {
+        let visible = NSRect(x: 0, y: 0, width: 1800, height: 1100)
+        let size = NSSize(width: 480, height: 600)
+
+        let roomOnRight = GuideLayout.frame(
+            for: size, beside: NSRect(x: 200, y: 300, width: 700, height: 650), in: visible)
+        XCTAssertEqual(roomOnRight, NSRect(x: 916, y: 350, width: 480, height: 600))
+
+        let roomOnLeft = GuideLayout.frame(
+            for: size, beside: NSRect(x: 1000, y: 300, width: 700, height: 650), in: visible)
+        XCTAssertEqual(roomOnLeft.maxX, 1000 - GuideLayout.gap)
+
+        let noRoom = GuideLayout.frame(
+            for: size, beside: NSRect(x: 400, y: 0, width: 1000, height: 400), in: visible)
+        XCTAssertEqual(noRoom, NSRect(x: 1320, y: 0, width: 480, height: 600))
+
+        let target = GuideLayout.dropTarget(in: NSRect(x: 100, y: 100, width: 1000, height: 1000))
+        XCTAssertEqual(target, NSPoint(x: 720, y: 650))
     }
 
     func testAfterRecordingActionMatchesWhatFinalizationDoes() {
