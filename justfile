@@ -63,7 +63,7 @@ build-app: build
     /usr/libexec/PlistBuddy -c "Set :GitCommit $GIT_COMMIT" "{{ app_dir }}/Contents/Info.plist"
     echo "Embedded commit: $GIT_COMMIT"
     cp Sources/AppIcon.icns "{{ app_dir }}/Contents/Resources/"
-    sparkle_framework_path="$(find .build -type d -path "*/release/Sparkle.framework" | head -n 1)"
+    sparkle_framework_path="$(find .build -type d -ipath "*/release/Sparkle.framework" | head -n 1)"
     if [[ -z "$sparkle_framework_path" ]]; then
         echo "Error: Sparkle.framework not found in .build"
         exit 1
