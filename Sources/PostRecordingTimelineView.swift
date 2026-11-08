@@ -216,6 +216,8 @@ private struct ZoomSceneSettingsPopover: View {
 }
 
 struct PostRecordingTimelineView: View {
+    private static let zoomLaneCoordinateSpaceName = "ZoomLane"
+
     let videoURL: URL
     @Binding var edit: TimelineEdit
     /// Read-only here, but a binding so the Split shortcut sees the current
@@ -224,7 +226,7 @@ struct PostRecordingTimelineView: View {
     @Binding var currentSourceTime: Double
     @Binding var selection: TimelineSelection
     let onSeek: (Double) -> Void
-    /// Shows a source frame without moving it to kept footage, so a trim
+    /// Shows a source frame without moving it to kept footage, so a timeline
     /// handle can show the frame it is moving over. Nil ends the scrub.
     let onScrub: (Double?) -> Void
     let onSelectZoomScene: (ZoomScene.ID) -> Void
@@ -498,6 +500,7 @@ struct PostRecordingTimelineView: View {
             }
         }
         .frame(width: scale.width, height: zoomLaneHeight)
+        .coordinateSpace(name: Self.zoomLaneCoordinateSpaceName)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(PostRecordingText.zoomLane)
         .accessibilityValue("\(edit.zoomScenes.count) zoom scenes")
@@ -662,7 +665,9 @@ struct PostRecordingTimelineView: View {
         edge: ZoomResizeEdge,
         scale: TimelineScale
     ) -> some Gesture {
-        DragGesture(minimumDistance: 0)
+        // Measure against the stationary lane, not the handle that moves as
+        // the draft span changes, or its movement feeds back into the drag.
+        DragGesture(minimumDistance: 0, coordinateSpace: .named(Self.zoomLaneCoordinateSpaceName))
             .onChanged { value in
                 let state: ZoomResizeState
                 if let current = zoomResizeState,
@@ -696,6 +701,7 @@ struct PostRecordingTimelineView: View {
                     originalSpan: state.originalSpan,
                     currentSpan: span
                 )
+                onScrub(edge == .leading ? span.start : span.end)
             }
             .onEnded { _ in
                 finishZoomResize(sceneID: scene.id)
@@ -719,6 +725,7 @@ struct PostRecordingTimelineView: View {
         else { return }
         do {
             try edit.resizeZoomScene(id: scene.id, to: span)
+            onSeek(edge == .leading ? span.start : span.end)
         } catch {
             showEditError(error.localizedDescription)
         }
@@ -752,6 +759,7 @@ struct PostRecordingTimelineView: View {
     }
 
     private func finishZoomResize(sceneID: ZoomScene.ID) {
+        defer { onScrub(nil) }
         guard let state = zoomResizeState, state.sceneID == sceneID else { return }
         zoomResizeState = nil
         guard state.currentSpan != state.originalSpan else { return }
@@ -800,11 +808,13 @@ struct PostRecordingTimelineView: View {
                     start: max(gap.start, min(start, time)),
                     end: min(gap.end, max(start, time))
                 )
+                onScrub(min(max(gap.start, time), gap.end))
             }
             .onEnded { value in
                 defer {
                     zoomDraftStart = nil
                     zoomDraftSpan = nil
+                    onScrub(nil)
                 }
                 guard let span = zoomDraftSpan else { return }
                 if span.duration < TimelineEdit.minimumZoomSceneDuration {
@@ -812,6 +822,7 @@ struct PostRecordingTimelineView: View {
                     return
                 }
                 addZoomScene(span: span)
+                onScrub(min(max(span.start, scale.sourceTime(at: value.location.x)), span.end))
             }
     }
 

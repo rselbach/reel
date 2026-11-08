@@ -20,16 +20,14 @@ Start from the repository root. The helper refuses to launch if any Reel
 process is already running because Reel registers machine-wide hotkeys and uses
 machine-wide screen, microphone, and camera permissions.
 
+Always sign test app bundles with the user's Developer ID Application identity
+so macOS permissions can persist across rebuilds. Keep the verification bundle
+identifier stable. Check `security find-identity -v -p codesigning` if the
+identity below is unavailable; do not fall back to unsigned or ad-hoc builds.
+
 ```bash
 run_id="$(date -u +%Y%m%dT%H%M%SZ)-$$"
-.agents/skills/verify-reel/scripts/verify-reel launch "${run_id}"
-```
-
-To re-sign the disposable copy after its bundle metadata changes, pass a
-Developer ID Application identity:
-
-```bash
-SIGNING_IDENTITY="<Developer ID Application identity>" \
+SIGNING_IDENTITY="Developer ID Application: Roberto Teixeira (LS8YD2TR79)" \
   .agents/skills/verify-reel/scripts/verify-reel launch "${run_id}"
 ```
 

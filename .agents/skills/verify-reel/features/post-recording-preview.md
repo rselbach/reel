@@ -16,6 +16,7 @@ take. Edits are saved with the recording as they are made.
 - `preview-edit` trims either end with handles, splits at the playhead,
   deletes or restores clips, and exports an edited copy.
 - `preview-undo` undoes and redoes timeline changes from the Edit menu.
+- `preview-zoom-timing` scrubs the preview while drawing or resizing a zoom scene.
 - `preview-saved-edits` keeps cuts and zoom scenes with the recording and
   restores them when it is opened from Recent Recordings.
 - `preview-transport` plays and skips through edited time, the only clock.
@@ -76,6 +77,13 @@ Preconditions:
   pasteboard file URL named like `<recording>-edited.mp4` whose duration
   matches the kept clips. Click `Share` and require the share popover to name
   the same file; press Escape without picking a service.
+- **Zoom timing.** Drag empty space in the zoom lane in both directions.
+  Require the preview and playhead to follow the moving boundary. Select the
+  scene and drag each edge inward and outward, including against a neighboring
+  scene and the recording ends. Require the preview to show the constrained
+  boundary while dragging, then the focus editor to show that frame on release.
+  A click without movement must leave scrubbing inactive. Require each resize
+  to undo in one step. Capture `preview-zoom-timing` during and after a drag.
 - **Saved edits.** Delete a clip, click `Done`, and require no alert. Reopen
   the recording from `Recent Recordings` and require the same `Deleted clip`
   and edited time.

@@ -242,7 +242,7 @@ struct PostRecordingView: View {
     @State private var playbackIntent: PlaybackIntent = .paused
     /// One frame of the recording, for the arrow keys.
     @State private var frameDuration: Double = 1.0 / 30
-    /// While a trim handle shows frames from footage that may be deleted,
+    /// While a timeline drag shows frames from footage that may be deleted,
     /// playback must not move the playhead back onto kept footage.
     @State private var isScrubbing = false
     @State private var timelineSelection: TimelineSelection = .none
@@ -261,12 +261,12 @@ struct PostRecordingView: View {
 
     var body: some View {
         VStack(spacing: 14) {
-            if case .zoomScene(let sceneID) = timelineSelection,
-                let scene = edit?.zoomScene(id: sceneID)
+            if !isScrubbing, case .zoomScene(let sceneID) = timelineSelection,
+                let edit, let scene = edit.zoomScene(id: sceneID)
             {
                 ZoomFocusEditor(
                     videoURL: videoURL,
-                    sourceTime: scene.span.start + scene.span.duration / 2,
+                    sourceTime: min(currentTime, max(0, edit.sourceDuration - frameDuration)),
                     focalPoint: scene.focalPoint,
                     scale: scene.settings.level.scale,
                     onChange: { point in
