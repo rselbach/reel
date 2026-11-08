@@ -17,6 +17,9 @@ struct VideoPlayerView: NSViewRepresentable {
         let view = AVPlayerView()
         view.player = player
         view.controlsStyle = .none
+        // Live Text would otherwise make text in a paused frame selectable
+        // and fill the accessibility tree with it.
+        view.allowsVideoFrameAnalysis = false
         return view
     }
 
@@ -51,7 +54,6 @@ enum PostRecordingText {
     static let trimStart = "Trim start"
     static let trimEnd = "Trim end"
     static let trimHandleHelp = "Drag to trim. Trimmed footage stays on the timeline so you can restore it."
-    static let clearSelection = "Clear Selection"
     static let splitClipAtPlayhead = "Split Clip at Playhead"
     static let deleteClip = "Delete Clip"
     static let restoreClip = "Restore Clip"
@@ -66,6 +68,7 @@ enum PostRecordingText {
     static let zoomSceneHint = "Select this scene to set its focal point."
     static let addZoomSceneAtPlayhead = "Add Zoom Scene at Playhead"
     static let deleteZoomScene = "Delete Zoom Scene"
+    static let zoomSettings = "Zoom Settings..."
     static let editClipFailedTitle = "Could Not Edit Timeline"
     static let splitClipFailedMessage =
         "Move the playhead at least 0.05 seconds from either edge of a clip, then split again."
@@ -78,10 +81,6 @@ enum PostRecordingText {
     static let play = "Play"
     static let pause = "Pause"
     static let editedPlaybackTime = "Edited playback time"
-    static let undo = "Undo"
-    static let redo = "Redo"
-    static let undoHelp = "Undo (⌘Z)"
-    static let redoHelp = "Redo (⇧⌘Z)"
     static let export = "Export"
     static let exportEdited = "Edited Video..."
     static let exportEditedHelp = "Full size, with your edits"
@@ -241,14 +240,10 @@ struct PostRecordingView: View {
                 intent: playbackIntent,
                 currentTime: editedCurrentTime,
                 duration: edit?.editedDuration ?? 0,
-                isEnabled: player != nil && edit != nil && !isExporting && !isEditingZoomFocus,
+                isEnabled: player != nil && edit != nil && !isExporting,
                 onTogglePlayback: togglePlayback,
                 onSkip: skipEditedSeconds
             )
-            // An overlay, so the playback buttons stay centered.
-            .overlay(alignment: .leading) {
-                undoButtons
-            }
             .padding(.horizontal)
 
             if let loadedEdit = edit {
@@ -384,26 +379,6 @@ struct PostRecordingView: View {
 
     private var hasEdits: Bool {
         edit?.hasMeaningfulChanges == true
-    }
-
-    private var undoButtons: some View {
-        HStack(spacing: 8) {
-            Button(action: undoEdit) {
-                Label(PostRecordingText.undo, systemImage: "arrow.uturn.backward")
-                    .labelStyle(.iconOnly)
-            }
-            .keyboardShortcut("z", modifiers: .command)
-            .help(PostRecordingText.undoHelp)
-            .disabled(!canUndo)
-
-            Button(action: redoEdit) {
-                Label(PostRecordingText.redo, systemImage: "arrow.uturn.forward")
-                    .labelStyle(.iconOnly)
-            }
-            .keyboardShortcut("z", modifiers: [.command, .shift])
-            .help(PostRecordingText.redoHelp)
-            .disabled(!canRedo)
-        }
     }
 
     private var shareURL: URL? {
@@ -787,6 +762,10 @@ struct PostRecordingView: View {
 
     private func togglePlayback() {
         guard let player, let edit else { return }
+        if case .zoomScene(let id) = timelineSelection, let scene = edit.zoomScene(id: id) {
+            playZoomScene(scene)
+            return
+        }
         switch playbackIntent {
         case .playing:
             pausePlayback()
@@ -801,12 +780,25 @@ struct PostRecordingView: View {
         }
     }
 
+    /// Playing while a zoom scene is being aimed leaves the focal point
+    /// editor and plays from just before the scene, so its zoom shows in
+    /// motion.
+    private func playZoomScene(_ scene: ZoomScene) {
+        timelineSelection = .none
+        seekPlayer(to: max(0, scene.span.start - 1))
+        playbackIntent = .playing
+        player?.play()
+    }
+
     private func pausePlayback() {
         player?.pause()
         playbackIntent = .paused
     }
 
     private func skipEditedSeconds(_ seconds: Double) {
+        if isEditingZoomFocus {
+            timelineSelection = .none
+        }
         guard
             let edit,
             let sourceTime = PostRecordingTimelineMath.sourceTimeBySkipping(

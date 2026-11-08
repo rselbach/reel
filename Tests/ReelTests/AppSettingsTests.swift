@@ -1292,7 +1292,7 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(PostRecordingText.exportGIF, "Animated GIF...")
         XCTAssertEqual(PostRecordingText.share, "Share")
         XCTAssertEqual(PostRecordingText.timeline, "Timeline")
-        XCTAssertEqual(PostRecordingText.clearSelection, "Clear Selection")
+        XCTAssertEqual(PostRecordingText.zoomSettings, "Zoom Settings...")
         XCTAssertEqual(PostRecordingText.splitClipAtPlayhead, "Split Clip at Playhead")
         XCTAssertEqual(PostRecordingText.split, "Split")
         XCTAssertEqual(PostRecordingText.splitHelp, "Split the clip at the playhead (⌘B)")

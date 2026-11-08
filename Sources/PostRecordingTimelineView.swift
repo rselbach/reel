@@ -138,7 +138,6 @@ private struct ZoomResizeState {
 
 private struct ZoomSceneSettingsPopover: View {
     @Binding var settings: ZoomSceneSettings
-    let onDelete: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -168,11 +167,6 @@ private struct ZoomSceneSettingsPopover: View {
             }
             .labelsHidden()
             .pickerStyle(.segmented)
-
-            Divider()
-
-            Button(PostRecordingText.deleteZoomScene, role: .destructive, action: onDelete)
-                .frame(maxWidth: .infinity, alignment: .trailing)
         }
         .controlSize(.small)
         .padding()
@@ -296,11 +290,6 @@ struct PostRecordingTimelineView: View {
             Spacer()
 
             if case .clip(let id) = selection, let clip = edit.clip(id: id) {
-                Button(PostRecordingText.clearSelection) {
-                    selection = .none
-                }
-                .keyboardShortcut(.cancelAction)
-
                 if clip.isDeleted {
                     Button(PostRecordingText.restoreClip) {
                         restoreClip(id: id)
@@ -317,15 +306,9 @@ struct PostRecordingTimelineView: View {
                     .disabled(!edit.canDeleteClip(id: id))
                 }
             } else if case .zoomScene(let id) = selection, edit.zoomScene(id: id) != nil {
-                Button(PostRecordingText.clearSelection) {
-                    selection = .none
+                Button(PostRecordingText.zoomSettings) {
+                    zoomSettingsPopoverSceneID = id
                 }
-                .keyboardShortcut(.cancelAction)
-
-                Button(PostRecordingText.deleteZoomScene, role: .destructive) {
-                    deleteSelection()
-                }
-                .keyboardShortcut(.delete, modifiers: [])
             }
 
             Button {
@@ -337,6 +320,31 @@ struct PostRecordingTimelineView: View {
             .help(PostRecordingText.splitHelp)
             .disabled(!edit.canSplit(at: currentSourceTime))
         }
+        .background {
+            selectionShortcuts
+        }
+    }
+
+    /// Escape clears the selection, and Delete removes a selected zoom
+    /// scene, whose own trash button is its visible delete control.
+    private var selectionShortcuts: some View {
+        ZStack {
+            Button("") {
+                selection = .none
+            }
+            .keyboardShortcut(.cancelAction)
+            .disabled(selection == .none)
+
+            if case .zoomScene = selection {
+                Button("") {
+                    deleteSelection()
+                }
+                .keyboardShortcut(.delete, modifiers: [])
+            }
+        }
+        .opacity(0)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 
     private var selectionDescription: String {
@@ -473,17 +481,19 @@ struct PostRecordingTimelineView: View {
         )
         .contentShape(Rectangle())
         .onTapGesture {
-            selectZoomScene(scene.id)
+            // A second click on the selected scene opens its settings.
+            if isSelected {
+                zoomSettingsPopoverSceneID = scene.id
+            } else {
+                selectZoomScene(scene.id)
+            }
         }
         .popover(
             isPresented: zoomSettingsPopoverPresented(for: scene.id),
             attachmentAnchor: .rect(.bounds),
             arrowEdge: .bottom
         ) {
-            ZoomSceneSettingsPopover(
-                settings: zoomSettingsBinding(for: scene.id),
-                onDelete: { removeZoomScene(id: scene.id) }
-            )
+            ZoomSceneSettingsPopover(settings: zoomSettingsBinding(for: scene.id))
         }
         .overlay(alignment: .trailing) {
             if isSelected, blockWidth >= 88 {
@@ -559,7 +569,6 @@ struct PostRecordingTimelineView: View {
     private func selectZoomScene(_ sceneID: ZoomScene.ID) {
         guard edit.zoomScene(id: sceneID) != nil else { return }
         selection = .zoomScene(sceneID)
-        zoomSettingsPopoverSceneID = sceneID
         focusedZoomSceneID = sceneID
         onSelectZoomScene(sceneID)
     }
