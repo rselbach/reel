@@ -48,7 +48,7 @@ enum PostRecordingText {
     static let share = "Share"
     static let delete = "Move to Trash"
     static let timeline = "Timeline"
-    static let timelineHelp = "Drag the yellow handles to trim. To remove a middle part, split around it and delete it."
+    static let timelineHelp = "Drag either end to trim. To remove a middle part, split around it and delete it."
     static let split = "Split"
     static let splitHelp = "Split the clip at the playhead (⌘B)"
     static let trimStart = "Trim start"
@@ -91,8 +91,6 @@ enum PostRecordingText {
     static let exporting = "Exporting"
     static let cancelExport = "Cancel"
     static let showInFinder = "Show in Finder"
-    static let editNote =
-        "Deleted clips are skipped, and zoom scenes are applied during playback and export."
     static let done = "Done"
     static let recordAgain = "Record Again"
     static let changeTarget = "Change Target..."
@@ -261,12 +259,6 @@ struct PostRecordingView: View {
                 )
                 .padding(.horizontal)
                 .disabled(isExporting)
-
-                if hasEdits {
-                    Text(PostRecordingText.editNote)
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
             }
 
             if let error = exportError {

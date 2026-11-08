@@ -30,42 +30,6 @@ enum PostRecordingTimelineMath {
     static let minimumThumbnailCount = 3
     static let maximumThumbnailCount = 24
 
-    static func position(for time: Double, duration: Double, width: CGFloat) -> CGFloat {
-        guard time.isFinite, duration.isFinite, duration > 0, width.isFinite, width > 0 else {
-            return 0
-        }
-        let progress = min(max(0, time / duration), 1)
-        return width * progress
-    }
-
-    static func sourceTime(at position: CGFloat, duration: Double, width: CGFloat) -> Double {
-        guard position.isFinite, duration.isFinite, duration > 0, width.isFinite, width > 0 else {
-            return 0
-        }
-        let progress = min(max(0, position / width), 1)
-        return duration * progress
-    }
-
-    static func translatedSourceTime(
-        origin: Double,
-        translation: CGFloat,
-        duration: Double,
-        width: CGFloat
-    ) -> Double {
-        guard origin.isFinite else { return 0 }
-        return sourceTime(
-            at: position(for: origin, duration: duration, width: width) + translation,
-            duration: duration,
-            width: width
-        )
-    }
-
-    static func width(for span: TimelineSpan, duration: Double, width: CGFloat) -> CGFloat {
-        let start = position(for: span.start, duration: duration, width: width)
-        let end = position(for: span.end, duration: duration, width: width)
-        return max(0, end - start)
-    }
-
     static func thumbnailCount(forWidth width: CGFloat) -> Int {
         guard width.isFinite, width > 0 else { return minimumThumbnailCount }
         let count = Int(ceil(width / preferredThumbnailWidth))
@@ -113,6 +77,76 @@ enum PostRecordingTimelineMath {
         let minutes = tenths / 600
         let wholeSeconds = (tenths / 10) % 60
         return String(format: "%d:%02d.%d", minutes, wholeSeconds, tenths % 10)
+    }
+}
+
+/// Maps source time to positions across the timeline. Deleted clips get a
+/// quarter of their share, but at least enough to click, so kept footage
+/// gets the room and a long cut does not dominate the strip.
+struct TimelineScale: Equatable {
+    static let deletedShare: CGFloat = 0.25
+    static let minimumDeletedWidth: CGFloat = 28
+
+    private struct Segment: Equatable {
+        let span: TimelineSpan
+        let x: CGFloat
+        let width: CGFloat
+    }
+
+    let width: CGFloat
+    private let segments: [Segment]
+
+    init(edit: TimelineEdit, width: CGFloat) {
+        let width = width.isFinite ? max(1, width) : 1
+        self.width = width
+        let duration = edit.sourceDuration
+        let proportional = { (span: TimelineSpan) in width * CGFloat(span.duration / duration) }
+        let deletedWidths = edit.clips.map { clip -> CGFloat? in
+            guard clip.isDeleted else { return nil }
+            let share = proportional(clip.span)
+            return min(share, max(Self.minimumDeletedWidth, share * Self.deletedShare))
+        }
+        let keptWidth = max(0, width - deletedWidths.reduce(0) { $0 + ($1 ?? 0) })
+        let keptDuration = edit.editedDuration
+
+        var x: CGFloat = 0
+        var segments: [Segment] = []
+        for (clip, deletedWidth) in zip(edit.clips, deletedWidths) {
+            let segmentWidth =
+                deletedWidth
+                ?? (keptDuration > 0 ? keptWidth * CGFloat(clip.span.duration / keptDuration) : 0)
+            segments.append(Segment(span: clip.span, x: x, width: segmentWidth))
+            x += segmentWidth
+        }
+        self.segments = segments
+    }
+
+    func position(_ time: Double) -> CGFloat {
+        guard time.isFinite, let first = segments.first, let last = segments.last else { return 0 }
+        guard time > first.span.start else { return 0 }
+        guard time < last.span.end else { return width }
+        let segment = segments.first { time < $0.span.end } ?? last
+        let progress = (time - segment.span.start) / segment.span.duration
+        return segment.x + segment.width * CGFloat(progress)
+    }
+
+    func sourceTime(at position: CGFloat) -> Double {
+        guard position.isFinite, let first = segments.first, let last = segments.last else { return 0 }
+        guard position > 0 else { return first.span.start }
+        guard position < width else { return last.span.end }
+        let segment = segments.first { position < $0.x + $0.width } ?? last
+        guard segment.width > 0 else { return segment.span.start }
+        let progress = Double((position - segment.x) / segment.width)
+        return segment.span.start + segment.span.duration * min(max(0, progress), 1)
+    }
+
+    func translatedSourceTime(origin: Double, translation: CGFloat) -> Double {
+        guard origin.isFinite else { return 0 }
+        return sourceTime(at: position(origin) + translation)
+    }
+
+    func width(for span: TimelineSpan) -> CGFloat {
+        max(0, position(span.end) - position(span.start))
     }
 }
 
@@ -201,6 +235,9 @@ struct PostRecordingTimelineView: View {
     @State private var zoomDraftSpan: TimelineSpan?
     @State private var zoomResizeState: ZoomResizeState?
     @State private var zoomSettingsPopoverSceneID: ZoomScene.ID?
+    /// The trim frame turns yellow only while the pointer is over the
+    /// timeline or a handle is dragged, so the clip does not look selected.
+    @State private var isHoveringTimeline = false
     @State private var showsEditError = false
     @State private var editErrorMessage = ""
     @AccessibilityFocusState private var focusedClipID: TimelineClip.ID?
@@ -221,48 +258,52 @@ struct PostRecordingTimelineView: View {
             selectionControls
 
             GeometryReader { geometry in
-                let timelineWidth = max(1, geometry.size.width - timelineGutter * 2)
+                // Laid out from the edit before a trim drag, so the strip holds
+                // still under the handle while it moves.
+                let scale = TimelineScale(
+                    edit: trimDrag?.original ?? edit,
+                    width: geometry.size.width - timelineGutter * 2
+                )
 
                 ZStack(alignment: .topLeading) {
-                    zoomLane(width: timelineWidth)
+                    zoomLane(scale: scale)
                         .offset(x: timelineGutter)
 
                     ThumbnailFilmstrip(
                         videoURL: videoURL,
                         duration: edit.sourceDuration,
-                        count: PostRecordingTimelineMath.thumbnailCount(forWidth: timelineWidth)
+                        segments: displayedEdit.clips.map { ($0.span, scale.width(for: $0.span)) },
+                        sampleCount: PostRecordingTimelineMath.thumbnailCount(forWidth: scale.width) * 2
                     )
-                    .frame(width: timelineWidth, height: filmstripHeight)
+                    .frame(width: scale.width, height: filmstripHeight)
                     .offset(x: timelineGutter, y: zoomLaneHeight + laneSpacing)
                     .accessibilityHidden(true)
 
                     ForEach(displayedEdit.clips) { clip in
-                        clipSegment(
-                            clip,
-                            timelineWidth: timelineWidth,
-                            gutter: timelineGutter
-                        )
-                        .offset(y: zoomLaneHeight + laneSpacing)
+                        clipSegment(clip, scale: scale, gutter: timelineGutter)
+                            .offset(y: zoomLaneHeight + laneSpacing)
                     }
 
-                    timelineGestureTarget(width: timelineWidth)
+                    timelineGestureTarget(scale: scale)
                         .offset(x: timelineGutter, y: zoomLaneHeight + laneSpacing)
 
-                    keptFrame(timelineWidth: timelineWidth, gutter: timelineGutter)
+                    keptFrame(scale: scale, gutter: timelineGutter)
                         .offset(y: zoomLaneHeight + laneSpacing)
 
-                    playhead(timelineWidth: timelineWidth, gutter: timelineGutter)
+                    playhead(scale: scale, gutter: timelineGutter)
 
                     // Above the playhead, which starts on the start handle;
                     // the playhead stays reachable by its knob.
-                    trimHandle(.start, timelineWidth: timelineWidth, gutter: timelineGutter)
+                    trimHandle(.start, scale: scale, gutter: timelineGutter)
                         .offset(y: zoomLaneHeight + laneSpacing)
-                    trimHandle(.end, timelineWidth: timelineWidth, gutter: timelineGutter)
+                    trimHandle(.end, scale: scale, gutter: timelineGutter)
                         .offset(y: zoomLaneHeight + laneSpacing)
                 }
                 .contextMenu {
                     timelineContextMenu
                 }
+                .onHover { isHoveringTimeline = $0 }
+                .animation(.easeOut(duration: 0.15), value: showsTrimFrame)
             }
             .frame(height: timelineContentHeight + 14)
         }
@@ -281,7 +322,8 @@ struct PostRecordingTimelineView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(PostRecordingText.timeline)
                     .font(.headline)
-                Text(selectionDescription)
+                // A space keeps the line's height when there is nothing to say.
+                Text(selectionDescription.isEmpty ? " " : selectionDescription)
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
@@ -353,7 +395,8 @@ struct PostRecordingTimelineView: View {
                 "\(scene.settings.level.label) zoom, \(formattedLength(scene.span)). Drag the circle in the video to aim it."
         }
         guard case .clip(let id) = selection, let clip = edit.clip(id: id) else {
-            return PostRecordingText.timelineHelp
+            // The how-to stays only until the first edit.
+            return edit.hasMeaningfulChanges ? "" : PostRecordingText.timelineHelp
         }
         if clip.isDeleted {
             return "Deleted clip, \(formattedLength(clip.span)). Restore it to keep it."
@@ -396,18 +439,18 @@ struct PostRecordingTimelineView: View {
         return edit.clipID(at: currentSourceTime)
     }
 
-    private func timelineGestureTarget(width: CGFloat) -> some View {
+    private func timelineGestureTarget(scale: TimelineScale) -> some View {
         Color.clear
             .contentShape(Rectangle())
-            .frame(width: width, height: filmstripHeight)
+            .frame(width: scale.width, height: filmstripHeight)
             .gesture(
                 DragGesture(minimumDistance: 0)
                     .onChanged { value in
                         guard abs(value.translation.width) >= 3 else { return }
-                        seekAndSelect(at: value.location.x, width: width)
+                        seekAndSelect(at: value.location.x, scale: scale)
                     }
                     .onEnded { value in
-                        seekAndSelect(at: value.location.x, width: width)
+                        seekAndSelect(at: value.location.x, scale: scale)
                     }
             )
             .accessibilityElement()
@@ -419,7 +462,7 @@ struct PostRecordingTimelineView: View {
             }
     }
 
-    private func zoomLane(width: CGFloat) -> some View {
+    private func zoomLane(scale: TimelineScale) -> some View {
         ZStack(alignment: .leading) {
             RoundedRectangle(cornerRadius: 6)
                 .fill(Color(nsColor: .controlBackgroundColor))
@@ -428,22 +471,22 @@ struct PostRecordingTimelineView: View {
                         .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
                 )
                 .contentShape(Rectangle())
-                .gesture(zoomLaneGesture(width: width))
+                .gesture(zoomLaneGesture(scale: scale))
 
             if let zoomDraftSpan {
                 zoomBlock(
                     span: zoomDraftSpan,
                     level: ZoomSceneSettings.standard.level,
-                    width: width,
+                    scale: scale,
                     isSelected: false
                 )
-                .offset(x: position(zoomDraftSpan.start, in: width))
+                .offset(x: scale.position(zoomDraftSpan.start))
                 .opacity(0.65)
                 .allowsHitTesting(false)
             }
 
             ForEach(edit.zoomScenes) { scene in
-                zoomSceneBlock(scene, width: width)
+                zoomSceneBlock(scene, scale: scale)
             }
 
             if edit.zoomScenes.isEmpty, zoomDraftSpan == nil {
@@ -454,7 +497,7 @@ struct PostRecordingTimelineView: View {
                     .allowsHitTesting(false)
             }
         }
-        .frame(width: width, height: zoomLaneHeight)
+        .frame(width: scale.width, height: zoomLaneHeight)
         .accessibilityElement(children: .contain)
         .accessibilityLabel(PostRecordingText.zoomLane)
         .accessibilityValue("\(edit.zoomScenes.count) zoom scenes")
@@ -464,19 +507,15 @@ struct PostRecordingTimelineView: View {
         }
     }
 
-    private func zoomSceneBlock(_ scene: ZoomScene, width: CGFloat) -> some View {
+    private func zoomSceneBlock(_ scene: ZoomScene, scale: TimelineScale) -> some View {
         let isSelected = selection == .zoomScene(scene.id)
         let span = displayedZoomSpan(for: scene)
-        let blockWidth = PostRecordingTimelineMath.width(
-            for: span,
-            duration: edit.sourceDuration,
-            width: width
-        )
+        let blockWidth = scale.width(for: span)
 
         return zoomBlock(
             span: span,
             level: scene.settings.level,
-            width: width,
+            scale: scale,
             isSelected: isSelected
         )
         .contentShape(Rectangle())
@@ -515,7 +554,7 @@ struct PostRecordingTimelineView: View {
                     scene: scene,
                     span: span,
                     edge: .leading,
-                    width: width
+                    scale: scale
                 )
                 .offset(x: -8)
             }
@@ -526,7 +565,7 @@ struct PostRecordingTimelineView: View {
                     scene: scene,
                     span: span,
                     edge: .trailing,
-                    width: width
+                    scale: scale
                 )
                 .offset(x: 8)
             }
@@ -536,7 +575,7 @@ struct PostRecordingTimelineView: View {
                 removeZoomScene(id: scene.id)
             }
         }
-        .offset(x: position(span.start, in: width))
+        .offset(x: scale.position(span.start))
         .accessibilityElement(children: .contain)
         .accessibilityLabel(PostRecordingText.zoomScene)
         .accessibilityValue(
@@ -597,7 +636,7 @@ struct PostRecordingTimelineView: View {
         scene: ZoomScene,
         span: TimelineSpan,
         edge: ZoomResizeEdge,
-        width: CGFloat
+        scale: TimelineScale
     ) -> some View {
         ZStack {
             Color.clear
@@ -608,7 +647,7 @@ struct PostRecordingTimelineView: View {
         }
         .frame(width: 16, height: zoomLaneHeight)
         .contentShape(Rectangle())
-        .gesture(zoomResizeGesture(scene: scene, edge: edge, width: width))
+        .gesture(zoomResizeGesture(scene: scene, edge: edge, scale: scale))
         .accessibilityElement()
         .accessibilityLabel(edge == .leading ? "Zoom start" : "Zoom end")
         .accessibilityValue(formattedEditedTime(edge == .leading ? span.start : span.end))
@@ -621,7 +660,7 @@ struct PostRecordingTimelineView: View {
     private func zoomResizeGesture(
         scene: ZoomScene,
         edge: ZoomResizeEdge,
-        width: CGFloat
+        scale: TimelineScale
     ) -> some Gesture {
         DragGesture(minimumDistance: 0)
             .onChanged { value in
@@ -639,7 +678,10 @@ struct PostRecordingTimelineView: View {
                         currentSpan: scene.span
                     )
                 }
-                let seconds = Double(value.translation.width / width) * edit.sourceDuration
+                let originalEdge = edge == .leading ? state.originalSpan.start : state.originalSpan.end
+                let seconds =
+                    scale.translatedSourceTime(origin: originalEdge, translation: value.translation.width)
+                    - originalEdge
                 guard
                     let span = resizedZoomSpan(
                         sceneID: scene.id,
@@ -723,14 +765,10 @@ struct PostRecordingTimelineView: View {
     private func zoomBlock(
         span: TimelineSpan,
         level: ZoomSceneSettings.Level,
-        width: CGFloat,
+        scale: TimelineScale,
         isSelected: Bool
     ) -> some View {
-        let blockWidth = PostRecordingTimelineMath.width(
-            for: span,
-            duration: edit.sourceDuration,
-            width: width
-        )
+        let blockWidth = scale.width(for: span)
         return ZStack {
             RoundedRectangle(cornerRadius: 5)
                 .fill(Color.accentColor.opacity(isSelected ? 0.85 : 0.62))
@@ -746,14 +784,10 @@ struct PostRecordingTimelineView: View {
         .frame(width: max(3, blockWidth), height: zoomLaneHeight)
     }
 
-    private func zoomLaneGesture(width: CGFloat) -> some Gesture {
+    private func zoomLaneGesture(scale: TimelineScale) -> some Gesture {
         DragGesture(minimumDistance: 0)
             .onChanged { value in
-                let time = PostRecordingTimelineMath.sourceTime(
-                    at: value.location.x,
-                    duration: edit.sourceDuration,
-                    width: width
-                )
+                let time = scale.sourceTime(at: value.location.x)
                 if zoomDraftStart == nil {
                     guard edit.availableZoomSpan(containing: time) != nil else { return }
                     zoomDraftStart = time
@@ -774,12 +808,7 @@ struct PostRecordingTimelineView: View {
                 }
                 guard let span = zoomDraftSpan else { return }
                 if span.duration < TimelineEdit.minimumZoomSceneDuration {
-                    let time = PostRecordingTimelineMath.sourceTime(
-                        at: value.location.x,
-                        duration: edit.sourceDuration,
-                        width: width
-                    )
-                    onSeek(time)
+                    onSeek(scale.sourceTime(at: value.location.x))
                     return
                 }
                 addZoomScene(span: span)
@@ -834,14 +863,10 @@ struct PostRecordingTimelineView: View {
 
     private func clipSegment(
         _ clip: TimelineClip,
-        timelineWidth: CGFloat,
+        scale: TimelineScale,
         gutter: CGFloat
     ) -> some View {
-        let width = PostRecordingTimelineMath.width(
-            for: clip.span,
-            duration: edit.sourceDuration,
-            width: timelineWidth
-        )
+        let width = scale.width(for: clip.span)
         let isSelected = selection == .clip(clip.id)
 
         return ZStack {
@@ -868,7 +893,7 @@ struct PostRecordingTimelineView: View {
                 )
         }
         .frame(width: max(2, width), height: filmstripHeight)
-        .offset(x: gutter + position(clip.span.start, in: timelineWidth))
+        .offset(x: gutter + scale.position(clip.span.start))
         .allowsHitTesting(false)
         .accessibilityElement()
         .accessibilityLabel(clip.isDeleted ? PostRecordingText.deletedClip : PostRecordingText.clip)
@@ -889,6 +914,10 @@ struct PostRecordingTimelineView: View {
         }
     }
 
+    private var showsTrimFrame: Bool {
+        isHoveringTimeline || trimDrag != nil
+    }
+
     /// The edit as shown, including a trim still being dragged.
     private var displayedEdit: TimelineEdit {
         trimDrag?.draft ?? edit
@@ -904,23 +933,24 @@ struct PostRecordingTimelineView: View {
     }
 
     /// Outlines the kept recording from the start handle to the end handle.
-    private func keptFrame(timelineWidth: CGFloat, gutter: CGFloat) -> some View {
-        let start = position(keptEdge(.start, of: displayedEdit), in: timelineWidth)
-        let end = position(keptEdge(.end, of: displayedEdit), in: timelineWidth)
+    private func keptFrame(scale: TimelineScale, gutter: CGFloat) -> some View {
+        let start = scale.position(keptEdge(.start, of: displayedEdit))
+        let end = scale.position(keptEdge(.end, of: displayedEdit))
         return VStack(spacing: 0) {
             Rectangle().frame(height: 3)
             Spacer(minLength: 0)
             Rectangle().frame(height: 3)
         }
         .foregroundStyle(Color.yellow)
+        .opacity(showsTrimFrame ? 1 : 0)
         .frame(width: max(0, end - start), height: filmstripHeight)
         .offset(x: gutter + start)
         .allowsHitTesting(false)
         .accessibilityHidden(true)
     }
 
-    private func trimHandle(_ edge: TrimEdge, timelineWidth: CGFloat, gutter: CGFloat) -> some View {
-        let x = gutter + position(keptEdge(edge, of: displayedEdit), in: timelineWidth)
+    private func trimHandle(_ edge: TrimEdge, scale: TimelineScale, gutter: CGFloat) -> some View {
+        let x = gutter + scale.position(keptEdge(edge, of: displayedEdit))
         let trimmed =
             edge == .start
             ? keptEdge(.start, of: edit)
@@ -933,16 +963,16 @@ struct PostRecordingTimelineView: View {
             bottomTrailingRadius: edge == .end ? radius : 0,
             topTrailingRadius: edge == .end ? radius : 0
         )
-        .fill(Color.yellow)
+        .fill(showsTrimFrame ? Color.yellow : Color.gray.opacity(0.6))
         .overlay {
             Image(systemName: edge == .start ? "chevron.compact.left" : "chevron.compact.right")
                 .font(.system(size: 13, weight: .heavy))
-                .foregroundStyle(.black.opacity(0.65))
+                .foregroundStyle(showsTrimFrame ? .black.opacity(0.65) : .white.opacity(0.85))
         }
         .frame(width: trimHandleWidth, height: filmstripHeight)
         .contentShape(Rectangle())
         .offset(x: edge == .start ? x - trimHandleWidth : x)
-        .gesture(trimGesture(edge, width: timelineWidth))
+        .gesture(trimGesture(edge, scale: scale))
         .help(PostRecordingText.trimHandleHelp)
         .accessibilityElement()
         .accessibilityLabel(edge == .start ? PostRecordingText.trimStart : PostRecordingText.trimEnd)
@@ -954,18 +984,16 @@ struct PostRecordingTimelineView: View {
         }
     }
 
-    private func trimGesture(_ edge: TrimEdge, width: CGFloat) -> some Gesture {
+    private func trimGesture(_ edge: TrimEdge, scale: TimelineScale) -> some Gesture {
         DragGesture(minimumDistance: 0)
             .onChanged { value in
                 let original = trimDrag?.original ?? edit
                 var draft = original
                 draft.trim(
                     edge,
-                    to: PostRecordingTimelineMath.translatedSourceTime(
+                    to: scale.translatedSourceTime(
                         origin: keptEdge(edge, of: original),
-                        translation: value.translation.width,
-                        duration: original.sourceDuration,
-                        width: width
+                        translation: value.translation.width
                     )
                 )
                 trimDrag = TrimDrag(edge: edge, original: original, draft: draft)
@@ -989,7 +1017,7 @@ struct PostRecordingTimelineView: View {
         onSeek(keptEdge(edge, of: edit))
     }
 
-    private func playhead(timelineWidth: CGFloat, gutter: CGFloat) -> some View {
+    private func playhead(scale: TimelineScale, gutter: CGFloat) -> some View {
         VStack(spacing: 0) {
             Circle()
                 .fill(Color.accentColor)
@@ -1005,10 +1033,10 @@ struct PostRecordingTimelineView: View {
         // instead of staying where the timeline starts.
         .contentShape(Rectangle())
         .offset(
-            x: gutter + position(currentSourceTime, in: timelineWidth) - 9,
+            x: gutter + scale.position(currentSourceTime) - 9,
             y: -8
         )
-        .gesture(playheadGesture(width: timelineWidth))
+        .gesture(playheadGesture(scale: scale))
         .accessibilityElement()
         .accessibilityLabel(PostRecordingText.playhead)
         .accessibilityValue(formattedEditedTime(currentSourceTime))
@@ -1021,17 +1049,15 @@ struct PostRecordingTimelineView: View {
         }
     }
 
-    private func playheadGesture(width: CGFloat) -> some Gesture {
+    private func playheadGesture(scale: TimelineScale) -> some Gesture {
         DragGesture()
             .onChanged { value in
                 if playheadDragOrigin == nil {
                     playheadDragOrigin = currentSourceTime
                 }
-                let newTime = PostRecordingTimelineMath.translatedSourceTime(
+                let newTime = scale.translatedSourceTime(
                     origin: playheadDragOrigin ?? currentSourceTime,
-                    translation: value.translation.width,
-                    duration: edit.sourceDuration,
-                    width: width
+                    translation: value.translation.width
                 )
                 onSeek(newTime)
             }
@@ -1040,12 +1066,8 @@ struct PostRecordingTimelineView: View {
             }
     }
 
-    private func seekAndSelect(at position: CGFloat, width: CGFloat) {
-        let time = PostRecordingTimelineMath.sourceTime(
-            at: position,
-            duration: edit.sourceDuration,
-            width: width
-        )
+    private func seekAndSelect(at position: CGFloat, scale: TimelineScale) {
+        let time = scale.sourceTime(at: position)
         if let id = edit.clipID(at: time) {
             selection = .clip(id)
             focusedClipID = id
@@ -1121,14 +1143,6 @@ struct PostRecordingTimelineView: View {
         }
     }
 
-    private func position(_ time: Double, in width: CGFloat) -> CGFloat {
-        PostRecordingTimelineMath.position(
-            for: time,
-            duration: edit.sourceDuration,
-            width: width
-        )
-    }
-
     /// Times read as the preview's clock does, in the edited recording, so
     /// the timeline never shows a second clock in source time.
     private func formattedEditedTime(_ sourceTime: Double) -> String {
@@ -1142,19 +1156,36 @@ struct PostRecordingTimelineView: View {
     }
 }
 
+/// Frames from the recording behind the timeline. Each clip shows frames
+/// from its own footage across its own width, so a narrowed deleted clip
+/// does not shift the frames beside it.
 private struct ThumbnailFilmstrip: View {
     let videoURL: URL
     let duration: Double
-    let count: Int
+    /// Each clip's footage and displayed width, left to right.
+    let segments: [(span: TimelineSpan, width: CGFloat)]
+    let sampleCount: Int
 
     @State private var thumbnails: [CGImage?] = []
 
     var body: some View {
-        HStack(spacing: 1) {
-            ForEach(0..<count, id: \.self) { index in
-                thumbnail(at: index)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .clipped()
+        HStack(spacing: 0) {
+            ForEach(segments.indices, id: \.self) { index in
+                let segment = segments[index]
+                let cells = max(
+                    1,
+                    Int((segment.width / PostRecordingTimelineMath.preferredThumbnailWidth).rounded())
+                )
+                HStack(spacing: 1) {
+                    ForEach(0..<cells, id: \.self) { cell in
+                        let progress = (Double(cell) + 0.5) / Double(cells)
+                        thumbnail(at: sampleIndex(for: segment.span.start + segment.span.duration * progress))
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .clipped()
+                    }
+                }
+                .frame(width: segment.width)
+                .clipped()
             }
         }
         .background(Color(nsColor: .controlBackgroundColor))
@@ -1163,9 +1194,14 @@ private struct ThumbnailFilmstrip: View {
             RoundedRectangle(cornerRadius: 6)
                 .stroke(Color(nsColor: .separatorColor), lineWidth: 1)
         )
-        .task(id: count) {
+        .task(id: sampleCount) {
             await generateThumbnails()
         }
+    }
+
+    private func sampleIndex(for time: Double) -> Int {
+        guard sampleCount > 0, duration > 0 else { return 0 }
+        return min(sampleCount - 1, max(0, Int(time / duration * Double(sampleCount))))
     }
 
     @ViewBuilder
@@ -1194,7 +1230,12 @@ private struct ThumbnailFilmstrip: View {
         let generator = AVAssetImageGenerator(asset: asset)
         generator.appliesPreferredTrackTransform = true
         generator.maximumSize = CGSize(width: 320, height: 180)
-        let times = PostRecordingTimelineMath.thumbnailSampleTimes(duration: duration, count: count)
+        // Close to the asked time rather than the nearest keyframe, which
+        // could show the same frame in neighboring cells.
+        let tolerance = CMTime(seconds: duration / Double(max(1, sampleCount)) / 2, preferredTimescale: 600)
+        generator.requestedTimeToleranceBefore = tolerance
+        generator.requestedTimeToleranceAfter = tolerance
+        let times = PostRecordingTimelineMath.thumbnailSampleTimes(duration: duration, count: sampleCount)
         var generated = [CGImage?](repeating: nil, count: times.count)
         thumbnails = generated
 

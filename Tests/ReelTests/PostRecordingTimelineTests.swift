@@ -316,33 +316,45 @@ final class PostRecordingTimelineTests: XCTestCase {
         XCTAssertEqual(edit.clipID(at: 5), clipFromFive)
     }
 
-    func testTimelineGeometryMapsSourceTimeAndDragDistance() {
-        XCTAssertEqual(
-            PostRecordingTimelineMath.position(for: 2.5, duration: 10, width: 400),
-            100
-        )
-        XCTAssertEqual(
-            PostRecordingTimelineMath.sourceTime(at: 500, duration: 10, width: 400),
-            10
-        )
-        XCTAssertEqual(
-            PostRecordingTimelineMath.translatedSourceTime(
-                origin: 4,
-                translation: -80,
-                duration: 10,
-                width: 400
-            ),
-            2,
-            accuracy: 0.0001
-        )
-        XCTAssertEqual(
-            PostRecordingTimelineMath.width(
-                for: TimelineSpan(start: 2, end: 5),
-                duration: 10,
-                width: 400
-            ),
-            120
-        )
+    func testTimelineScaleMapsSourceTimeAndDragDistance() throws {
+        var edit = try XCTUnwrap(TimelineEdit(sourceDuration: 10))
+        let unedited = TimelineScale(edit: edit, width: 400)
+        XCTAssertEqual(unedited.position(2.5), 100)
+        XCTAssertEqual(unedited.sourceTime(at: 500), 10)
+        XCTAssertEqual(unedited.width(for: TimelineSpan(start: 2, end: 5)), 120, accuracy: 0.0001)
+
+        _ = try XCTUnwrap(edit.splitClip(at: 2))
+        _ = try XCTUnwrap(edit.splitClip(at: 6))
+        let middle = try XCTUnwrap(edit.clipID(at: 4))
+        XCTAssertTrue(edit.deleteClip(id: middle))
+
+        // The deleted 4 seconds get a quarter of their 160 points; the kept
+        // 6 seconds share the other 360.
+        let scale = TimelineScale(edit: edit, width: 400)
+        let positions: [Double: CGFloat] = [0: 0, 1: 60, 2: 120, 4: 140, 6: 160, 8: 280, 10: 400]
+        for (tc, want) in positions {
+            XCTAssertEqual(scale.position(tc), want, accuracy: 0.0001, "time \(tc)")
+            XCTAssertEqual(scale.sourceTime(at: want), tc, accuracy: 0.0001, "position \(want)")
+        }
+        XCTAssertEqual(scale.width(for: TimelineSpan(start: 2, end: 6)), 40, accuracy: 0.0001)
+        XCTAssertEqual(scale.translatedSourceTime(origin: 1, translation: 80), 4, accuracy: 0.0001)
+        XCTAssertEqual(scale.sourceTime(at: -20), 0)
+    }
+
+    func testTimelineScaleKeepsShortDeletedClipsClickable() throws {
+        var edit = try XCTUnwrap(TimelineEdit(sourceDuration: 100))
+        let deleted = try XCTUnwrap(edit.splitClip(at: 99))
+        XCTAssertTrue(edit.deleteClip(id: deleted))
+
+        let wide = TimelineScale(edit: edit, width: 1000)
+        XCTAssertEqual(wide.width(for: TimelineSpan(start: 99, end: 100)), 10, accuracy: 0.0001)
+
+        _ = try XCTUnwrap(edit.splitClip(at: 50))
+        let half = try XCTUnwrap(edit.clipID(at: 75))
+        XCTAssertTrue(edit.deleteClip(id: half))
+        let scale = TimelineScale(edit: edit, width: 1000)
+        XCTAssertEqual(scale.width(for: TimelineSpan(start: 50, end: 99)), 122.5, accuracy: 0.0001)
+        XCTAssertEqual(scale.width(for: TimelineSpan(start: 99, end: 100)), 10, accuracy: 0.0001)
     }
 
     func testTimelineThumbnailCountAndSampleTimesFollowQuantizedWidth() {
