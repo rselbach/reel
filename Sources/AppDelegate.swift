@@ -78,6 +78,26 @@ enum PreviewPlacement {
 /// instead of from its empty undo manager.
 final class PreviewWindow: NSWindow {
     var undoCommands = PreviewUndoCommands()
+    var shareSource = PreviewShareSource()
+    /// Kept while a drag is in flight; a file promise holds its delegate
+    /// weakly.
+    private var promisedRecording: PromisedRecording?
+
+    /// Drags edits that are not rendered yet as a file promise, which
+    /// Finder and Mail fill in once the render finishes.
+    func beginPromisedFileDrag(with event: NSEvent) {
+        guard let view = contentView else { return }
+        let promise = PromisedRecording(source: shareSource)
+        promisedRecording = promise
+        let provider = NSFilePromiseProvider(fileType: UTType.mpeg4Movie.identifier, delegate: promise)
+        let item = NSDraggingItem(pasteboardWriter: provider)
+        let point = view.convert(event.locationInWindow, from: nil)
+        item.setDraggingFrame(
+            NSRect(x: point.x - 16, y: point.y - 16, width: 32, height: 32),
+            contents: NSWorkspace.shared.icon(for: .mpeg4Movie)
+        )
+        view.beginDraggingSession(with: [item], event: event, source: self)
+    }
 
     @objc func undo(_ sender: Any?) {
         undoCommands.undo()
@@ -95,6 +115,49 @@ final class PreviewWindow: NSWindow {
             return undoCommands.canRedo()
         default:
             return super.validateMenuItem(menuItem)
+        }
+    }
+}
+
+extension PreviewWindow: NSDraggingSource {
+    func draggingSession(
+        _ session: NSDraggingSession,
+        sourceOperationMaskFor context: NSDraggingContext
+    ) -> NSDragOperation {
+        .copy
+    }
+}
+
+/// Writes the preview's shareable file where a promised drag was dropped.
+final class PromisedRecording: NSObject, NSFilePromiseProviderDelegate {
+    private let source: PreviewShareSource
+    private let fileName: String
+
+    @MainActor
+    init(source: PreviewShareSource) {
+        self.source = source
+        fileName = source.fileName()
+    }
+
+    func filePromiseProvider(_ filePromiseProvider: NSFilePromiseProvider, fileNameForType fileType: String) -> String {
+        fileName
+    }
+
+    func filePromiseProvider(
+        _ filePromiseProvider: NSFilePromiseProvider,
+        writePromiseTo url: URL,
+        completionHandler: @escaping (Error?) -> Void
+    ) {
+        nonisolated(unsafe) let completion = completionHandler
+        let source = source
+        Task { @MainActor in
+            do {
+                let file = try await source.shareableFile()
+                try FileManager.default.copyItem(at: file, to: url)
+                completion(nil)
+            } catch {
+                completion(error)
+            }
         }
     }
 }
@@ -855,6 +918,24 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         [settingsWindow, recordingDialogWindow, aboutWindow, welcomeWindow].compactMap { $0 } + previewWindows
     }
 
+    /// Dragging a preview's title bar icon hands out what Copy and Share do:
+    /// the recording until it is edited, then the rendered edits.
+    func window(
+        _ window: NSWindow,
+        shouldDragDocumentWith event: NSEvent,
+        from dragImageLocation: NSPoint,
+        with pasteboard: NSPasteboard
+    ) -> Bool {
+        guard let preview = window as? PreviewWindow else { return true }
+        if let file = preview.shareSource.readyFile() {
+            pasteboard.clearContents()
+            pasteboard.writeObjects([file as NSURL])
+            return true
+        }
+        preview.beginPromisedFileDrag(with: event)
+        return false
+    }
+
     func windowWillClose(_ notification: Notification) {
         guard let window = notification.object as? NSWindow else { return }
 
@@ -1029,9 +1110,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         // preview opened last.
         weak var window: NSWindow?
         let undoCommands = PreviewUndoCommands()
+        let shareSource = PreviewShareSource()
         let previewView = PostRecordingView(
             videoURL: url,
             undoCommands: undoCommands,
+            shareSource: shareSource,
             onDismiss: { [weak self] in
                 self?.closePreview(window)
             },
@@ -1089,6 +1172,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         previewWindow.representedURL = url
         previewWindow.toolbarStyle = .unified
         previewWindow.undoCommands = undoCommands
+        previewWindow.shareSource = shareSource
         if let previous = previewWindows.last, let visibleFrame = previous.screen?.visibleFrame {
             previewWindow.setFrame(
                 PreviewPlacement.cascadedFrame(previewWindow.frame, after: previous.frame, within: visibleFrame),

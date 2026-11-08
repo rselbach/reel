@@ -65,9 +65,9 @@ enum PostRecordingText {
     static let revealInFinder = "Reveal in Finder"
     static let copy = "Copy"
     static let copied = "Copied!"
-    static let copyHelp = "Copy the recording to paste into Slack, Mail, or Finder"
-    static let exportToShareHelp = "Copy and Share use a file. Choose Export to make one from your edits."
+    static let copyHelp = "Copy the recording, with your edits, to paste into Slack, Mail, or Finder"
     static let share = "Share"
+    static let shareHelp = "Share the recording, with your edits"
     static let more = "More"
     static let delete = "Move to Trash..."
     static let confirmDelete = "Move to Trash"
@@ -178,6 +178,35 @@ enum PostRecordingLogic {
     }
 }
 
+/// Hands out the file that Copy, Share, and a drag of the title bar's icon
+/// share: the recording itself until it is edited, then a video rendered
+/// from the edits. The preview fills in the closures.
+@MainActor
+final class PreviewShareSource {
+    /// The file to share if it exists already, without rendering.
+    var readyFile: () -> URL? = { nil }
+    /// The file to share, rendering the edits first if needed.
+    var file: () async throws -> URL = { throw CancellationError() }
+    /// What the shared file is called.
+    var fileName: () -> String = { "Recording.mp4" }
+
+    func shareableFile() async throws -> URL {
+        try await file()
+    }
+}
+
+/// Shares the preview's file through the system share menu, which asks for
+/// it only once a service is chosen, so the edits render only when needed.
+struct SharedRecording: Transferable {
+    let source: PreviewShareSource
+
+    static var transferRepresentation: some TransferRepresentation {
+        FileRepresentation(exportedContentType: .mpeg4Movie) { recording in
+            SentTransferredFile(try await recording.source.shareableFile())
+        }
+    }
+}
+
 /// Lets the Edit menu's Undo and Redo reach a preview's timeline, whose
 /// history lives in SwiftUI state. The preview fills in the closures.
 @MainActor
@@ -191,6 +220,7 @@ final class PreviewUndoCommands {
 struct PostRecordingView: View {
     let videoURL: URL
     let undoCommands: PreviewUndoCommands
+    let shareSource: PreviewShareSource
     let onDismiss: () -> Void
     let onRevealInFinder: () -> Void
     let onRecordAgain: () -> Void
@@ -222,6 +252,9 @@ struct PostRecordingView: View {
     /// The file the last export wrote, until the edit changes.
     @State private var lastExportURL: URL?
     @State private var exportTask: Task<Void, Never>?
+    /// Rendering the edits for Copy, Share, or a drag, so later requests for
+    /// the same edit wait for it instead of starting another.
+    @State private var shareRender: (edit: TimelineEdit, task: Task<URL, Error>)?
     @State private var showDeleteConfirmation = false
     @State private var exportError: String?
     @State private var justCopied = false
@@ -319,14 +352,17 @@ struct PostRecordingView: View {
                         systemImage: justCopied ? "checkmark" : "doc.on.doc"
                     )
                 }
-                .help(shareURL == nil ? PostRecordingText.exportToShareHelp : PostRecordingText.copyHelp)
-                .disabled(isExporting || shareURL == nil)
+                .help(PostRecordingText.copyHelp)
+                .disabled(isExporting || edit == nil)
 
-                ShareLink(item: shareURL ?? videoURL) {
+                ShareLink(
+                    item: SharedRecording(source: shareSource),
+                    preview: SharePreview(shareFileName)
+                ) {
                     Label(PostRecordingText.share, systemImage: "square.and.arrow.up")
                 }
-                .help(shareURL == nil ? PostRecordingText.exportToShareHelp : PostRecordingText.share)
-                .disabled(isExporting || shareURL == nil)
+                .help(PostRecordingText.shareHelp)
+                .disabled(isExporting || edit == nil)
 
                 exportMenu
 
@@ -356,6 +392,7 @@ struct PostRecordingView: View {
         .onAppear {
             setupPlayer()
             connectUndoCommands()
+            connectShareSource()
         }
         .onChange(of: edit) { previousEdit, changedEdit in
             lastExportURL = nil
@@ -383,6 +420,8 @@ struct PostRecordingView: View {
         .onDisappear {
             exportTask?.cancel()
             exportTask = nil
+            shareRender?.task.cancel()
+            shareRender = nil
             isExporting = false
             cleanupPlayer()
         }
@@ -410,6 +449,7 @@ struct PostRecordingView: View {
                     .accessibilityLabel(PostRecordingText.exporting)
                 Button(PostRecordingText.cancelExport) {
                     exportTask?.cancel()
+                    shareRender?.task.cancel()
                 }
                 .keyboardShortcut(.cancelAction)
             }
@@ -486,10 +526,21 @@ struct PostRecordingView: View {
     }
 
     private func copyToPasteboard() {
-        guard let shareURL else { return }
+        Task { @MainActor in
+            do {
+                writeToPasteboard(try await fileToShare())
+            } catch is CancellationError {
+                return
+            } catch {
+                exportError = "Could not prepare the recording to copy: \(error.localizedDescription)"
+            }
+        }
+    }
+
+    private func writeToPasteboard(_ url: URL) {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
-        guard pasteboard.writeObjects([shareURL as NSURL]) else {
+        guard pasteboard.writeObjects([url as NSURL]) else {
             exportError = "Could not copy the recording to the clipboard."
             justCopied = false
             return
@@ -504,6 +555,64 @@ struct PostRecordingView: View {
             }
             justCopied = false
         }
+    }
+
+    private var shareFileName: String {
+        guard hasEdits else { return videoURL.lastPathComponent }
+        return "\(videoURL.deletingPathExtension().lastPathComponent)-edited.mp4"
+    }
+
+    private func connectShareSource() {
+        shareSource.readyFile = { shareURL }
+        shareSource.file = fileToShare
+        shareSource.fileName = { shareFileName }
+    }
+
+    /// The recording while it is unedited, else a full-size video of the
+    /// edits, rendered once into a temporary folder and reused until the
+    /// edits change.
+    private func fileToShare() async throws -> URL {
+        if let shareURL {
+            return shareURL
+        }
+        guard let edit else { throw CancellationError() }
+        if let shareRender, shareRender.edit == edit {
+            return try await shareRender.task.value
+        }
+        guard !isExporting else { throw CancellationError() }
+
+        let fileName = shareFileName
+        let task = Task { @MainActor () throws -> URL in
+            isExporting = true
+            exportError = nil
+            exportProgress = 0
+            defer {
+                isExporting = false
+                exportProgress = nil
+            }
+            let folder = FileManager.default.temporaryDirectory
+                .appendingPathComponent("Reel Shares", isDirectory: true)
+                .appendingPathComponent(UUID().uuidString, isDirectory: true)
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            let url = folder.appendingPathComponent(fileName)
+            try await VideoEditExporter.export(
+                sourceURL: videoURL,
+                outputURL: url,
+                quality: .source,
+                edit: edit,
+                onProgress: { exportProgress = $0 }
+            )
+            try Task.checkCancellation()
+            exportedVideo = ExportedVideo(edit: edit, url: url)
+            return url
+        }
+        shareRender = (edit, task)
+        defer {
+            if shareRender?.edit == edit {
+                shareRender = nil
+            }
+        }
+        return try await task.value
     }
 
     private func cleanupPlayer() {
@@ -936,7 +1045,10 @@ struct PostRecordingView: View {
                 switch format {
                 case .video(let quality, _):
                     warning = try await exportVideo(to: outputURL, quality: quality, edit: edit)
-                    exportedVideo = ExportedVideo(edit: edit, url: outputURL)
+                    // A smaller copy is not what Copy and Share should hand out.
+                    if quality == .source {
+                        exportedVideo = ExportedVideo(edit: edit, url: outputURL)
+                    }
                 case .gif:
                     warning = try await exportGIF(to: outputURL, edit: edit)
                 }
