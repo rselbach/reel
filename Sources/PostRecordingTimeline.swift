@@ -503,6 +503,22 @@ struct TimelineEdit: Equatable, Sendable {
         return nil
     }
 
+    /// The latest kept time at or before `time`, for playing and stepping
+    /// backward over deleted clips.
+    func playableSourceTime(atOrBefore time: Double) -> Double? {
+        guard time.isFinite else { return nil }
+        let clamped = min(max(0, time), sourceDuration)
+        for range in keptRanges.reversed() {
+            if clamped > range.end {
+                return range.end
+            }
+            if clamped >= range.start {
+                return clamped
+            }
+        }
+        return nil
+    }
+
     func sourceTime(forEditedTime time: Double) -> Double? {
         guard time.isFinite, time >= 0, time <= editedDuration else { return nil }
         var cursor = 0.0

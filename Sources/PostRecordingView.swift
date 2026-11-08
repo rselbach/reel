@@ -13,22 +13,45 @@ private let logger = Logger(
 struct VideoPlayerView: NSViewRepresentable {
     let player: AVPlayer
 
-    func makeNSView(context: Context) -> AVPlayerView {
-        let view = AVPlayerView()
+    func makeNSView(context: Context) -> PlayerLayerView {
+        let view = PlayerLayerView()
         view.player = player
-        view.controlsStyle = .none
-        // Live Text would otherwise make text in a paused frame selectable
-        // and fill the accessibility tree with it.
-        view.allowsVideoFrameAnalysis = false
         return view
     }
 
-    func updateNSView(_ nsView: AVPlayerView, context: Context) {
+    func updateNSView(_ nsView: PlayerLayerView, context: Context) {
         nsView.player = player
     }
 
-    static func dismantleNSView(_ nsView: AVPlayerView, coordinator: ()) {
+    static func dismantleNSView(_ nsView: PlayerLayerView, coordinator: ()) {
         nsView.player = nil
+    }
+}
+
+/// Shows the player's video and nothing else. AVPlayerView would add Live
+/// Text, which makes text in a paused frame selectable, and its own Space,
+/// J, K, L, and arrow keys, which play straight through deleted clips.
+final class PlayerLayerView: NSView {
+    private let playerLayer = AVPlayerLayer()
+
+    var player: AVPlayer? {
+        get { playerLayer.player }
+        set { playerLayer.player = newValue }
+    }
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        playerLayer.videoGravity = .resizeAspect
+        playerLayer.backgroundColor = NSColor.black.cgColor
+        wantsLayer = true
+    }
+
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+    }
+
+    override func makeBackingLayer() -> CALayer {
+        playerLayer
     }
 }
 
@@ -53,7 +76,8 @@ enum PostRecordingText {
     static let splitHelp = "Split the clip at the playhead (⌘B)"
     static let trimStart = "Trim start"
     static let trimEnd = "Trim end"
-    static let trimHandleHelp = "Drag to trim. Trimmed footage stays on the timeline so you can restore it."
+    static let trimHandleHelp =
+        "Drag to trim, or press I or O to trim to the playhead. Trimmed footage stays on the timeline so you can restore it."
     static let splitClipAtPlayhead = "Split Clip at Playhead"
     static let deleteClip = "Delete Clip"
     static let restoreClip = "Restore Clip"
@@ -80,6 +104,7 @@ enum PostRecordingText {
     static let forwardFiveSeconds = "Forward 5 seconds"
     static let play = "Play"
     static let pause = "Pause"
+    static let playHelp = "Play or pause (Space). J, K, and L play backward, pause, and play forward."
     static let editedPlaybackTime = "Edited playback time"
     static let export = "Export"
     static let exportEdited = "Edited Video..."
@@ -194,6 +219,8 @@ struct PostRecordingView: View {
     @State private var exportedVideo: ExportedVideo?
     @State private var currentTime: Double = 0
     @State private var playbackIntent: PlaybackIntent = .paused
+    /// One frame of the recording, for the arrow keys.
+    @State private var frameDuration: Double = 1.0 / 30
     /// While a trim handle shows frames from footage that may be deleted,
     /// playback must not move the playhead back onto kept footage.
     @State private var isScrubbing = false
@@ -243,6 +270,9 @@ struct PostRecordingView: View {
                 onSkip: skipEditedSeconds
             )
             .padding(.horizontal)
+            .background {
+                playbackShortcuts
+            }
 
             if let loadedEdit = edit {
                 PostRecordingTimelineView(
@@ -551,6 +581,17 @@ struct PostRecordingView: View {
 
         Task { @MainActor [self] in
             do {
+                guard let track = try await asset.loadTracks(withMediaType: .video).first else { return }
+                let rate = try await track.load(.nominalFrameRate)
+                guard !isCleanedUp, rate > 0 else { return }
+                frameDuration = 1 / Double(rate)
+            } catch {
+                logger.warning("Unable to load the frame rate: \(error.localizedDescription)")
+            }
+        }
+
+        Task { @MainActor [self] in
+            do {
                 let loadedTimeline = try await CursorMetadataTrack.load(from: videoURL)
                 guard !isCleanedUp else { return }
                 cursorTimeline = loadedTimeline
@@ -567,6 +608,10 @@ struct PostRecordingView: View {
                 guard !isCleanedUp, !isScrubbing else { return }
                 let seconds = CMTimeGetSeconds(time)
                 guard seconds.isFinite, let edit else { return }
+                if let rate = newPlayer?.rate, rate < 0 {
+                    followReversePlayback(at: seconds, edit: edit)
+                    return
+                }
                 guard seconds < edit.sourceDuration else {
                     newPlayer?.pause()
                     playbackIntent = .paused
@@ -591,6 +636,24 @@ struct PostRecordingView: View {
         }
     }
 
+    /// Playing backward, the player skips deleted clips toward the start and
+    /// pauses on the first kept frame.
+    private func followReversePlayback(at seconds: Double, edit: TimelineEdit) {
+        let first = edit.firstKeptTime ?? 0
+        guard seconds > first + 0.01, let playable = edit.playableSourceTime(atOrBefore: seconds) else {
+            pausePlayback()
+            seekPlayer(to: first)
+            return
+        }
+        currentTime = playable
+        guard playable < seconds - 0.001 else { return }
+        player?.seek(
+            to: CMTime(seconds: playable, preferredTimescale: 600),
+            toleranceBefore: .zero,
+            toleranceAfter: .zero
+        )
+    }
+
     private func refreshDeletedClipBoundaryObservers() {
         guard let player else { return }
         for observer in deletedClipBoundaryObservers {
@@ -606,6 +669,8 @@ struct PostRecordingView: View {
                     guard
                         !isCleanedUp,
                         let player,
+                        // Reverse playback is handled by the periodic observer.
+                        player.rate > 0,
                         let deletedClip = self.edit?.deletedClips.first(where: { $0.id == clip.id })
                     else { return }
                     let seconds = CMTimeGetSeconds(player.currentTime())
@@ -780,6 +845,75 @@ struct PostRecordingView: View {
         seekPlayer(to: max(0, scene.span.start - 1))
         playbackIntent = .playing
         player?.play()
+    }
+
+    /// L plays forward and J backward, each faster with another press, up to
+    /// four times normal speed.
+    private func shuttle(forward: Bool) {
+        guard let player, let edit else { return }
+        if isEditingZoomFocus {
+            timelineSelection = .none
+        }
+        let direction: Float = forward ? 1 : -1
+        let speed = playbackIntent == .playing && player.rate * direction > 0 ? min(abs(player.rate) * 2, 4) : 1
+        if forward, editedCurrentTime >= edit.editedDuration - 0.01, let first = edit.firstKeptTime {
+            seekPlayer(to: first)
+        }
+        if !forward {
+            guard player.currentItem?.canPlayReverse == true, currentTime > (edit.firstKeptTime ?? 0) + 0.01 else {
+                return
+            }
+        }
+        playbackIntent = .playing
+        player.rate = speed * direction
+    }
+
+    private func stepFrames(_ count: Int) {
+        pausePlayback()
+        if isEditingZoomFocus {
+            timelineSelection = .none
+        }
+        let target = currentTime + Double(count) * frameDuration
+        guard count < 0, let edit else {
+            seekPlayer(to: target)
+            return
+        }
+        seekPlayer(to: edit.playableSourceTime(atOrBefore: target) ?? edit.firstKeptTime ?? 0)
+    }
+
+    private func trimToPlayhead(_ edge: TrimEdge) {
+        guard var changed = edit else { return }
+        changed.trim(edge, to: currentTime)
+        guard changed != edit else { return }
+        applyEdit(changed)
+        seekPlayer(to: currentTime)
+    }
+
+    /// Keys a video editor is expected to have: the arrows step a frame,
+    /// J, K, and L shuttle, I and O trim to the playhead, and Home and End
+    /// go to either end.
+    private var playbackShortcuts: some View {
+        let shortcuts: [(KeyboardShortcut, () -> Void)] = [
+            (KeyboardShortcut(.leftArrow, modifiers: []), { stepFrames(-1) }),
+            (KeyboardShortcut(.rightArrow, modifiers: []), { stepFrames(1) }),
+            (KeyboardShortcut("j", modifiers: []), { shuttle(forward: false) }),
+            (KeyboardShortcut("k", modifiers: []), { pausePlayback() }),
+            (KeyboardShortcut("l", modifiers: []), { shuttle(forward: true) }),
+            (KeyboardShortcut("i", modifiers: []), { trimToPlayhead(.start) }),
+            (KeyboardShortcut("o", modifiers: []), { trimToPlayhead(.end) }),
+            (KeyboardShortcut(.home, modifiers: []), { seekPlayer(to: edit?.firstKeptTime ?? 0) }),
+            (KeyboardShortcut(.end, modifiers: []), { seekPlayer(to: edit?.lastKeptTime ?? 0) }),
+        ]
+        return ZStack {
+            ForEach(shortcuts.indices, id: \.self) { index in
+                Button("", action: shortcuts[index].1)
+                    .keyboardShortcut(shortcuts[index].0)
+            }
+        }
+        .opacity(0)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
+        .disabled(player == nil || edit == nil || isExporting)
     }
 
     private func pausePlayback() {
@@ -1039,7 +1173,7 @@ struct PlaybackTransport: View {
                 .frame(width: 18)
             }
             .keyboardShortcut(.space, modifiers: [])
-            .help(intent == .playing ? PostRecordingText.pause : PostRecordingText.play)
+            .help(PostRecordingText.playHelp)
             .accessibilityLabel(intent == .playing ? PostRecordingText.pause : PostRecordingText.play)
 
             Button {

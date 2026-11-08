@@ -312,6 +312,12 @@ final class PostRecordingTimelineTests: XCTestCase {
         XCTAssertEqual(edit.playableSourceTime(atOrAfter: 0), 1)
         XCTAssertEqual(edit.playableSourceTime(atOrAfter: 4), 5)
         XCTAssertNil(edit.playableSourceTime(atOrAfter: 9.1))
+        // Kept: 1–3 and 5–9.
+        let backward: [Double: Double] = [10: 9, 9: 9, 6: 6, 4: 3, 3: 3, 2: 2, 1: 1]
+        for (tc, want) in backward {
+            XCTAssertEqual(edit.playableSourceTime(atOrBefore: tc), want, "time \(tc)")
+        }
+        XCTAssertNil(edit.playableSourceTime(atOrBefore: 0.5))
         XCTAssertEqual(edit.clipID(at: 1), clipFromOne)
         XCTAssertEqual(edit.clipID(at: 5), clipFromFive)
     }
