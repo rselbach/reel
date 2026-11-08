@@ -175,13 +175,6 @@ enum PostRecordingLogic {
         guard let exportedVideo, exportedVideo.edit == edit else { return nil }
         return exportedVideo.url
     }
-
-    /// Edits live only in the preview until something is exported from
-    /// them, so closing the preview before that throws them away.
-    static func hasUnsavedEdits(edit: TimelineEdit?, exportedEdit: TimelineEdit?) -> Bool {
-        guard let edit, edit.hasMeaningfulChanges else { return false }
-        return edit != exportedEdit
-    }
 }
 
 /// Lets the Edit menu's Undo and Redo reach a preview's timeline, whose
@@ -202,7 +195,6 @@ struct PostRecordingView: View {
     let onRecordAgain: () -> Void
     let onChangeTarget: () -> Void
     let onDelete: () -> Void
-    let onUnsavedEditsChanged: (Bool) -> Void
 
     @State private var player: AVPlayer?
     /// Loaded with the preview so future cursor-aware effects can use the
@@ -214,8 +206,6 @@ struct PostRecordingView: View {
     @State private var isCleanedUp = false
     @State private var edit: TimelineEdit?
     @State private var history = TimelineHistory()
-    /// The edit as of the last successful export, in any format.
-    @State private var exportedEdit: TimelineEdit?
     @State private var exportedVideo: ExportedVideo?
     @State private var currentTime: Double = 0
     @State private var playbackIntent: PlaybackIntent = .paused
@@ -374,15 +364,13 @@ struct PostRecordingView: View {
                 return
             }
             timelineSelection = timelineSelection.validated(for: changedEdit)
+            saveEdit(changedEdit)
             if previousEdit?.clips != changedEdit.clips {
                 refreshDeletedClipBoundaryObservers()
             }
             if previousEdit?.zoomScenes != changedEdit.zoomScenes {
                 refreshZoomPreviewComposition(scenes: changedEdit.zoomScenes)
             }
-        }
-        .onChange(of: hasUnsavedEdits) { _, unsaved in
-            onUnsavedEditsChanged(unsaved)
         }
         .onChange(of: timelineSelection) { previousSelection, changedSelection in
             if case .zoomScene = previousSelection, case .zoomScene = changedSelection {
@@ -499,10 +487,6 @@ struct PostRecordingView: View {
         .font(.caption)
     }
 
-    private var hasUnsavedEdits: Bool {
-        PostRecordingLogic.hasUnsavedEdits(edit: edit, exportedEdit: exportedEdit)
-    }
-
     private var canExport: Bool {
         PostRecordingLogic.canExport(edit: edit, isExporting: isExporting)
     }
@@ -569,7 +553,8 @@ struct PostRecordingView: View {
                 let durationTime = try await asset.load(.duration)
                 guard !isCleanedUp else { return }
                 let seconds = CMTimeGetSeconds(durationTime)
-                if let loadedEdit = TimelineEdit(sourceDuration: seconds) {
+                if let freshEdit = TimelineEdit(sourceDuration: seconds) {
+                    let loadedEdit = SavedTimelineEdit.load(from: videoURL, sourceDuration: seconds) ?? freshEdit
                     edit = loadedEdit
                     currentTime = loadedEdit.firstKeptTime ?? 0
                 }
@@ -779,6 +764,17 @@ struct PostRecordingView: View {
         applyEdit(changed)
     }
 
+    /// Edits are kept with the recording as they are made, so closing the
+    /// preview never loses them.
+    private func saveEdit(_ edit: TimelineEdit) {
+        do {
+            try SavedTimelineEdit.save(edit, to: videoURL)
+        } catch {
+            logger.error("Could not save edits: \(error.localizedDescription, privacy: .public)")
+            exportError = "Reel could not save your edits with the recording: \(error.localizedDescription)"
+        }
+    }
+
     /// Every change to the edit comes through here so it can be undone.
     private func applyEdit(_ changed: TimelineEdit) {
         guard let edit else { return }
@@ -960,7 +956,6 @@ struct PostRecordingView: View {
                 case .gif:
                     warning = try await exportGIF(to: outputURL, edit: edit)
                 }
-                exportedEdit = edit
                 lastExportURL = outputURL
                 if let warning {
                     exportError = warning.localizedDescription

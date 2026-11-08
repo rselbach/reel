@@ -613,3 +613,105 @@ struct TimelineHistory: Sendable {
         }
     }
 }
+
+/// The edits saved with a recording, so closing the preview keeps them. They
+/// live in an extended attribute on the video, which follows the file when
+/// it is renamed or moved and stays behind when the file is shared.
+enum SavedTimelineEdit {
+    static let attributeName = "com.rselbach.reel.edits"
+
+    private struct Stored: Codable {
+        struct Clip: Codable {
+            let start: Double
+            let end: Double
+            let isDeleted: Bool
+        }
+
+        struct Zoom: Codable {
+            let start: Double
+            let end: Double
+            let focalX: Double
+            let focalY: Double
+            let scale: Double
+            let transition: Double
+        }
+
+        var version = 1
+        let sourceDuration: Double
+        let clips: [Clip]
+        let zoomScenes: [Zoom]
+    }
+
+    static func encode(_ edit: TimelineEdit) throws -> Data {
+        try JSONEncoder().encode(
+            Stored(
+                sourceDuration: edit.sourceDuration,
+                clips: edit.clips.map { Stored.Clip(start: $0.span.start, end: $0.span.end, isDeleted: $0.isDeleted) },
+                zoomScenes: edit.zoomScenes.map {
+                    Stored.Zoom(
+                        start: $0.span.start,
+                        end: $0.span.end,
+                        focalX: $0.focalPoint.x,
+                        focalY: $0.focalPoint.y,
+                        scale: $0.settings.level.scale,
+                        transition: $0.settings.transitionSpeed.rawValue
+                    )
+                }
+            ))
+    }
+
+    /// Rebuilds the edit through the same operations the timeline uses, so
+    /// saved data that breaks the timeline's rules, or belongs to a file of
+    /// another length, is ignored rather than trusted.
+    static func decode(_ data: Data, sourceDuration: Double) -> TimelineEdit? {
+        guard
+            let stored = try? JSONDecoder().decode(Stored.self, from: data),
+            stored.version == 1,
+            abs(stored.sourceDuration - sourceDuration) <= 0.05,
+            var edit = TimelineEdit(sourceDuration: sourceDuration)
+        else { return nil }
+
+        for clip in stored.clips.dropFirst() {
+            guard edit.splitClip(at: clip.start) != nil else { return nil }
+        }
+        for clip in stored.clips where clip.isDeleted {
+            guard let id = edit.clipID(at: clip.start), edit.deleteClip(id: id) else { return nil }
+        }
+        for zoom in stored.zoomScenes {
+            guard
+                let focalPoint = UnitPoint2D(x: zoom.focalX, y: zoom.focalY),
+                let speed = ZoomSceneSettings.TransitionSpeed(rawValue: zoom.transition),
+                (try? edit.addZoomScene(
+                    span: TimelineSpan(start: zoom.start, end: zoom.end),
+                    focalPoint: focalPoint,
+                    settings: ZoomSceneSettings(level: .init(scale: zoom.scale), transitionSpeed: speed)
+                )) != nil
+            else { return nil }
+        }
+        return edit
+    }
+
+    static func load(from url: URL, sourceDuration: Double) -> TimelineEdit? {
+        let size = getxattr(url.path, attributeName, nil, 0, 0, 0)
+        guard size > 0 else { return nil }
+        var data = Data(count: size)
+        let read = data.withUnsafeMutableBytes { getxattr(url.path, attributeName, $0.baseAddress, size, 0, 0) }
+        guard read == size else { return nil }
+        return decode(data, sourceDuration: sourceDuration)
+    }
+
+    /// Saves the edit, or removes the saved one once nothing is edited.
+    static func save(_ edit: TimelineEdit, to url: URL) throws {
+        guard edit.hasMeaningfulChanges else {
+            guard removexattr(url.path, attributeName, 0) == 0 || errno == ENOATTR else {
+                throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+            }
+            return
+        }
+        let data = try encode(edit)
+        let result = data.withUnsafeBytes { setxattr(url.path, attributeName, $0.baseAddress, data.count, 0, 0) }
+        guard result == 0 else {
+            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+        }
+    }
+}

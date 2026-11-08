@@ -20,14 +20,6 @@ enum AppMenuText {
     static let discardConfirmationMessage = "The take will be moved to the Trash."
     static let discard = "Discard"
     static let cancel = "Cancel"
-    static let discardEditsTitle = "Discard your edits?"
-    static let discardEditsMessage =
-        "The cuts and zoom scenes in this preview have not been exported. To keep them, choose Export first."
-    static let discardEdits = "Discard Edits"
-    static let quitDiscardingEditsTitle = "Quit and discard your edits?"
-    static let quitDiscardingEditsMessage =
-        "A recording preview has cuts or zoom scenes that have not been exported."
-    static let quit = "Quit"
     static let aboutReel = "About Reel"
     static let checkForUpdates = "Check for Updates..."
     static let settings = "Settings..."
@@ -332,10 +324,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var updaterController: SPUStandardUpdaterController?
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        if previewWindows.contains(where: \.isDocumentEdited), !confirmQuitDiscardingEdits() {
-            return .terminateCancel
-        }
-
         let reply = AppTerminationLogic.reply(
             isRecorderInitialized: screenRecorder != nil,
             isRecording: screenRecorder?.isRecording ?? false,
@@ -868,16 +856,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         [settingsWindow, recordingDialogWindow, aboutWindow, welcomeWindow].compactMap { $0 } + previewWindows
     }
 
-    /// The close button and Command-W reach previews here; Done and the other
-    /// preview buttons go through closePreview directly.
-    func windowShouldClose(_ sender: NSWindow) -> Bool {
-        guard previewWindows.contains(where: { $0 === sender }), sender.isDocumentEdited else {
-            return true
-        }
-        closePreview(sender)
-        return false
-    }
-
     func windowWillClose(_ notification: Notification) {
         guard let window = notification.object as? NSWindow else { return }
 
@@ -1096,10 +1074,6 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 }
                 self?.rebuildMenu()
                 window?.close()
-            },
-            onUnsavedEditsChanged: { unsaved in
-                // Also puts the standard unsaved-changes dot in the close button.
-                window?.isDocumentEdited = unsaved
             }
         )
 
@@ -1120,38 +1094,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         presentWindow(previewWindow)
     }
 
-    /// Closes a preview, first asking whether to throw away edits that have
-    /// not been exported, then runs `then`.
+    /// Closes a preview, then runs `then`. Edits are already saved with the
+    /// recording.
     private func closePreview(_ window: NSWindow?, then: @escaping @MainActor () -> Void = {}) {
         guard let window else { return }
-        guard window.isDocumentEdited else {
-            window.close()
-            then()
-            return
-        }
-
-        let alert = NSAlert()
-        alert.messageText = AppMenuText.discardEditsTitle
-        alert.informativeText = AppMenuText.discardEditsMessage
-        alert.alertStyle = .warning
-        alert.addButton(withTitle: AppMenuText.discardEdits).hasDestructiveAction = true
-        alert.addButton(withTitle: AppMenuText.cancel)
-        Task { @MainActor in
-            guard await alert.beginSheetModal(for: window) == .alertFirstButtonReturn else { return }
-            window.close()
-            then()
-        }
-    }
-
-    private func confirmQuitDiscardingEdits() -> Bool {
-        NSApp.activate(ignoringOtherApps: true)
-        let alert = NSAlert()
-        alert.messageText = AppMenuText.quitDiscardingEditsTitle
-        alert.informativeText = AppMenuText.quitDiscardingEditsMessage
-        alert.alertStyle = .warning
-        alert.addButton(withTitle: AppMenuText.quit).hasDestructiveAction = true
-        alert.addButton(withTitle: AppMenuText.cancel)
-        return alert.runModal() == .alertFirstButtonReturn
+        window.close()
+        then()
     }
 
     @objc private func showRecordingDialog() {

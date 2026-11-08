@@ -2583,24 +2583,49 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertNil(PostRecordingLogic.shareURL(original: original, edit: edit, exportedVideo: exported))
     }
 
-    func testPostRecordingLogicTracksEditsUntilTheyAreExported() throws {
+    func testSavedTimelineEditRoundTripsCutsAndZoomScenes() throws {
         var edit = try XCTUnwrap(TimelineEdit(sourceDuration: 10))
-        XCTAssertFalse(PostRecordingLogic.hasUnsavedEdits(edit: nil, exportedEdit: nil))
-        XCTAssertFalse(PostRecordingLogic.hasUnsavedEdits(edit: edit, exportedEdit: nil))
+        edit.trim(.start, to: 1)
+        let middle = try XCTUnwrap(edit.splitClip(at: 4))
+        _ = try XCTUnwrap(edit.splitClip(at: 6))
+        XCTAssertTrue(edit.deleteClip(id: middle))
+        let focus = try XCTUnwrap(UnitPoint2D(x: 0.25, y: 0.75))
+        let settings = ZoomSceneSettings(level: .init(scale: 2), transitionSpeed: .slow)
+        try edit.addZoomScene(span: TimelineSpan(start: 6.5, end: 8), focalPoint: focus, settings: settings)
 
-        let tailID = try XCTUnwrap(edit.splitClip(at: 8))
-        XCTAssertTrue(edit.deleteClip(id: tailID))
-        XCTAssertTrue(PostRecordingLogic.hasUnsavedEdits(edit: edit, exportedEdit: nil))
+        let data = try SavedTimelineEdit.encode(edit)
+        XCTAssertNotNil(SavedTimelineEdit.decode(data, sourceDuration: 10.01), "rounding in the reported length")
+        let restored = try XCTUnwrap(SavedTimelineEdit.decode(data, sourceDuration: 10))
+        XCTAssertEqual(restored.keptRanges, edit.keptRanges)
+        XCTAssertEqual(restored.deletedClips.map(\.span), edit.deletedClips.map(\.span))
+        let scene = try XCTUnwrap(restored.zoomScenes.first)
+        XCTAssertEqual(restored.zoomScenes.count, 1)
+        XCTAssertEqual(scene.span, TimelineSpan(start: 6.5, end: 8))
+        XCTAssertEqual(scene.focalPoint, focus)
+        XCTAssertEqual(scene.settings, settings)
 
-        let exported = edit
-        XCTAssertFalse(PostRecordingLogic.hasUnsavedEdits(edit: edit, exportedEdit: exported))
+        XCTAssertNil(SavedTimelineEdit.decode(data, sourceDuration: 12), "another file's length")
+        XCTAssertNil(SavedTimelineEdit.decode(Data("{}".utf8), sourceDuration: 10))
+    }
 
-        try edit.addZoomScene(span: TimelineSpan(start: 1, end: 3))
-        XCTAssertTrue(PostRecordingLogic.hasUnsavedEdits(edit: edit, exportedEdit: exported))
+    func testSavedTimelineEditLivesOnTheRecordingUntilEditsAreUndone() throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("Greendale Debate \(UUID().uuidString).mp4")
+        try Data("not a real video".utf8).write(to: url)
+        defer { try? FileManager.default.removeItem(at: url) }
 
-        edit.removeZoomScene(id: try XCTUnwrap(edit.zoomScenes.first?.id))
-        edit.restoreClip(id: tailID)
-        XCTAssertFalse(PostRecordingLogic.hasUnsavedEdits(edit: edit, exportedEdit: exported))
+        var edit = try XCTUnwrap(TimelineEdit(sourceDuration: 10))
+        XCTAssertNil(SavedTimelineEdit.load(from: url, sourceDuration: 10))
+
+        let tail = try XCTUnwrap(edit.splitClip(at: 8))
+        XCTAssertTrue(edit.deleteClip(id: tail))
+        try SavedTimelineEdit.save(edit, to: url)
+        XCTAssertEqual(SavedTimelineEdit.load(from: url, sourceDuration: 10)?.editedDuration, 8)
+
+        edit.restoreClip(id: tail)
+        try SavedTimelineEdit.save(edit, to: url)
+        XCTAssertNil(SavedTimelineEdit.load(from: url, sourceDuration: 10))
+        try SavedTimelineEdit.save(edit, to: url)
     }
 
     @MainActor
