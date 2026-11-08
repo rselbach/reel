@@ -829,14 +829,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         } catch {
             showErrorAlert(
                 title: AppMenuText.couldNotOpenRecordingsFolder,
-                message: "Reel could not create \(url.path()): \(error.localizedDescription)"
+                message: "Reel could not create \(url.path(percentEncoded: false)): \(error.localizedDescription)"
             )
             return
         }
         if !NSWorkspace.shared.open(url) {
             showErrorAlert(
                 title: AppMenuText.couldNotOpenRecordingsFolder,
-                message: "Finder could not open \(url.path())."
+                message: "Finder could not open \(url.path(percentEncoded: false))."
             )
         }
     }
@@ -846,7 +846,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         if !NSWorkspace.shared.open(url) {
             showErrorAlert(
                 title: AppMenuText.couldNotOpenRecording,
-                message: "Could not open \(url.path()). The file may have been moved or deleted."
+                message: "Could not open \(url.path(percentEncoded: false)). The file may have been moved or deleted."
             )
         }
     }
@@ -1119,11 +1119,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 self?.closePreview(window)
             },
             onRevealInFinder: {
-                let revealed = NSWorkspace.shared.selectFile(url.path(), inFileViewerRootedAtPath: "")
+                let revealed = NSWorkspace.shared.selectFile(url.path(percentEncoded: false), inFileViewerRootedAtPath: "")
                 if !revealed {
                     let alert = NSAlert()
                     alert.messageText = AppMenuText.couldNotRevealRecording
-                    alert.informativeText = "Finder could not reveal the recording at \(url.path())."
+                    alert.informativeText = "Finder could not reveal the recording at \(url.path(percentEncoded: false))."
                     alert.alertStyle = .warning
                     alert.runModal()
                 }
@@ -1166,7 +1166,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         // drag, or Command-click for its folder, as in any document window.
         let previewWindow = configure(
             PreviewWindow(contentViewController: hostingController),
-            title: FileManager.default.displayName(atPath: url.path()),
+            title: FileManager.default.displayName(atPath: url.path(percentEncoded: false)),
             styleMask: [.titled, .closable, .miniaturizable, .resizable]
         )
         previewWindow.representedURL = url

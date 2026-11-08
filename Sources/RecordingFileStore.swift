@@ -91,7 +91,7 @@ enum RecordingDiskSpace {
         )
         let seconds = Int(recordableSeconds(availableBytes: availableBytes, bitrate: bitrate))
         return """
-            Not enough free space in \(directory.path()) to record. \
+            Not enough free space in \(directory.path(percentEncoded: false)) to record. \
             \(free) available, about \(seconds)s at the current video quality. \
             Free up space or lower the video quality in Settings.
             """
@@ -105,9 +105,9 @@ enum RecordingError: LocalizedError {
     var errorDescription: String? {
         switch self {
         case .outputDirectoryCreationFailed(let url, let error):
-            "Unable to prepare output directory \(url.path()): \(error.localizedDescription)"
+            "Unable to prepare output directory \(url.path(percentEncoded: false)): \(error.localizedDescription)"
         case .outputDirectoryNotWritable(let url):
-            "Output directory is not writable: \(url.path())"
+            "Output directory is not writable: \(url.path(percentEncoded: false))"
         }
     }
 }
@@ -117,7 +117,7 @@ struct FileReplacementWarning: LocalizedError {
     let underlyingError: Error
 
     var errorDescription: String? {
-        "The new file was saved, but its backup could not be removed at \(backupURL.path()): \(underlyingError.localizedDescription)"
+        "The new file was saved, but its backup could not be removed at \(backupURL.path(percentEncoded: false)): \(underlyingError.localizedDescription)"
     }
 }
 
@@ -128,7 +128,7 @@ enum FileReplacementError: LocalizedError {
         switch self {
         case .rollbackFailed(let commitError, let restoreError, let backupURL):
             return
-                "Replacement failed (\(commitError.localizedDescription)), and the original file could not be restored. It remains at \(backupURL.path()): \(restoreError.localizedDescription)"
+                "Replacement failed (\(commitError.localizedDescription)), and the original file could not be restored. It remains at \(backupURL.path(percentEncoded: false)): \(restoreError.localizedDescription)"
         }
     }
 }
@@ -144,7 +144,7 @@ enum FileReplacement {
             return nil
         }
 
-        guard fileManager.fileExists(atPath: outputURL.path()) else {
+        guard fileManager.fileExists(atPath: outputURL.path(percentEncoded: false)) else {
             try fileManager.moveItem(at: tempURL, to: outputURL)
             return nil
         }
@@ -158,9 +158,9 @@ enum FileReplacement {
         do {
             try fileManager.moveItem(at: tempURL, to: outputURL)
         } catch let commitError {
-            if fileManager.fileExists(atPath: backupURL.path()) {
+            if fileManager.fileExists(atPath: backupURL.path(percentEncoded: false)) {
                 do {
-                    if fileManager.fileExists(atPath: outputURL.path()) {
+                    if fileManager.fileExists(atPath: outputURL.path(percentEncoded: false)) {
                         try fileManager.removeItem(at: outputURL)
                     }
                     try fileManager.moveItem(at: backupURL, to: outputURL)
@@ -225,7 +225,7 @@ enum RecordingFileStore {
             let candidate = outputDir.appendingPathComponent(
                 RecordingFileNaming.fileName(date: date, copy: copy)
             )
-            if !FileManager.default.fileExists(atPath: candidate.path()) {
+            if !FileManager.default.fileExists(atPath: candidate.path(percentEncoded: false)) {
                 return candidate
             }
         }
@@ -248,14 +248,14 @@ enum RecordingFileStore {
             let values = try url.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
             return values.volumeAvailableCapacityForImportantUsage
         } catch {
-            logger.warning("Could not read free space for \(url.path()): \(error.localizedDescription)")
+            logger.warning("Could not read free space for \(url.path(percentEncoded: false)): \(error.localizedDescription)")
             return nil
         }
     }
 
     /// Removes a temporary recording that will never reach the user.
     static func discard(_ url: URL) throws {
-        guard FileManager.default.fileExists(atPath: url.path()) else { return }
+        guard FileManager.default.fileExists(atPath: url.path(percentEncoded: false)) else { return }
         try FileManager.default.removeItem(at: url)
     }
 }

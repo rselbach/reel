@@ -64,14 +64,14 @@ enum AudioTrackMixer {
 
         let mixedURL = ExportFileNaming.temporaryURL(for: url)
         defer {
-            if FileManager.default.fileExists(atPath: mixedURL.path()) {
+            if FileManager.default.fileExists(atPath: mixedURL.path(percentEncoded: false)) {
                 do {
                     try FileManager.default.removeItem(at: mixedURL)
                 } catch {
                     // A hidden leftover beside the recording is not worth
                     // failing a finished take over.
                     logger.error(
-                        "Could not remove \(mixedURL.path(), privacy: .public): \(error.localizedDescription, privacy: .public)"
+                        "Could not remove \(mixedURL.path(percentEncoded: false), privacy: .public): \(error.localizedDescription, privacy: .public)"
                     )
                 }
             }

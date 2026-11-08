@@ -2069,6 +2069,14 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertEqual(GitInfo.normalizedCommit(fullSHA), fullSHA.lowercased())
     }
 
+    func testRecentRecordingsReadPathsSavedPercentEncoded() {
+        let saved = "/Users/troy/Movies/Reel/Reel 2026-11-07 at 8.20.39 PM.mp4"
+        let encoded = "/Users/troy/Movies/Reel/Reel%202026-11-07%20at%208.20.39%20PM.mp4"
+        XCTAssertEqual(RecentRecordingsLogic.storedPath(encoded, fileExists: { $0 == saved }), saved)
+        XCTAssertEqual(RecentRecordingsLogic.storedPath(saved, fileExists: { $0 == saved }), saved)
+        XCTAssertEqual(RecentRecordingsLogic.storedPath("/tmp/100%25.mp4", fileExists: { _ in true }), "/tmp/100%25.mp4")
+    }
+
     func testRecentRecordingsDeduplicateAndCapMostRecentFirst() {
         XCTAssertEqual(
             RecentRecordingsLogic.updatedPaths(current: [], adding: "/a.mp4", limit: 5),

@@ -502,7 +502,7 @@ struct PostRecordingView: View {
                 .lineLimit(1)
                 .truncationMode(.middle)
             Button(PostRecordingText.showInFinder) {
-                if !NSWorkspace.shared.selectFile(url.path(), inFileViewerRootedAtPath: "") {
+                if !NSWorkspace.shared.selectFile(url.path(percentEncoded: false), inFileViewerRootedAtPath: "") {
                     exportError = "Finder could not show \(url.lastPathComponent)."
                 }
             }
@@ -1174,12 +1174,12 @@ struct PostRecordingView: View {
     }
 
     private func removeTemporaryExport(at url: URL, kind: String) {
-        guard FileManager.default.fileExists(atPath: url.path()) else { return }
+        guard FileManager.default.fileExists(atPath: url.path(percentEncoded: false)) else { return }
         do {
             try FileManager.default.removeItem(at: url)
         } catch {
             logger.error(
-                "Failed to remove temporary \(kind, privacy: .public) export at \(url.path(), privacy: .public): \(error.localizedDescription, privacy: .public)"
+                "Failed to remove temporary \(kind, privacy: .public) export at \(url.path(percentEncoded: false), privacy: .public): \(error.localizedDescription, privacy: .public)"
             )
         }
     }

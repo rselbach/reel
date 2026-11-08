@@ -37,6 +37,13 @@ enum RecentRecordingsLogic {
     static func removingPath(_ path: String, from current: [String]) -> [String] {
         current.filter { $0 != path }
     }
+
+    /// Reel once saved these paths percent-encoded, so a stored
+    /// "Reel%202026…" that names no file means "Reel 2026…".
+    static func storedPath(_ path: String, fileExists: (String) -> Bool) -> String {
+        guard !fileExists(path), let decoded = path.removingPercentEncoding else { return path }
+        return decoded
+    }
 }
 
 /// The recording target remembered between launches.
@@ -206,22 +213,22 @@ class AppSettings: ObservableObject {
     }
 
     private static func isWritableDirectory(_ url: URL) -> Bool {
-        if FileManager.default.fileExists(atPath: url.path()) {
+        if FileManager.default.fileExists(atPath: url.path(percentEncoded: false)) {
             var isDirectory = ObjCBool(false)
-            guard FileManager.default.fileExists(atPath: url.path(), isDirectory: &isDirectory),
+            guard FileManager.default.fileExists(atPath: url.path(percentEncoded: false), isDirectory: &isDirectory),
                 isDirectory.boolValue
             else {
                 return false
             }
-            return FileManager.default.isWritableFile(atPath: url.path())
+            return FileManager.default.isWritableFile(atPath: url.path(percentEncoded: false))
         }
 
         let parent = url.deletingLastPathComponent()
         guard parent.path != "/" && parent.path != url.path else {
             return false
         }
-        return FileManager.default.fileExists(atPath: parent.path())
-            && FileManager.default.isWritableFile(atPath: parent.path())
+        return FileManager.default.fileExists(atPath: parent.path(percentEncoded: false))
+            && FileManager.default.isWritableFile(atPath: parent.path(percentEncoded: false))
     }
 
     @Published var launchAtLogin: Bool {
@@ -284,7 +291,7 @@ class AppSettings: ObservableObject {
 
     @Published var outputDirectory: URL {
         didSet {
-            persist(outputDirectory.path(), key: DefaultsKey.outputDirectory)
+            persist(outputDirectory.path(percentEncoded: false), key: DefaultsKey.outputDirectory)
         }
     }
 
@@ -519,14 +526,14 @@ class AppSettings: ObservableObject {
     func noteRecentRecording(_ url: URL) {
         recentRecordingPaths = RecentRecordingsLogic.updatedPaths(
             current: recentRecordingPaths,
-            adding: url.path(),
+            adding: url.path(percentEncoded: false),
             limit: Self.maxRecentRecordings
         )
     }
 
     func forgetRecentRecording(_ url: URL) {
         recentRecordingPaths = RecentRecordingsLogic.removingPath(
-            url.path(),
+            url.path(percentEncoded: false),
             from: recentRecordingPaths
         )
     }
@@ -535,7 +542,7 @@ class AppSettings: ObservableObject {
     var existingRecentRecordings: [URL] {
         recentRecordingPaths
             .map { URL(fileURLWithPath: $0) }
-            .filter { FileManager.default.fileExists(atPath: $0.path()) }
+            .filter { FileManager.default.fileExists(atPath: $0.path(percentEncoded: false)) }
     }
 
     enum AudioSource: String, StoredAppSetting {
@@ -980,7 +987,7 @@ class AppSettings: ObservableObject {
                 logger.warning("Stored outputDirectory is invalid, using default: \(path)")
                 let fallbackDirectory = Self.defaultOutputDirectory()
                 self.outputDirectory = fallbackDirectory
-                defaults.set(fallbackDirectory.path(), forKey: DefaultsKey.outputDirectory)
+                defaults.set(fallbackDirectory.path(percentEncoded: false), forKey: DefaultsKey.outputDirectory)
             }
         } else {
             self.outputDirectory = Self.defaultOutputDirectory()
@@ -1030,7 +1037,9 @@ class AppSettings: ObservableObject {
         self.textOverlayPosition =
             TextOverlayPosition.fromStored(defaults.string(forKey: DefaultsKey.textOverlayPosition)) ?? .center
 
-        self.recentRecordingPaths = defaults.stringArray(forKey: DefaultsKey.recentRecordings) ?? []
+        self.recentRecordingPaths = (defaults.stringArray(forKey: DefaultsKey.recentRecordings) ?? []).map {
+            RecentRecordingsLogic.storedPath($0, fileExists: FileManager.default.fileExists(atPath:))
+        }
         self.rememberedTarget = Self.loadRememberedTarget(from: defaults)
     }
 

@@ -215,7 +215,7 @@ private enum AppIconCache {
         else {
             return nil
         }
-        let image = NSWorkspace.shared.icon(forFile: appURL.path())
+        let image = NSWorkspace.shared.icon(forFile: appURL.path(percentEncoded: false))
         images.setObject(image, forKey: bundleID as NSString)
         return image
     }

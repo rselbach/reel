@@ -253,9 +253,9 @@ struct GeneralPane: View {
         do {
             let values = try url.resourceValues(forKeys: [.isDirectoryKey])
             guard values.isDirectory == true else { return false }
-            return FileManager.default.isWritableFile(atPath: url.path())
+            return FileManager.default.isWritableFile(atPath: url.path(percentEncoded: false))
         } catch {
-            logger.warning("Failed to read directory attributes for \(url.path()): \(error.localizedDescription)")
+            logger.warning("Failed to read directory attributes for \(url.path(percentEncoded: false)): \(error.localizedDescription)")
             return false
         }
     }
@@ -268,14 +268,14 @@ private struct OutputFolderLabel: View {
 
     var body: some View {
         HStack(spacing: 4) {
-            Image(nsImage: NSWorkspace.shared.icon(forFile: url.path()))
+            Image(nsImage: NSWorkspace.shared.icon(forFile: url.path(percentEncoded: false)))
                 .resizable()
                 .frame(width: 16, height: 16)
-            Text(FileManager.default.displayName(atPath: url.path()))
+            Text(FileManager.default.displayName(atPath: url.path(percentEncoded: false)))
                 .lineLimit(1)
                 .truncationMode(.middle)
         }
-        .help(url.path())
+        .help(url.path(percentEncoded: false))
         .accessibilityElement(children: .combine)
     }
 }

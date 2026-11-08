@@ -27,11 +27,11 @@ enum RecordingFinalizationLogic {
     }
 
     static func finderRevealFailureMessage(for url: URL) -> String {
-        "Recording saved, but Finder could not reveal it: \(url.path())"
+        "Recording saved, but Finder could not reveal it: \(url.path(percentEncoded: false))"
     }
 
     static func retainedRecordingMessage(for url: URL, saveError: Error) -> String {
-        "Could not save to the chosen location. The recording was kept at \(url.path()): \(saveError.localizedDescription)"
+        "Could not save to the chosen location. The recording was kept at \(url.path(percentEncoded: false)): \(saveError.localizedDescription)"
     }
 }
 
@@ -1085,7 +1085,7 @@ class ScreenRecorder: NSObject, ObservableObject {
         } catch {
             logger.error("Failed to move discarded recording to the Trash: \(error.localizedDescription)")
             errorMessage =
-                "Could not move the discarded recording to the Trash. It was kept at \(outputURL.path()): \(error.localizedDescription)"
+                "Could not move the discarded recording to the Trash. It was kept at \(outputURL.path(percentEncoded: false)): \(error.localizedDescription)"
         }
     }
 
@@ -1267,7 +1267,7 @@ class ScreenRecorder: NSObject, ObservableObject {
             return try RecordingFileStore.makeOutputURL(in: outputDir)
         } catch {
             logger.warning(
-                "Configured output directory unavailable (\(outputDir.path()), using fallback: \(error.localizedDescription))"
+                "Configured output directory unavailable (\(outputDir.path(percentEncoded: false)), using fallback: \(error.localizedDescription))"
             )
             let fallback = AppSettings.defaultOutputDirectory()
             persistSettingOutputDirectory(fallback)
@@ -1615,7 +1615,7 @@ class ScreenRecorder: NSObject, ObservableObject {
                 do {
                     replacementWarning = try moveTempRecording(from: tempURL, to: finalURL)
                 } catch {
-                    guard FileManager.default.fileExists(atPath: tempURL.path()) else {
+                    guard FileManager.default.fileExists(atPath: tempURL.path(percentEncoded: false)) else {
                         errorMessage = "Failed to save recording: \(error.localizedDescription)"
                         lastRecordedURL = nil
                         return
@@ -1627,11 +1627,11 @@ class ScreenRecorder: NSObject, ObservableObject {
                     )
                 }
             } else {
-                logger.info("Save cancelled; keeping recording at \(tempURL.path(), privacy: .public)")
+                logger.info("Save cancelled; keeping recording at \(tempURL.path(percentEncoded: false), privacy: .public)")
             }
         }
 
-        logger.info("Recording saved to: \(finalURL.path())")
+        logger.info("Recording saved to: \(finalURL.path(percentEncoded: false))")
         lastRecordedURL = finalURL
         settings.noteRecentRecording(finalURL)
         if let replacementWarning {
@@ -1643,7 +1643,7 @@ class ScreenRecorder: NSObject, ObservableObject {
             openFinderAfterRecording: options.openFinderAfterRecording,
             showPreviewAfterRecording: options.showPreviewAfterRecording
         ) {
-            let revealed = NSWorkspace.shared.selectFile(finalURL.path(), inFileViewerRootedAtPath: "")
+            let revealed = NSWorkspace.shared.selectFile(finalURL.path(percentEncoded: false), inFileViewerRootedAtPath: "")
             if !revealed {
                 let revealError = RecordingFinalizationLogic.finderRevealFailureMessage(for: finalURL)
                 errorMessage = errorMessage.map { "\($0)\n\(revealError)" } ?? revealError
@@ -1679,7 +1679,7 @@ class ScreenRecorder: NSObject, ObservableObject {
             try RecordingFileStore.discard(tempURL)
         } catch {
             logger.error(
-                "Failed to remove temporary recording at \(tempURL.path(), privacy: .public): \(error.localizedDescription, privacy: .public)"
+                "Failed to remove temporary recording at \(tempURL.path(percentEncoded: false), privacy: .public): \(error.localizedDescription, privacy: .public)"
             )
             if errorMessage == nil {
                 errorMessage = "Failed to clean up temporary recording: \(error.localizedDescription)"
