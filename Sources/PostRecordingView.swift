@@ -65,11 +65,12 @@ enum PostRecordingText {
     static let revealInFinder = "Reveal in Finder"
     static let copy = "Copy"
     static let copied = "Copied!"
-    static let dragHint = "Drag this recording into Slack, Mail, or Finder"
-    static let exportToShare = "Export edits to share"
-    static let exportToShareHelp = "Drag, Copy, and Share use a file. Choose Export to make one from your edits."
+    static let copyHelp = "Copy the recording to paste into Slack, Mail, or Finder"
+    static let exportToShareHelp = "Copy and Share use a file. Choose Export to make one from your edits."
     static let share = "Share"
-    static let delete = "Move to Trash"
+    static let more = "More"
+    static let delete = "Move to Trash..."
+    static let confirmDelete = "Move to Trash"
     static let timeline = "Timeline"
     static let timelineHelp = "Drag either end to trim. To remove a middle part, split around it and delete it."
     static let split = "Split"
@@ -281,58 +282,22 @@ struct PostRecordingView: View {
                 .disabled(isExporting)
             }
 
-            if let error = exportError {
-                Text(error)
-                    .foregroundColor(.red)
-                    .font(.caption)
-            }
-
-            if let lastExportURL {
-                exportedNote(for: lastExportURL)
-            }
-
             HStack(spacing: 12) {
-                fileChip
-
-                Button(justCopied ? PostRecordingText.copied : PostRecordingText.copy) {
-                    copyToPasteboard()
-                }
-                .disabled(isExporting || shareURL == nil)
-
-                ShareLink(item: shareURL ?? videoURL) {
-                    Label(PostRecordingText.share, systemImage: "square.and.arrow.up")
-                }
-                .disabled(isExporting || shareURL == nil)
-
-                Spacer()
-
-                Button(PostRecordingText.revealInFinder) {
-                    onRevealInFinder()
-                }
-                .disabled(isExporting)
-
-                Button(PostRecordingText.delete, role: .destructive) {
-                    showDeleteConfirmation = true
-                }
-                .foregroundColor(.red)
-                .disabled(isExporting)
-            }
-            .padding(.horizontal)
-
-            HStack(spacing: 12) {
-                Button(PostRecordingText.recordAgain) {
+                Menu {
+                    Button(PostRecordingText.changeTarget, action: onChangeTarget)
+                } label: {
+                    Text(PostRecordingText.recordAgain)
+                } primaryAction: {
                     onRecordAgain()
                 }
+                .fixedSize()
                 .disabled(isExporting)
 
-                Button(PostRecordingText.changeTarget) {
-                    onChangeTarget()
-                }
-                .disabled(isExporting)
-
-                Spacer()
-
-                exportControls
+                // The space stays when there is no status, keeping Done at
+                // the trailing edge.
+                Color.clear
+                    .frame(maxWidth: .infinity)
+                    .overlay { statusLine }
 
                 Button(PostRecordingText.done) {
                     onDismiss()
@@ -340,12 +305,48 @@ struct PostRecordingView: View {
                 .buttonStyle(.borderedProminent)
                 .disabled(isExporting)
             }
+            // Fixed, so a status message never moves the video or timeline.
+            .frame(height: 30)
             .padding(.horizontal)
+        }
+        .toolbar {
+            ToolbarItemGroup(placement: .primaryAction) {
+                Button {
+                    copyToPasteboard()
+                } label: {
+                    Label(
+                        justCopied ? PostRecordingText.copied : PostRecordingText.copy,
+                        systemImage: justCopied ? "checkmark" : "doc.on.doc"
+                    )
+                }
+                .help(shareURL == nil ? PostRecordingText.exportToShareHelp : PostRecordingText.copyHelp)
+                .disabled(isExporting || shareURL == nil)
+
+                ShareLink(item: shareURL ?? videoURL) {
+                    Label(PostRecordingText.share, systemImage: "square.and.arrow.up")
+                }
+                .help(shareURL == nil ? PostRecordingText.exportToShareHelp : PostRecordingText.share)
+                .disabled(isExporting || shareURL == nil)
+
+                exportMenu
+
+                Menu {
+                    Button(PostRecordingText.revealInFinder, action: onRevealInFinder)
+                    Divider()
+                    Button(PostRecordingText.delete, role: .destructive) {
+                        showDeleteConfirmation = true
+                    }
+                } label: {
+                    Label(PostRecordingText.more, systemImage: "ellipsis.circle")
+                }
+                .help(PostRecordingText.more)
+                .disabled(isExporting)
+            }
         }
         .padding()
         .frame(minWidth: 780, minHeight: 700)
         .alert(PostRecordingText.deleteConfirmationTitle, isPresented: $showDeleteConfirmation) {
-            Button(PostRecordingText.delete, role: .destructive) {
+            Button(PostRecordingText.confirmDelete, role: .destructive) {
                 onDelete()
             }
             Button("Cancel", role: .cancel) {}
@@ -395,78 +396,61 @@ struct PostRecordingView: View {
         PostRecordingLogic.shareURL(original: videoURL, edit: edit, exportedVideo: exportedVideo)
     }
 
+    /// Export progress, the last error, or the file just saved, one at a
+    /// time in the bottom bar.
     @ViewBuilder
-    private var fileChip: some View {
-        let chip = HStack(spacing: 6) {
-            Image(systemName: "film")
-            Text(shareURL?.lastPathComponent ?? PostRecordingText.exportToShare)
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .frame(maxWidth: 220, alignment: .leading)
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 5)
-        .background(
-            RoundedRectangle(cornerRadius: 6)
-                .fill(Color(nsColor: .controlBackgroundColor))
-        )
-
-        if let shareURL {
-            chip
-                .onDrag {
-                    NSItemProvider(contentsOf: shareURL) ?? NSItemProvider()
+    private var statusLine: some View {
+        if let exportProgress {
+            HStack(spacing: 8) {
+                Text("\(PostRecordingText.exporting) \(Int((exportProgress * 100).rounded()))%")
+                    .monospacedDigit()
+                    .foregroundStyle(.secondary)
+                ProgressView(value: exportProgress)
+                    .frame(width: 120)
+                    .accessibilityLabel(PostRecordingText.exporting)
+                Button(PostRecordingText.cancelExport) {
+                    exportTask?.cancel()
                 }
-                .allowsHitTesting(!isExporting)
-                .help(PostRecordingText.dragHint)
-        } else {
-            chip
-                .foregroundStyle(.secondary)
-                .help(PostRecordingText.exportToShareHelp)
+                .keyboardShortcut(.cancelAction)
+            }
+        } else if let exportError {
+            Text(exportError)
+                .font(.caption)
+                .foregroundStyle(.red)
+                .lineLimit(2)
+                .truncationMode(.middle)
+        } else if let lastExportURL {
+            exportedNote(for: lastExportURL)
         }
     }
 
-    /// One Export menu, replaced by progress and Cancel while a file is
-    /// being written.
-    @ViewBuilder
-    private var exportControls: some View {
-        if let exportProgress {
-            Text("\(PostRecordingText.exporting) \(Int((exportProgress * 100).rounded()))%")
-                .monospacedDigit()
-                .foregroundStyle(.secondary)
-            ProgressView(value: exportProgress)
-                .frame(width: 120)
-                .accessibilityLabel(PostRecordingText.exporting)
-            Button(PostRecordingText.cancelExport) {
-                exportTask?.cancel()
+    private var exportMenu: some View {
+        Menu(PostRecordingText.export) {
+            Button {
+                startExport(.video(.source, suffix: "edited"))
+            } label: {
+                Text(PostRecordingText.exportEdited)
+                Text(PostRecordingText.exportEditedHelp)
             }
-            .keyboardShortcut(.cancelAction)
-        } else {
-            Menu(PostRecordingText.export) {
-                Button {
-                    startExport(.video(.source, suffix: "edited"))
-                } label: {
-                    Text(PostRecordingText.exportEdited)
-                    Text(PostRecordingText.exportEditedHelp)
-                }
-                .disabled(!hasEdits)
+            .disabled(!hasEdits)
 
-                Button {
-                    startExport(.video(.p720, suffix: "720p"))
-                } label: {
-                    Text(PostRecordingText.exportSmaller)
-                    Text(PostRecordingText.exportSmallerHelp)
-                }
-
-                Button {
-                    startExport(.gif)
-                } label: {
-                    Text(PostRecordingText.exportGIF)
-                    Text(PostRecordingText.exportGIFHelp)
-                }
+            Button {
+                startExport(.video(.p720, suffix: "720p"))
+            } label: {
+                Text(PostRecordingText.exportSmaller)
+                Text(PostRecordingText.exportSmallerHelp)
             }
-            .fixedSize()
-            .disabled(!canExport)
+
+            Button {
+                startExport(.gif)
+            } label: {
+                Text(PostRecordingText.exportGIF)
+                Text(PostRecordingText.exportGIFHelp)
+            }
         }
+        .fixedSize()
+        .help(PostRecordingText.export)
+        .disabled(!canExport)
     }
 
     private func exportedNote(for url: URL) -> some View {

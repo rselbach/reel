@@ -34,7 +34,6 @@ enum AppMenuText {
     static let recordingStopped = "Recording Stopped"
     static let couldNotRevealRecording = "Could not reveal recording"
     static let couldNotDeleteRecording = "Could not move recording to Trash"
-    static let recordingPreviewTitle = "Recording Preview"
     static let newRecordingTitle = "New Recording"
     static let settingsWindowTitle = "Reel Settings"
 }
@@ -1077,11 +1076,18 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             }
         )
 
+        let hostingController = NSHostingController(rootView: previewView)
+        // Lets the preview's SwiftUI toolbar become the window's toolbar.
+        hostingController.sceneBridgingOptions = [.toolbars]
+        // Named after the recording, with its file icon in the title bar to
+        // drag, or Command-click for its folder, as in any document window.
         let previewWindow = configure(
-            PreviewWindow(contentViewController: NSHostingController(rootView: previewView)),
-            title: AppMenuText.recordingPreviewTitle,
+            PreviewWindow(contentViewController: hostingController),
+            title: FileManager.default.displayName(atPath: url.path()),
             styleMask: [.titled, .closable, .miniaturizable, .resizable]
         )
+        previewWindow.representedURL = url
+        previewWindow.toolbarStyle = .unified
         previewWindow.undoCommands = undoCommands
         if let previous = previewWindows.last, let visibleFrame = previous.screen?.visibleFrame {
             previewWindow.setFrame(

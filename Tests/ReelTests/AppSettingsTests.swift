@@ -1275,7 +1275,6 @@ final class AppSettingsTests: XCTestCase {
     }
 
     func testAppMenuTextMatchesWindowTitlesAndPreviewWarnings() {
-        XCTAssertEqual(AppMenuText.recordingPreviewTitle, "Recording Preview")
         XCTAssertEqual(AppMenuText.newRecordingTitle, "New Recording")
         XCTAssertEqual(AppMenuText.settingsWindowTitle, "Reel Settings")
         XCTAssertEqual(AppMenuText.couldNotRevealRecording, "Could not reveal recording")
@@ -1285,7 +1284,8 @@ final class AppSettingsTests: XCTestCase {
     func testPostRecordingTextMatchesPreviewActions() {
         XCTAssertEqual(PostRecordingText.loading, "Loading...")
         XCTAssertEqual(PostRecordingText.revealInFinder, "Reveal in Finder")
-        XCTAssertEqual(PostRecordingText.delete, "Move to Trash")
+        XCTAssertEqual(PostRecordingText.delete, "Move to Trash...")
+        XCTAssertEqual(PostRecordingText.confirmDelete, "Move to Trash")
         XCTAssertEqual(PostRecordingText.export, "Export")
         XCTAssertEqual(PostRecordingText.exportEdited, "Edited Video...")
         XCTAssertEqual(PostRecordingText.exportSmaller, "Smaller Copy (720p)...")
