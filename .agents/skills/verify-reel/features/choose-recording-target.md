@@ -22,7 +22,7 @@ remembered area and set microphone or camera use for only the next take.
 - Choose Reel's menu-bar item, then `Start Recording...`.
 - Press the configured global recording shortcut when no remembered target is
   usable.
-- Choose `Change Target...` from Recording Preview.
+- Choose `Change Target...` from the preview's `Record Again` menu.
 - Choose `Record Again` when the remembered target is unavailable.
 
 ## Driving it with Computer Use

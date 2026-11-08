@@ -276,27 +276,28 @@ Notes:
 
 User story: As a user, I want a preview window after capture so I can inspect, edit, reveal, delete, or finish with the recording.
 
-Expected behavior: When enabled, a preview window opens after each recording with playback, Undo and Redo, a timeline with trim handles and a Split button, a draggable file chip, Copy, Share, reveal, delete, Record Again, and one Export menu. The file chip, Copy, and Share hand out the recording until the timeline is edited, then the latest video exported from exactly that edit; while edits exist only in the preview, the chip reads Export edits to share and Copy and Share are disabled. Any retained clip can be deleted and any deleted clip can be restored, and Delete always acts on the current selection. Undo and Redo, also Command-Z and Shift-Command-Z, step through every timeline change; a quick run of changes to one zoom scene's focus or settings undoes as one step. The preview shows one clock, edited time beside the playback controls, and describes selections by length. The playhead can be dragged by its knob wherever it is. Record Again closes the preview and starts another take with the remembered target. While cuts or zoom scenes have not been exported in any format, the close button shows the unsaved-changes dot, and Done, Record Again, Change Target, the close button, Command-W, and Quit ask before discarding them. Previews can be minimized; each new preview opens down and to the right of the last one; and Edit > Undo and Redo in Reel's menu bar act on the preview's timeline.
+Expected behavior: When enabled, a preview window opens after each recording, named after the file with its icon in the title bar, and Recent Recordings opens the same preview, or brings forward the one already showing that recording. The video is drawn with an AVPlayerLayer, so no Live Text reads the paused frame. Below it are playback controls, a timeline with trim handles and a Split button, and a bottom bar with Record Again, whose menu holds Change Target, a status line for export progress, errors, and the file just saved, and Done. A toolbar holds Copy, Share, an Export menu, and a More menu with Reveal in Finder and Move to Trash. Copy, Share, and a drag of the title bar's file icon hand out the recording until it is edited, then a full-size video of the edits, rendered on demand into a temporary folder with progress in the status line and reused until the edits change; the share menu asks for the file only once a service is chosen, and a drag of edits not yet rendered carries a file promise. Cuts and zoom scenes are saved as they are made in the com.rselbach.reel.edits extended attribute on the video and restored when it is opened again; saved edits that break the timeline's rules or belong to a file of another length are ignored, and closing or quitting never asks about edits. Any retained clip can be deleted and any deleted clip restored; Delete acts on the current selection and Escape clears it. Edit > Undo and Redo, also Command-Z and Shift-Command-Z, step through every timeline change; a quick run of changes to one zoom scene's focus or settings undoes as one step. Space plays and pauses; the arrow keys step a frame; J, K, and L play backward, pause, and play forward, faster with each press up to four times; I and O trim to the playhead; Home and End go to either end. Playing backward skips deleted clips. The preview shows one clock, edited time beside the playback controls, and describes selections by length. Record Again closes the preview and starts another take with the remembered target. Previews can be minimized, and each new preview opens down and to the right of the last one.
 
 Manual steps:
 
 1. Record something with preview enabled
-2. drag the start and end trim handles and verify the video follows the handle, then drag them back out
-3. move the playhead by dragging its knob and press Split or Command-B to split there
-4. select one clip, then another, press Delete, and verify only the second is deleted
-5. restore it
-6. press Undo and Redo, then Command-Z and Shift-Command-Z, and verify each change steps back and forward
-7. drag a zoom scene's focus twice and verify each drag undoes separately
-8. verify playback skips deleted clips and only edited time is shown
-9. press Record Again and verify countdown starts for the remembered target
-10. verify Done closes the preview without deleting the file
-11. delete a clip and verify the file chip reads Export edits to share and Copy and Share are disabled
-12. export a Smaller Copy and verify the chip names the exported file and dragging it into Finder copies the edited video
-13. delete a clip, press Done, and verify Reel asks before discarding the edit
-14. cancel, export a Smaller Copy, press Done, and verify the preview closes without asking
-15. delete a clip and quit Reel, and verify it asks before quitting.
+2. verify the window is named after the MP4 and has a toolbar with Copy, Share, Export, and More
+3. drag the start and end trim handles and verify the video follows the handle, then drag them back out
+4. move the playhead by dragging its knob and press Split or Command-B to split there
+5. select one clip, then another, press Delete, and verify only the second is deleted
+6. restore it
+7. use Edit > Undo and Redo, then Command-Z and Shift-Command-Z, and verify each change steps back and forward
+8. drag a zoom scene's focus twice and verify each drag undoes separately
+9. press the arrow keys, J, K, L, I, O, Home, and End and verify each acts as described
+10. verify playback skips deleted clips in both directions and only edited time is shown
+11. delete a clip and verify Copy and Share hand out an edited video and dragging the title bar's icon into Finder copies it
+12. press Done and verify no alert
+13. reopen the recording from Recent Recordings and verify the edit is back
+14. choose Reveal in Finder from More and verify Finder selects the file
+15. press Record Again and verify countdown starts for the remembered target
+16. quit Reel with an open edited preview and verify it does not ask.
 
-Current status: Partial automated evidence passed; manual UI and accessibility interaction validation still pending. Validate manually using the listed steps.
+Current status: Partial automated evidence passed and the main flows were driven on 2026-11-07; dragging the title bar icon, VoiceOver, and audio continuity are still pending. Validate manually using the listed steps.
 
 Result: [ ] Pass  [ ] Fail  [ ] Blocked
 
@@ -306,7 +307,7 @@ Notes:
 
 User story: As a user, I want to trim either end or remove sections from the middle of a recording and export a new MP4.
 
-Expected behavior: Yellow handles at both ends of the filmstrip trim the start and end. A trim is one deleted clip at that end, keeps at least 0.5 seconds, and never leaves a sliver shorter than a split allows; dragging a handle back out returns footage. Split cuts the clip at the playhead. Deleting the first or last clip also trims an endpoint, while deleting an interior clip removes a middle section. The Export menu offers Edited Video once there is an edit, Smaller Copy (720p), and Animated GIF. A single kept range uses the passthrough preset directly; multiple kept ranges are joined in source order with AVMutableComposition before export. While a file is written, the menu becomes a progress bar with Cancel, also Escape, and cancelling removes the partial file. Exports use a temporary sibling file and rollback-safe atomic replacement, report failures, and finish with a Saved line and a Show in Finder link instead of switching to Finder.
+Expected behavior: Handles at both ends of the filmstrip trim the start and end; they turn yellow, with a yellow frame around the kept footage, only while the pointer is over the timeline or a handle is dragged. A trim is one deleted clip at that end, keeps at least 0.5 seconds, and never leaves a sliver shorter than a split allows; dragging a handle back out returns footage, and the strip holds still under the handle until the drag ends. I and O trim to the playhead. Split cuts the clip at the playhead. Deleting the first or last clip also trims an endpoint, while deleting an interior clip removes a middle section. Deleted clips take a quarter of their share of the timeline, but at least 28 points, and each clip shows frames from its own footage. The how-to line shows until the first edit. Dragging empty space in the zoom lane adds a zoom scene and selects it without opening its settings, which open from Zoom Settings or a second click on the scene; Play while a scene is selected plays from a second before it. The Export menu offers Edited Video once there is an edit, Smaller Copy (720p), and Animated GIF. A single kept range uses the passthrough preset directly; multiple kept ranges are joined in source order with AVMutableComposition before export. While a file is written, the bottom bar shows progress with Cancel, also Escape, and cancelling removes the partial file. Exports use a temporary sibling file and rollback-safe atomic replacement, report failures, and finish with a Saved line and a Show in Finder link instead of switching to Finder.
 
 Manual steps:
 
@@ -909,7 +910,7 @@ Manual steps:
 
 1. Record a short display, window, and area take with preview enabled
 2. move the cursor throughout each take and pause once
-3. verify the native cursor appearance is unchanged, each MP4 is playable, and Recording Preview opens without an error. Inspect each MP4 with CursorMetadataTrack.load and verify positions exist only during unpaused video time and stay within normalized final-frame coordinates.
+3. verify the native cursor appearance is unchanged, each MP4 is playable, and the preview opens without an error. Inspect each MP4 with CursorMetadataTrack.load and verify positions exist only during unpaused video time and stay within normalized final-frame coordinates.
 
 Current status: Partial automated evidence and packaged launch checks passed; Computer Use accessibility was blocked, so live recording validation remains pending.
 

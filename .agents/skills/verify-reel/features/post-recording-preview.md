@@ -1,19 +1,26 @@
 # Post-recording preview
 
-Recording Preview plays the finished MP4 and lets the user edit, share, export,
-repeat, retarget, reveal, or delete the take.
+The preview, a window named after the recording, plays the finished MP4 and
+lets the user edit, share, export, repeat, retarget, reveal, or delete the
+take. Edits are saved with the recording as they are made.
 
 ## Sub-features
 
 - `preview-open` opens automatically after a successful take when enabled.
-- `preview-copy` puts the recording file on the pasteboard.
+- `preview-copy` puts the recording file on the pasteboard, or a video of the
+  edits once there are any.
 - `preview-share` opens the system share menu for the same file.
+- `preview-drag` drags the same file from the title bar's file icon.
 - `preview-reveal` selects the MP4 in Finder.
 - `preview-delete` confirms and moves the recording to Trash.
 - `preview-edit` trims either end with handles, splits at the playhead,
   deletes or restores clips, and exports an edited copy.
-- `preview-undo` undoes and redoes timeline changes.
+- `preview-undo` undoes and redoes timeline changes from the Edit menu.
+- `preview-saved-edits` keeps cuts and zoom scenes with the recording and
+  restores them when it is opened from Recent Recordings.
 - `preview-transport` plays and skips through edited time, the only clock.
+- `preview-keys` steps frames with the arrow keys, shuttles with J, K, and L,
+  trims to the playhead with I and O, and jumps with Home and End.
 - `preview-smaller` exports a 720p copy.
 - `preview-gif` exports the edited recording as a looping GIF.
 - `preview-export-cancel` stops an export and leaves no file behind.
@@ -23,6 +30,7 @@ repeat, retarget, reveal, or delete the take.
 ## How to get to it (user POV)
 
 - Stop a successful recording while `Show preview after recording` is enabled.
+- Choose a recording under `Recent Recordings` in Reel's menu-bar item.
 
 ## Driving it with Computer Use
 
@@ -33,12 +41,14 @@ Preconditions:
 - Keep `Show preview after recording` enabled.
 - Record the source MP4 path and initial `stat` output before mutating anything.
 
-- **Open state.** Stop the take and require window `Recording Preview`, the
-  MP4 filename, `Undo`, `Redo`, `Back 5 seconds`, `Play`,
-  `Forward 5 seconds`, `Timeline`, `Split`, `Playhead`, `Trim start`,
-  `Trim end`, `Clip`, `Copy`, `Share`, `Reveal in Finder`, `Move to Trash`,
-  `Record Again`, `Change Target...`, menu button `Export`, and `Done`. No
-  text may mention `Source` time. Capture `preview-open`.
+- **Open state.** Stop the take and require a window named after the MP4,
+  `Back 5 seconds`, `Play`, `Forward 5 seconds`, `Timeline`, `Split`,
+  `Playhead`, `Trim start`, `Trim end`, `Clip`, a toolbar with `Copy`,
+  `Share`, menu button `Export`, and a `More` menu holding
+  `Reveal in Finder` and `Move to Trash...`, then `Record Again` with
+  `Change Target...` in its menu, and `Done`. No text may mention `Source`
+  time, and no text area may read text from the video. Capture
+  `preview-open`.
 - **Transport.** Click `Play`. Require the control to change to `Pause` and the
   edited playback time to advance. Use `Back 5 seconds` and `Forward 5 seconds`.
   Require both controls to change edited time and skip removed sections.
@@ -47,8 +57,9 @@ Preconditions:
   the source MP4. Do not paste it into another app for proof.
 - **Share.** Click `Share` and require the system share popover. Press Escape
   to dismiss it. Never pick a sharing service.
-- **Reveal.** Click `Reveal in Finder`. Require Finder to show the source MP4
-  selected. This changes foreground app state but does not alter the file.
+- **Reveal.** Choose `Reveal in Finder` from `More`. Require Finder to show
+  the source MP4 selected and no `Could not reveal recording` alert. This
+  changes foreground app state but does not alter the file.
 - **Trim.** Drag `Trim start` inward. Require a `Deleted clip` at the start,
   the video to show the frame under the handle while dragging, and the
   edited time's total to shrink. Drag it back out and require the footage to
@@ -57,12 +68,23 @@ Preconditions:
   new `Clip` boundary at the playhead. Move the playhead and press Command-B.
   Select the middle `Clip`, select another clip, then press Delete. Require
   only the second clip to become a red `Deleted clip`, with `Restore Clip`.
-  Restore it, then delete the middle clip. Choose `Export`, then
+  Restore it, then delete the middle clip, and require the deleted clip to be
+  narrower than its share of the recording. Choose `Export`, then
   `Edited Video...`, and save inside the isolated Movies directory. Require a
-  second nonzero MP4 whose duration matches the kept clips, the file chip to
-  name it, and `Copy` and `Share` to be enabled.
-- **Undo.** Press Command-Z until `Undo` is disabled, requiring each press to
-  step back one change. Press Shift-Command-Z once and require the last undone
+  second nonzero MP4 whose duration matches the kept clips.
+- **Share edits.** After an edit, click `Copy`. Require `Copied!` and a
+  pasteboard file URL named like `<recording>-edited.mp4` whose duration
+  matches the kept clips. Click `Share` and require the share popover to name
+  the same file; press Escape without picking a service.
+- **Saved edits.** Delete a clip, click `Done`, and require no alert. Reopen
+  the recording from `Recent Recordings` and require the same `Deleted clip`
+  and edited time.
+- **Keys.** Press Right Arrow ten times and require edited time to advance
+  about a third of a second. Press L, then L again, and require `Pause` and
+  faster playback; press K and require `Play`. Press J and require edited
+  time to fall. Press O and require the end trimmed to the playhead.
+- **Undo.** Press Command-Z until Edit > Undo is disabled, requiring each press
+  to step back one change. Press Shift-Command-Z once and require the last undone
   change to return. Drag a zoom scene's focus twice with a pause between and
   require each drag to undo separately. Trim again, open the `Edit` menu in
   Reel's menu bar, require `Undo` enabled, choose it, and require the trim to
@@ -83,14 +105,15 @@ Preconditions:
   `Cancel` while `Exporting` shows. Require the `Export` menu to return with
   no error and no `Saved` line. Run `ls -la` on the destination and require no
   new file, including hidden partial files.
-- **Change target.** Click `Change Target...` and require `New Recording` with
+- **Change target.** Choose `Change Target...` from the `Record Again` menu and
+  require `New Recording` with
   no active preview window. Make a fresh recording to continue the remaining
   preview checks.
 - **Record again.** Click `Record Again`. Require preview to close and the
   remembered target to enter countdown without reopening the picker. Cancel the
   countdown with Escape if this recipe is not making a second recording.
-- **Delete.** Only for a disposable file created by this run, click `Move to
-  Trash`. Require alert `Move recording to Trash?`. Click `Cancel` and require
+- **Delete.** Only for a disposable file created by this run, choose `Move to
+  Trash...` from `More`. Require alert `Move recording to Trash?`. Click `Cancel` and require
   the file to remain. Repeat and confirm only when deletion is part of the test,
   then require the file to be absent from its old path and from Recent
   Recordings.
@@ -99,7 +122,7 @@ Preconditions:
 
 ## Gotchas
 
-- `Move to Trash` is destructive. Computer Use requires confirmation at action
+- `Move to Trash...` is destructive. Computer Use requires confirmation at action
   time, and the target must be a disposable recording from this run.
 - Save panels can default outside the isolated Movies directory. Verify the
   destination before confirming.
@@ -111,5 +134,9 @@ Preconditions:
   the exported recording.
 - Reel refuses to delete the last retained clip.
 - `Record Again` can begin countdown immediately. Be ready to press Escape.
+- `Copy` writes to the shared pasteboard, replacing what the user copied.
+- Dragging the title bar's file icon needs the real pointer; a background
+  drag does not start it. Report it as skipped unless the user allows
+  foreground input.
 - Finder and save panels are separate apps. Return to the recorded Reel app path
   and fetch fresh state before continuing.

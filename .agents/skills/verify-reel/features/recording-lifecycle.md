@@ -48,7 +48,8 @@ Preconditions:
   does not advance. Click `Resume Recording` and require elapsed time to
   advance again.
 - **Stop.** Either click `Stop Recording` in the menu or left-click the status
-  item. Require a `Recording Preview` window when preview is enabled.
+  item. Require a preview window named after the new MP4 when preview is
+  enabled.
 - **File proof.** Find the new MP4 only under the isolated Movies directory.
   With the default folder it is in `Movies/Reel` and named like
   `Reel 2026-10-11 at 7.58.07 PM.mp4` in local time. Save `stat` and `mdls`

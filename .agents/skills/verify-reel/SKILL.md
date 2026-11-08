@@ -137,7 +137,7 @@ click, key press, drag, or value change, call `get_app_state` again before
 choosing the next index. Stable handles in this app include:
 
 - window names `Welcome to Reel`, `New Recording`, `Reel Settings`,
-  `Recording Preview`, and `About Reel`
+  the preview, named after its MP4, and `About Reel`
 - buttons and menu items such as `Get Started`, `Start Recording...`,
   `Settings...`, `Stop Recording`, `Record Again`, and `Done`
 - tabs `General`, `Recording`, and `Shortcuts`
