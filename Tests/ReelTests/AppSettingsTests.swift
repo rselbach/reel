@@ -2074,7 +2074,8 @@ final class AppSettingsTests: XCTestCase {
         let encoded = "/Users/troy/Movies/Reel/Reel%202026-11-07%20at%208.20.39%20PM.mp4"
         XCTAssertEqual(RecentRecordingsLogic.storedPath(encoded, fileExists: { $0 == saved }), saved)
         XCTAssertEqual(RecentRecordingsLogic.storedPath(saved, fileExists: { $0 == saved }), saved)
-        XCTAssertEqual(RecentRecordingsLogic.storedPath("/tmp/100%25.mp4", fileExists: { _ in true }), "/tmp/100%25.mp4")
+        XCTAssertEqual(
+            RecentRecordingsLogic.storedPath("/tmp/100%25.mp4", fileExists: { _ in true }), "/tmp/100%25.mp4")
     }
 
     func testRecentRecordingsDeduplicateAndCapMostRecentFirst() {

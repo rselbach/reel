@@ -1127,11 +1127,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 self?.closePreview(window)
             },
             onRevealInFinder: {
-                let revealed = NSWorkspace.shared.selectFile(url.path(percentEncoded: false), inFileViewerRootedAtPath: "")
+                let revealed = NSWorkspace.shared.selectFile(
+                    url.path(percentEncoded: false), inFileViewerRootedAtPath: "")
                 if !revealed {
                     let alert = NSAlert()
                     alert.messageText = AppMenuText.couldNotRevealRecording
-                    alert.informativeText = "Finder could not reveal the recording at \(url.path(percentEncoded: false))."
+                    alert.informativeText =
+                        "Finder could not reveal the recording at \(url.path(percentEncoded: false))."
                     alert.alertStyle = .warning
                     alert.runModal()
                 }

@@ -248,7 +248,8 @@ enum RecordingFileStore {
             let values = try url.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
             return values.volumeAvailableCapacityForImportantUsage
         } catch {
-            logger.warning("Could not read free space for \(url.path(percentEncoded: false)): \(error.localizedDescription)")
+            logger.warning(
+                "Could not read free space for \(url.path(percentEncoded: false)): \(error.localizedDescription)")
             return nil
         }
     }

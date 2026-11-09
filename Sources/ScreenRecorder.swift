@@ -1627,7 +1627,8 @@ class ScreenRecorder: NSObject, ObservableObject {
                     )
                 }
             } else {
-                logger.info("Save cancelled; keeping recording at \(tempURL.path(percentEncoded: false), privacy: .public)")
+                logger.info(
+                    "Save cancelled; keeping recording at \(tempURL.path(percentEncoded: false), privacy: .public)")
             }
         }
 
@@ -1643,7 +1644,8 @@ class ScreenRecorder: NSObject, ObservableObject {
             openFinderAfterRecording: options.openFinderAfterRecording,
             showPreviewAfterRecording: options.showPreviewAfterRecording
         ) {
-            let revealed = NSWorkspace.shared.selectFile(finalURL.path(percentEncoded: false), inFileViewerRootedAtPath: "")
+            let revealed = NSWorkspace.shared.selectFile(
+                finalURL.path(percentEncoded: false), inFileViewerRootedAtPath: "")
             if !revealed {
                 let revealError = RecordingFinalizationLogic.finderRevealFailureMessage(for: finalURL)
                 errorMessage = errorMessage.map { "\($0)\n\(revealError)" } ?? revealError

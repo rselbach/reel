@@ -255,7 +255,9 @@ struct GeneralPane: View {
             guard values.isDirectory == true else { return false }
             return FileManager.default.isWritableFile(atPath: url.path(percentEncoded: false))
         } catch {
-            logger.warning("Failed to read directory attributes for \(url.path(percentEncoded: false)): \(error.localizedDescription)")
+            logger.warning(
+                "Failed to read directory attributes for \(url.path(percentEncoded: false)): \(error.localizedDescription)"
+            )
             return false
         }
     }
