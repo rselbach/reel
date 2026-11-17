@@ -1419,6 +1419,28 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertFalse(LaunchLogic.showsWelcome(hasShownWelcome: true, hasScreenRecordingAccess: true))
     }
 
+    func testScreenCaptureKitIsAskedOnlyOnceAccessIsKnown() async {
+        let cases: [(name: String, hasPermission: Bool, preflight: Bool, probe: Bool, want: Bool, wantProbed: Bool)] = [
+            ("already capturing", true, false, false, true, false),
+            ("allowed at launch", false, true, false, true, false),
+            ("allowed since launch", false, false, true, true, true),
+            ("not allowed: no system prompt", false, false, false, false, true),
+        ]
+        for tc in cases {
+            var probed = false
+            let got = await ScreenCaptureGate.mayAskScreenCaptureKit(
+                hasPermission: tc.hasPermission,
+                preflight: { tc.preflight },
+                probe: {
+                    probed = true
+                    return tc.probe
+                }
+            )
+            XCTAssertEqual(got, tc.want, tc.name)
+            XCTAssertEqual(probed, tc.wantProbed, "\(tc.name): the probe starts a process")
+        }
+    }
+
     func testInfoPlistDeclaresMenuBarAppAndPermissionUsageDescriptions() throws {
         let plist = try loadSourceInfoPlist()
 

@@ -143,6 +143,23 @@ enum ScreenRecordingProbe {
     }
 }
 
+/// Whether Reel may ask ScreenCaptureKit for content. Without screen
+/// recording access that request shows the bare system prompt, so Reel asks
+/// only once access is known: already working, allowed at launch, or allowed
+/// now by the probe, which runs last because it starts a process.
+enum ScreenCaptureGate {
+    static func mayAskScreenCaptureKit(
+        hasPermission: Bool,
+        preflight: () -> Bool,
+        probe: () async -> Bool
+    ) async -> Bool {
+        if hasPermission || preflight() {
+            return true
+        }
+        return await probe()
+    }
+}
+
 /// Tracks every permission Reel uses while the welcome window is open. The
 /// user changes them in System Settings, which tells Reel nothing, so the
 /// center polls.

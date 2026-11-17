@@ -526,7 +526,23 @@ class ScreenRecorder: NSObject, ObservableObject {
         await updateShareableContent(failureMessage: "Permission denied")
     }
 
+    /// Without access this lists nothing, so the picker shows Reel's own
+    /// grant screen instead of macOS's prompt.
     func refreshWindows() async {
+        guard
+            await ScreenCaptureGate.mayAskScreenCaptureKit(
+                hasPermission: hasPermission,
+                preflight: CGPreflightScreenCaptureAccess,
+                probe: ScreenRecordingProbe.isAllowed
+            )
+        else {
+            availableDisplays = []
+            availableWindows = []
+            captureExcludedApplications = []
+            hasPermission = false
+            errorMessage = nil
+            return
+        }
         await updateShareableContent(failureMessage: "Failed to refresh windows")
     }
 
