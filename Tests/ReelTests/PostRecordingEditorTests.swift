@@ -6,6 +6,143 @@ import XCTest
 @testable import Reel
 
 final class PostRecordingEditorTests: XCTestCase {
+    @MainActor
+    func testPreviewUndoCommandsResetBreaksRetainCycle() {
+        final class Token {}
+
+        let commands = PreviewUndoCommands()
+        weak var weakToken: Token?
+        do {
+            let token = Token()
+            weakToken = token
+            commands.canUndo = {
+                _ = token
+                return true
+            }
+            commands.canRedo = {
+                _ = token
+                return true
+            }
+            commands.undo = { _ = token }
+            commands.redo = { _ = token }
+        }
+        XCTAssertNotNil(weakToken)
+        XCTAssertTrue(commands.canUndo())
+        XCTAssertTrue(commands.canRedo())
+
+        commands.reset()
+
+        XCTAssertNil(weakToken)
+        XCTAssertFalse(commands.canUndo())
+        XCTAssertFalse(commands.canRedo())
+    }
+
+    @MainActor
+    func testPreviewShareSourceResetBreaksRetainCycle() async {
+        final class Token {}
+
+        let source = PreviewShareSource()
+        let sampleURL = URL(fileURLWithPath: "/tmp/Greendale/study-group.mp4")
+        weak var weakToken: Token?
+        do {
+            let token = Token()
+            weakToken = token
+            source.readyFile = {
+                _ = token
+                return sampleURL
+            }
+            source.file = {
+                _ = token
+                return sampleURL
+            }
+            source.fileName = {
+                _ = token
+                return "study-group.mp4"
+            }
+        }
+        XCTAssertNotNil(weakToken)
+        XCTAssertEqual(source.readyFile(), sampleURL)
+        XCTAssertEqual(source.fileName(), "study-group.mp4")
+
+        source.reset()
+
+        XCTAssertNil(weakToken)
+        XCTAssertNil(source.readyFile())
+        XCTAssertEqual(source.fileName(), "Recording.mp4")
+        do {
+            _ = try await source.shareableFile()
+            XCTFail("Expected reset share source to throw CancellationError")
+        } catch is CancellationError {
+            // Expected after reset.
+        } catch {
+            XCTFail("Unexpected error after reset: \(error)")
+        }
+    }
+
+    func testExistingShareURLIgnoresMissingFilesOnDisk() throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("Reel-Abed-ShareURL-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let original = directory.appendingPathComponent("Greendale-original.mp4")
+        let exportedURL = directory.appendingPathComponent("Greendale-edited.mp4")
+        try Data("video".utf8).write(to: exportedURL)
+
+        var edit = try XCTUnwrap(TimelineEdit(sourceDuration: 10))
+        let tailID = try XCTUnwrap(edit.splitClip(at: 8))
+        XCTAssertTrue(edit.deleteClip(id: tailID))
+        let exported = ExportedVideo(edit: edit, url: exportedURL)
+
+        XCTAssertEqual(
+            PostRecordingLogic.existingShareURL(original: original, edit: edit, exportedVideo: exported),
+            exportedURL
+        )
+
+        try FileManager.default.removeItem(at: exportedURL)
+        XCTAssertNil(
+            PostRecordingLogic.existingShareURL(original: original, edit: edit, exportedVideo: exported)
+        )
+    }
+
+    func testShareTempStorageRemovesManagedAndStaleFoldersOnly() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("Reel-Jeff-ShareRoot-\(UUID().uuidString)", isDirectory: true)
+        let external = FileManager.default.temporaryDirectory
+            .appendingPathComponent("Reel-Jeff-External-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: external, withIntermediateDirectories: true)
+        defer {
+            try? FileManager.default.removeItem(at: root)
+            try? FileManager.default.removeItem(at: external)
+        }
+
+        let staleFolder = ShareTempStorage.makeFolder(in: root)
+        let freshFolder = ShareTempStorage.makeFolder(in: root)
+        try FileManager.default.createDirectory(at: staleFolder, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: freshFolder, withIntermediateDirectories: true)
+        let staleFile = staleFolder.appendingPathComponent("stale.mp4")
+        let freshFile = freshFolder.appendingPathComponent("fresh.mp4")
+        let externalFile = external.appendingPathComponent("user-export.mp4")
+        try Data("stale".utf8).write(to: staleFile)
+        try Data("fresh".utf8).write(to: freshFile)
+        try Data("keep".utf8).write(to: externalFile)
+
+        let now = Date()
+        let twoDaysAgo = now.addingTimeInterval(-48 * 60 * 60)
+        try FileManager.default.setAttributes([.modificationDate: twoDaysAgo], ofItemAtPath: staleFolder.path)
+
+        ShareTempStorage.cleanupStaleShareFolders(olderThan: 24 * 60 * 60, now: now, in: root)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: staleFolder.path))
+        XCTAssertTrue(FileManager.default.fileExists(atPath: freshFolder.path))
+
+        ShareTempStorage.removeManagedParentFolder(of: externalFile, in: root)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: externalFile.path))
+
+        ShareTempStorage.removeManagedParentFolder(of: freshFile, in: root)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: freshFolder.path))
+    }
+
     func testGIFExporterOutputSizeFitsWithinMaxDimensionWithoutUpscaling() {
         XCTAssertEqual(
             GIFExporter.outputSize(for: CGSize(width: 1200, height: 600), maxDimension: 800),

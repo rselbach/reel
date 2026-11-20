@@ -170,10 +170,82 @@ enum PostRecordingLogic {
     /// timeline is edited, then the latest video exported from exactly this
     /// edit. Nil while the edits exist only in the preview, since the
     /// original would not match what the preview shows.
-    static func shareURL(original: URL, edit: TimelineEdit?, exportedVideo: ExportedVideo?) -> URL? {
+    static func shareURL(
+        original: URL,
+        edit: TimelineEdit?,
+        exportedVideo: ExportedVideo?,
+        fileExists: (URL) -> Bool = { _ in true }
+    ) -> URL? {
         guard let edit, edit.hasMeaningfulChanges else { return original }
-        guard let exportedVideo, exportedVideo.edit == edit else { return nil }
+        guard let exportedVideo, exportedVideo.edit == edit, fileExists(exportedVideo.url) else { return nil }
         return exportedVideo.url
+    }
+
+    static func existingShareURL(
+        original: URL,
+        edit: TimelineEdit?,
+        exportedVideo: ExportedVideo?
+    ) -> URL? {
+        shareURL(original: original, edit: edit, exportedVideo: exportedVideo) {
+            FileManager.default.fileExists(atPath: $0.path(percentEncoded: false))
+        }
+    }
+}
+
+enum ShareTempStorage {
+    static var rootDirectory: URL {
+        FileManager.default.temporaryDirectory.appendingPathComponent("Reel Shares", isDirectory: true)
+    }
+
+    static func makeFolder(in root: URL = rootDirectory) -> URL {
+        root.appendingPathComponent(UUID().uuidString, isDirectory: true)
+    }
+
+    static func isManagedShareFolder(_ folder: URL, in root: URL = rootDirectory) -> Bool {
+        let normalizedRoot = root.standardizedFileURL.resolvingSymlinksInPath()
+        let normalizedFolder = folder.standardizedFileURL.resolvingSymlinksInPath()
+        return normalizedFolder != normalizedRoot && normalizedFolder.deletingLastPathComponent() == normalizedRoot
+    }
+
+    static func removeFolderIfManaged(_ folder: URL, in root: URL = rootDirectory) {
+        guard isManagedShareFolder(folder, in: root) else { return }
+        guard FileManager.default.fileExists(atPath: folder.path(percentEncoded: false)) else { return }
+        do {
+            try FileManager.default.removeItem(at: folder)
+        } catch {
+            let folderPath = folder.path(percentEncoded: false)
+            let message = error.localizedDescription
+            logger.error("Failed to remove share folder \(folderPath, privacy: .public): \(message, privacy: .public)")
+        }
+    }
+
+    static func removeManagedParentFolder(of fileURL: URL, in root: URL = rootDirectory) {
+        removeFolderIfManaged(fileURL.deletingLastPathComponent(), in: root)
+    }
+
+    static func cleanupStaleShareFolders(
+        olderThan age: TimeInterval = 24 * 60 * 60,
+        now: Date = .now,
+        in root: URL = rootDirectory
+    ) {
+        guard
+            let entries = try? FileManager.default.contentsOfDirectory(
+                at: root,
+                includingPropertiesForKeys: [.contentModificationDateKey, .creationDateKey, .isDirectoryKey],
+                options: [.skipsHiddenFiles]
+            )
+        else { return }
+
+        for entry in entries where isManagedShareFolder(entry, in: root) {
+            let values = try? entry.resourceValues(
+                forKeys: [.contentModificationDateKey, .creationDateKey, .isDirectoryKey]
+            )
+            guard values?.isDirectory == true else { continue }
+            let timestamp = values?.contentModificationDate ?? values?.creationDate ?? .distantPast
+            if now.timeIntervalSince(timestamp) >= age {
+                removeFolderIfManaged(entry, in: root)
+            }
+        }
     }
 }
 
@@ -191,6 +263,12 @@ final class PreviewShareSource {
 
     func shareableFile() async throws -> URL {
         try await file()
+    }
+
+    func reset() {
+        readyFile = { nil }
+        file = { throw CancellationError() }
+        fileName = { "Recording.mp4" }
     }
 }
 
@@ -214,6 +292,13 @@ final class PreviewUndoCommands {
     var canRedo: () -> Bool = { false }
     var undo: () -> Void = {}
     var redo: () -> Void = {}
+
+    func reset() {
+        canUndo = { false }
+        canRedo = { false }
+        undo = {}
+        redo = {}
+    }
 }
 
 struct PostRecordingView: View {
@@ -227,11 +312,10 @@ struct PostRecordingView: View {
     let onDelete: () -> Void
 
     @State private var player: AVPlayer?
-    /// Loaded with the preview so future cursor-aware effects can use the
-    /// recording's source-time positions without reopening the asset.
-    @State private var cursorTimeline = CursorTimeline.empty
     @State private var timeObserver: Any?
     @State private var deletedClipBoundaryObservers: [Any] = []
+    @State private var durationLoadTask: Task<Void, Never>?
+    @State private var frameRateLoadTask: Task<Void, Never>?
     @State private var zoomCompositionTask: Task<Void, Never>?
     @State private var isCleanedUp = false
     @State private var edit: TimelineEdit?
@@ -251,6 +335,8 @@ struct PostRecordingView: View {
     /// The file the last export wrote, until the edit changes.
     @State private var lastExportURL: URL?
     @State private var exportTask: Task<Void, Never>?
+    @State private var copyTask: Task<Void, Never>?
+    @State private var justCopiedResetTask: Task<Void, Never>?
     /// Rendering the edits for Copy, Share, or a drag, so later requests for
     /// the same edit wait for it instead of starting another.
     @State private var shareRender: (edit: TimelineEdit, task: Task<URL, Error>)?
@@ -419,9 +505,15 @@ struct PostRecordingView: View {
         .onDisappear {
             exportTask?.cancel()
             exportTask = nil
+            copyTask?.cancel()
+            copyTask = nil
+            justCopiedResetTask?.cancel()
+            justCopiedResetTask = nil
             shareRender?.task.cancel()
             shareRender = nil
             isExporting = false
+            undoCommands.reset()
+            shareSource.reset()
             cleanupPlayer()
         }
     }
@@ -431,7 +523,7 @@ struct PostRecordingView: View {
     }
 
     private var shareURL: URL? {
-        PostRecordingLogic.shareURL(original: videoURL, edit: edit, exportedVideo: exportedVideo)
+        PostRecordingLogic.existingShareURL(original: videoURL, edit: edit, exportedVideo: exportedVideo)
     }
 
     /// Export progress, the last error, or the file just saved, one at a
@@ -525,7 +617,9 @@ struct PostRecordingView: View {
     }
 
     private func copyToPasteboard() {
-        Task { @MainActor in
+        copyTask?.cancel()
+        copyTask = Task { @MainActor in
+            defer { copyTask = nil }
             do {
                 writeToPasteboard(try await fileToShare())
             } catch is CancellationError {
@@ -541,12 +635,16 @@ struct PostRecordingView: View {
         pasteboard.clearContents()
         guard pasteboard.writeObjects([url as NSURL]) else {
             exportError = "Could not copy the recording to the clipboard."
+            justCopiedResetTask?.cancel()
+            justCopiedResetTask = nil
             justCopied = false
             return
         }
         exportError = nil
         justCopied = true
-        Task { @MainActor in
+        justCopiedResetTask?.cancel()
+        justCopiedResetTask = Task { @MainActor in
+            defer { justCopiedResetTask = nil }
             do {
                 try await Task.sleep(for: .seconds(1.5))
             } catch {
@@ -565,6 +663,14 @@ struct PostRecordingView: View {
         shareSource.readyFile = { shareURL }
         shareSource.file = fileToShare
         shareSource.fileName = { shareFileName }
+    }
+
+    private func replaceExportedVideo(_ newExport: ExportedVideo) {
+        let previous = exportedVideo
+        exportedVideo = newExport
+        if let previous, previous.url != newExport.url {
+            ShareTempStorage.removeManagedParentFolder(of: previous.url)
+        }
     }
 
     /// The recording while it is unedited, else a full-size video of the
@@ -589,20 +695,23 @@ struct PostRecordingView: View {
                 isExporting = false
                 exportProgress = nil
             }
-            let folder = FileManager.default.temporaryDirectory
-                .appendingPathComponent("Reel Shares", isDirectory: true)
-                .appendingPathComponent(UUID().uuidString, isDirectory: true)
+            let folder = ShareTempStorage.makeFolder()
             try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
             let url = folder.appendingPathComponent(fileName)
-            try await VideoEditExporter.export(
-                sourceURL: videoURL,
-                outputURL: url,
-                quality: .source,
-                edit: edit,
-                onProgress: { exportProgress = $0 }
-            )
-            try Task.checkCancellation()
-            exportedVideo = ExportedVideo(edit: edit, url: url)
+            do {
+                try await VideoEditExporter.export(
+                    sourceURL: videoURL,
+                    outputURL: url,
+                    quality: .source,
+                    edit: edit,
+                    onProgress: { exportProgress = $0 }
+                )
+                try Task.checkCancellation()
+            } catch {
+                ShareTempStorage.removeFolderIfManaged(folder)
+                throw error
+            }
+            replaceExportedVideo(ExportedVideo(edit: edit, url: url))
             return url
         }
         shareRender = (edit, task)
@@ -627,6 +736,10 @@ struct PostRecordingView: View {
             }
         }
         deletedClipBoundaryObservers = []
+        durationLoadTask?.cancel()
+        durationLoadTask = nil
+        frameRateLoadTask?.cancel()
+        frameRateLoadTask = nil
         zoomCompositionTask?.cancel()
         zoomCompositionTask = nil
         timeObserver = nil
@@ -640,9 +753,12 @@ struct PostRecordingView: View {
         let newPlayer = AVPlayer(playerItem: playerItem)
         player = newPlayer
 
-        Task { @MainActor [self] in
+        durationLoadTask?.cancel()
+        durationLoadTask = Task { @MainActor [self] in
+            defer { durationLoadTask = nil }
             do {
                 let durationTime = try await asset.load(.duration)
+                try Task.checkCancellation()
                 guard !isCleanedUp else { return }
                 let seconds = CMTimeGetSeconds(durationTime)
                 if let freshEdit = TimelineEdit(sourceDuration: seconds) {
@@ -650,31 +766,28 @@ struct PostRecordingView: View {
                     edit = loadedEdit
                     currentTime = loadedEdit.firstKeptTime ?? 0
                 }
+            } catch is CancellationError {
+                return
             } catch {
                 guard !isCleanedUp else { return }
                 exportError = "Unable to load recording duration: \(error.localizedDescription)"
             }
         }
 
-        Task { @MainActor [self] in
+        frameRateLoadTask?.cancel()
+        frameRateLoadTask = Task { @MainActor [self] in
+            defer { frameRateLoadTask = nil }
             do {
                 guard let track = try await asset.loadTracks(withMediaType: .video).first else { return }
                 let rate = try await track.load(.nominalFrameRate)
+                try Task.checkCancellation()
                 guard !isCleanedUp, rate > 0 else { return }
                 frameDuration = 1 / Double(rate)
+            } catch is CancellationError {
+                return
             } catch {
+                guard !isCleanedUp else { return }
                 logger.warning("Unable to load the frame rate: \(error.localizedDescription)")
-            }
-        }
-
-        Task { @MainActor [self] in
-            do {
-                let loadedTimeline = try await CursorMetadataTrack.load(from: videoURL)
-                guard !isCleanedUp else { return }
-                cursorTimeline = loadedTimeline
-            } catch {
-                guard !isCleanedUp else { return }
-                logger.warning("Unable to load cursor positions: \(error.localizedDescription)")
             }
         }
 
@@ -1049,7 +1162,7 @@ struct PostRecordingView: View {
                     warning = try await exportVideo(to: outputURL, quality: quality, edit: edit)
                     // A smaller copy is not what Copy and Share should hand out.
                     if quality == .source {
-                        exportedVideo = ExportedVideo(edit: edit, url: outputURL)
+                        replaceExportedVideo(ExportedVideo(edit: edit, url: outputURL))
                     }
                 case .gif:
                     warning = try await exportGIF(to: outputURL, edit: edit)
