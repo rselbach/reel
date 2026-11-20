@@ -1486,6 +1486,37 @@ final class AppSettingsTests: XCTestCase {
         XCTAssertTrue(workflow.contains("fetch-depth: 0"))
     }
 
+    func testReleaseWorkflowGatesReleaseAndNotarizesDMG() throws {
+        let workflow = try String(
+            contentsOf: repoRoot().appendingPathComponent(".github/workflows/release.yml"),
+            encoding: .utf8
+        )
+
+        XCTAssertTrue(workflow.contains("just validate"))
+        XCTAssertTrue(workflow.contains("just test-coverage"))
+        XCTAssertFalse(workflow.contains("set-version.sh \"$VERSION\" Sources/Info.plist"))
+        XCTAssertTrue(workflow.contains("VERSION=\"$VERSION\" just sign"))
+        XCTAssertTrue(workflow.contains("security find-identity -v -p codesigning \"$KEYCHAIN_PATH\""))
+        XCTAssertTrue(workflow.contains("secrets.SIGNING_IDENTITY"))
+        XCTAssertTrue(workflow.contains("--keychain \"$KEYCHAIN_PATH\""))
+        XCTAssertTrue(workflow.contains("_notarize-dmg"))
+        XCTAssertTrue(workflow.contains("--ed-key-file -"))
+    }
+
+    func testJustfileSignsSparkleInsideOutWithTimestamp() throws {
+        let justfile = try String(
+            contentsOf: repoRoot().appendingPathComponent("justfile"),
+            encoding: .utf8
+        )
+
+        XCTAssertFalse(justfile.contains("codesign --force --options runtime --deep"))
+        XCTAssertTrue(justfile.contains("XPCServices/Installer.xpc"))
+        XCTAssertTrue(justfile.contains("XPCServices/Downloader.xpc"))
+        XCTAssertTrue(justfile.contains("Autoupdate"))
+        XCTAssertTrue(justfile.contains("Updater.app"))
+        XCTAssertTrue(justfile.contains("dmg-notarized: notarize _dmg-only _sign-dmg _notarize-dmg"))
+    }
+
     func testReleaseTagValidatorRequiresNumericSemanticVersion() throws {
         let script = repoRoot().appendingPathComponent("scripts/release/validate-release-tag.sh")
 
@@ -1514,8 +1545,38 @@ final class AppSettingsTests: XCTestCase {
         let appcast = try String(contentsOf: outputURL, encoding: .utf8)
         XCTAssertTrue(appcast.contains("<title>Version 1.2.3</title>"))
         XCTAssertTrue(appcast.contains("<sparkle:version>1.2.3</sparkle:version>"))
+        XCTAssertTrue(appcast.contains("<sparkle:minimumSystemVersion>26.0</sparkle:minimumSystemVersion>"))
         XCTAssertTrue(appcast.contains(#"url="https://github.com/rselbach/reel/releases/download/v1.2.3/Reel.dmg""#))
         XCTAssertTrue(appcast.contains(signature))
+    }
+
+    func testGenerateAppcastRejectsMalformedSignatureToStderr() throws {
+        let directory = try makeTemporaryDirectory()
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let outputURL = directory.appendingPathComponent("appcast.xml")
+        let script = repoRoot().appendingPathComponent("scripts/release/generate-appcast.sh")
+        let badSignature = #"sparkle:edSignature="abc123" length="42"/><injected/>"#
+
+        let result = try runProcess("/bin/bash", [script.path(), "1.2.3", badSignature, outputURL.path()])
+        XCTAssertNotEqual(result.exitCode, 0)
+        XCTAssertTrue(result.stdout.isEmpty)
+        XCTAssertTrue(result.stderr.contains("Invalid Sparkle signature"))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: outputURL.path()))
+    }
+
+    func testReleaseScriptsWriteErrorsToStderr() throws {
+        let setVersion = repoRoot().appendingPathComponent("scripts/release/set-version.sh")
+        let setVersionMissing = try runProcess("/bin/bash", [setVersion.path()])
+        XCTAssertNotEqual(setVersionMissing.exitCode, 0)
+        XCTAssertTrue(setVersionMissing.stdout.isEmpty)
+        XCTAssertTrue(setVersionMissing.stderr.contains("Usage:"))
+
+        let notarize = repoRoot().appendingPathComponent("scripts/release/notarize-and-staple.sh")
+        let notarizeMissing = try runProcess("/bin/bash", [notarize.path()])
+        XCTAssertNotEqual(notarizeMissing.exitCode, 0)
+        XCTAssertTrue(notarizeMissing.stdout.isEmpty)
+        XCTAssertTrue(notarizeMissing.stderr.contains("Usage:"))
     }
 
     func testAboutGitHubRepositoryLinkTargetsProject() {
