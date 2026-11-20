@@ -146,6 +146,19 @@ enum RecordingDialogLogic {
         return (appName ?? "").lowercased().contains(normalizedQuery)
             || (windowTitle ?? "").lowercased().contains(normalizedQuery)
     }
+
+    /// Keeps the selected window only when it appears in the currently visible
+    /// (search-filtered) window list, so Return / Start Recording never targets
+    /// a window hidden by search.
+    static func visibleWindowSelection(
+        selectedWindowID: CGWindowID?,
+        visibleWindowIDs: [CGWindowID]
+    ) -> CGWindowID? {
+        guard let selectedWindowID, visibleWindowIDs.contains(selectedWindowID) else {
+            return nil
+        }
+        return selectedWindowID
+    }
 }
 
 enum PickerNavigation {
@@ -202,7 +215,11 @@ private struct UncheckedSendable<T>: @unchecked Sendable {
 
 @MainActor
 private enum AppIconCache {
-    static let images = NSCache<NSString, NSImage>()
+    static let images: NSCache<NSString, NSImage> = {
+        let cache = NSCache<NSString, NSImage>()
+        cache.countLimit = 128
+        return cache
+    }()
 
     static func icon(bundleID: String) -> NSImage? {
         if let image = images.object(forKey: bundleID as NSString) {
@@ -242,12 +259,14 @@ struct RecordingDialog: View {
     @State private var selectedDisplayID: CGDirectDisplayID?
     @State private var selectedWindow: SCWindow?
     @State private var reusesLastArea: Bool
-    @State private var displayThumbnails: [Int: NSImage] = [:]
+    @State private var displayThumbnails: [CGDirectDisplayID: NSImage] = [:]
     @State private var windowThumbnails: [CGWindowID: NSImage] = [:]
     @State private var isLoading = true
+    @State private var refreshToken = 0
     @State private var searchText = ""
     @State private var recordAudio: Bool
     @State private var recordCamera: Bool
+    @ObservedObject private var settings = AppSettings.shared
     @StateObject private var levelMonitor = AudioLevelMonitor()
     /// Arrow keys reach onMoveCommand only through a focused view.
     @FocusState private var isPickerFocused: Bool
@@ -306,7 +325,15 @@ struct RecordingDialog: View {
         case .display:
             return selectedDisplayID.map { .display($0) }
         case .window:
-            return selectedWindow.map { .window($0) }
+            guard let selectedWindow,
+                RecordingDialogLogic.visibleWindowSelection(
+                    selectedWindowID: selectedWindow.windowID,
+                    visibleWindowIDs: filteredWindows.map(\.windowID)
+                ) != nil
+            else {
+                return nil
+            }
+            return .window(selectedWindow)
         case .area:
             return reusesLastArea && lastRegionOutputSize != nil ? .lastRegion : .region
         }
@@ -384,8 +411,12 @@ struct RecordingDialog: View {
             }
         }
         .frame(width: 540, height: 540)
-        .task {
-            await loadThumbnails()
+        .task(id: refreshToken) {
+            if refreshToken == 0 {
+                await loadThumbnails()
+            } else {
+                await refresh()
+            }
         }
     }
 
@@ -461,12 +492,12 @@ struct RecordingDialog: View {
                     .font(.caption)
                     .foregroundColor(.secondary)
                 Toggle(
-                    RecordingDialogText.recordAudio(source: AppSettings.shared.audioSource),
+                    RecordingDialogText.recordAudio(source: settings.audioSource),
                     isOn: $recordAudio
                 )
                 Toggle(RecordingDialogText.recordCamera, isOn: $recordCamera)
 
-                if recordAudio, AppSettings.shared.audioSource.capturesMicrophone {
+                if recordAudio, settings.audioSource.capturesMicrophone {
                     AudioLevelMeter(level: levelMonitor.level)
                         .frame(width: 80)
                 }
@@ -477,7 +508,7 @@ struct RecordingDialog: View {
             .padding(.top, 10)
 
             if recordAudio,
-                AppSettings.shared.audioSource.capturesMicrophone,
+                settings.audioSource.capturesMicrophone,
                 let error = levelMonitor.errorMessage
             {
                 Text(error)
@@ -518,11 +549,18 @@ struct RecordingDialog: View {
         .onChange(of: recordAudio) {
             refreshMetering()
         }
+        .onChange(of: settings.audioSource) {
+            refreshMetering()
+        }
+        .onChange(of: settings.audioDeviceID) {
+            refreshMetering()
+        }
     }
 
     private var refreshButton: some View {
         Button {
-            Task { await refresh() }
+            isLoading = true
+            refreshToken &+= 1
         } label: {
             Image(systemName: "arrow.clockwise")
         }
@@ -533,16 +571,17 @@ struct RecordingDialog: View {
     }
 
     private var displayGrid: some View {
-        ScrollView {
+        let titles = displayTitles
+        return ScrollView {
             LazyVGrid(
                 columns: [GridItem(.adaptive(minimum: 220, maximum: 250), spacing: Self.gridSpacing)],
                 spacing: Self.gridSpacing
             ) {
-                ForEach(0..<displays.count, id: \.self) { index in
-                    let displayID = displays[index].displayID
+                ForEach(Array(displays.enumerated()), id: \.element.displayID) { index, display in
+                    let displayID = display.displayID
                     ThumbnailCard(
-                        image: displayThumbnails[index],
-                        title: displayTitles[index],
+                        image: displayThumbnails[displayID],
+                        title: titles[index],
                         isSelected: selectedDisplayID == displayID,
                         isLoading: isLoading,
                         thumbnailHeight: 150,
@@ -657,16 +696,17 @@ struct RecordingDialog: View {
     }
 
     private func refreshMetering() {
-        guard recordAudio, AppSettings.shared.audioSource.capturesMicrophone else {
+        guard recordAudio, settings.audioSource.capturesMicrophone else {
             levelMonitor.stop()
             return
         }
-        levelMonitor.start(device: AppSettings.shared.selectedAudioDevice)
+        levelMonitor.start(device: settings.selectedAudioDevice)
     }
 
     private func refresh() async {
         isLoading = true
         let content = await onRefresh()
+        guard !Task.isCancelled else { return }
         displays = content.displays
         windows = content.windows
         excludedApplications = content.excludedApplications
@@ -692,8 +732,9 @@ struct RecordingDialog: View {
         let scale = displayScale
         let boxedExcludedApplications = UncheckedSendable(value: excludedApplications)
 
-        await withTaskGroup(of: UncheckedSendable<(Int, NSImage)>?.self) { group in
-            for (index, display) in displays.enumerated() {
+        await withTaskGroup(of: UncheckedSendable<(CGDirectDisplayID, NSImage)>?.self) { group in
+            for display in displays {
+                let displayID = display.displayID
                 let boxed = UncheckedSendable(value: display)
                 group.addTask {
                     guard
@@ -706,7 +747,7 @@ struct RecordingDialog: View {
                     else {
                         return nil
                     }
-                    return UncheckedSendable(value: (index, image))
+                    return UncheckedSendable(value: (displayID, image))
                 }
             }
             for await result in group {
@@ -718,6 +759,7 @@ struct RecordingDialog: View {
         }
 
         for batch in ThumbnailLoading.batches(count: windows.count) {
+            guard !Task.isCancelled else { return }
             await withTaskGroup(of: UncheckedSendable<(CGWindowID, NSImage)>?.self) { group in
                 for index in batch {
                     let boxed = UncheckedSendable(value: windows[index])

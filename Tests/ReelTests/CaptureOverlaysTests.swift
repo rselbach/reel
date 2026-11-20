@@ -288,4 +288,24 @@ final class CaptureOverlaysTests: XCTestCase {
         XCTAssertGreaterThanOrEqual(elapsed, .milliseconds(60))
         XCTAssertLessThan(elapsed, .seconds(2))
     }
+
+    @MainActor
+    func testRecordingDialogVisibleWindowSelectionRejectsFilteredOutWindow() {
+        let visibleIDs: [CGWindowID] = [101, 202, 303]
+
+        XCTAssertEqual(
+            RecordingDialogLogic.visibleWindowSelection(selectedWindowID: 202, visibleWindowIDs: visibleIDs),
+            202
+        )
+        XCTAssertNil(
+            RecordingDialogLogic.visibleWindowSelection(selectedWindowID: 404, visibleWindowIDs: visibleIDs),
+            "a window hidden by search must not remain startable"
+        )
+        XCTAssertNil(
+            RecordingDialogLogic.visibleWindowSelection(selectedWindowID: 101, visibleWindowIDs: [])
+        )
+        XCTAssertNil(
+            RecordingDialogLogic.visibleWindowSelection(selectedWindowID: nil, visibleWindowIDs: visibleIDs)
+        )
+    }
 }
