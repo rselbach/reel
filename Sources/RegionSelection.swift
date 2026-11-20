@@ -301,45 +301,106 @@ struct RecordingRegion: Equatable {
 /// Full-screen drag-to-select overlay, one window per display.
 @MainActor
 final class RegionSelector {
-    private var windows: [RegionSelectionWindow] = []
+    private(set) var windows: [RegionSelectionWindow] = []
     private var continuation: CheckedContinuation<RecordingRegion?, Never>?
+    private var keyMonitor: Any?
+    private var resignObserver: NSObjectProtocol?
 
     /// Presents the selection overlays and resolves with the chosen region,
-    /// or nil when the user cancels with Esc.
+    /// or nil when the user cancels with Esc or the calling task is cancelled.
     func select() async -> RecordingRegion? {
-        guard continuation == nil else { return nil }
+        guard continuation == nil, !Task.isCancelled else { return nil }
         guard !NSScreen.screens.isEmpty else {
             logger.error("Cannot select region: no screens available")
             return nil
         }
 
-        NSApp.activate(ignoringOtherApps: true)
-        return await withCheckedContinuation { continuation in
-            self.continuation = continuation
-            for screen in NSScreen.screens {
-                let window = RegionSelectionWindow(screen: screen)
-                window.onSelection = { [weak self] rect in
-                    guard let region = RecordingRegion(screen: screen, screenLocalCocoaRect: rect) else {
-                        logger.error("Selected screen has no display ID; cancelling region selection")
-                        self?.finish(with: nil)
-                        return
-                    }
-                    self?.finish(with: region)
-                }
-                window.onCancel = { [weak self] in
-                    self?.finish(with: nil)
-                }
-                window.makeKeyAndOrderFront(nil)
-                windows.append(window)
+        NSApplication.shared.activate(ignoringOtherApps: true)
+        return await withTaskCancellationHandler {
+            await withCheckedContinuation { continuation in
+                beginSelection(continuation: continuation)
             }
+        } onCancel: { [weak self] in
+            Task { @MainActor in
+                self?.finish(with: nil)
+            }
+        }
+    }
+
+    private func beginSelection(continuation: CheckedContinuation<RecordingRegion?, Never>) {
+        guard !Task.isCancelled else {
+            continuation.resume(returning: nil)
+            return
+        }
+
+        self.continuation = continuation
+        installCancelMonitors()
+
+        for screen in NSScreen.screens {
+            let window = RegionSelectionWindow(screen: screen)
+            window.onSelection = { [weak self] rect in
+                guard let region = RecordingRegion(screen: screen, screenLocalCocoaRect: rect) else {
+                    logger.error("Selected screen has no display ID; cancelling region selection")
+                    self?.finish(with: nil)
+                    return
+                }
+                self?.finish(with: region)
+            }
+            window.onCancel = { [weak self] in
+                self?.finish(with: nil)
+            }
+            window.onSelectionStart = { [weak self, weak window] in
+                guard let self, let activeWindow = window else { return }
+                self.clearSiblingSelections(except: activeWindow)
+            }
+            window.makeKeyAndOrderFront(nil)
+            windows.append(window)
+        }
+    }
+
+    private func clearSiblingSelections(except activeWindow: RegionSelectionWindow) {
+        for sibling in windows where sibling !== activeWindow {
+            sibling.resetSelection()
+        }
+    }
+
+    private func installCancelMonitors() {
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            if event.keyCode == KeyCode.escape {
+                self?.finish(with: nil)
+                return nil
+            }
+            return event
+        }
+        resignObserver = NotificationCenter.default.addObserver(
+            forName: NSApplication.didResignActiveNotification,
+            object: NSApplication.shared,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                self?.finish(with: nil)
+            }
+        }
+    }
+
+    private func removeCancelMonitors() {
+        if let keyMonitor {
+            NSEvent.removeMonitor(keyMonitor)
+            self.keyMonitor = nil
+        }
+        if let resignObserver {
+            NotificationCenter.default.removeObserver(resignObserver)
+            self.resignObserver = nil
         }
     }
 
     private func finish(with region: RecordingRegion?) {
         guard let continuation else { return }
         self.continuation = nil
+        removeCancelMonitors()
         for window in windows {
             window.orderOut(nil)
+            window.close()
         }
         windows = []
         continuation.resume(returning: region)
@@ -357,8 +418,17 @@ final class RegionSelectionWindow: NSWindow {
         set { selectionView?.onCancel = newValue }
     }
 
+    var onSelectionStart: (() -> Void)? {
+        get { selectionView?.onSelectionStart }
+        set { selectionView?.onSelectionStart = newValue }
+    }
+
     private var selectionView: RegionSelectionView? {
         contentView as? RegionSelectionView
+    }
+
+    func resetSelection() {
+        selectionView?.resetSelection()
     }
 
     init(screen: NSScreen) {
@@ -396,6 +466,7 @@ final class RegionSelectionWindow: NSWindow {
 final class RegionSelectionView: NSView {
     var onSelection: ((CGRect) -> Void)?
     var onCancel: (() -> Void)?
+    var onSelectionStart: (() -> Void)?
 
     private enum Phase {
         case idle
@@ -457,6 +528,18 @@ final class RegionSelectionView: NSView {
         layoutHint()
     }
 
+    func resetSelection() {
+        phase = .idle
+        startPoint = nil
+        currentRect = nil
+        activeHandle = nil
+        handleDragOrigin = nil
+        rectAtHandleDragStart = nil
+        isRatioLocked = false
+        showHint(Hint.draw)
+        needsDisplay = true
+    }
+
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     override func resetCursorRects() {
@@ -484,6 +567,7 @@ final class RegionSelectionView: NSView {
             return
         }
 
+        onSelectionStart?()
         phase = .drawing
         startPoint = point
         currentRect = nil
