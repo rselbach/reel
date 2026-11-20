@@ -153,8 +153,10 @@ private struct PermissionRow: View {
         case .notRequested, .missing:
             Button(PermissionText.grant, action: onGrant)
         case .needsRelaunch:
-            Button(PermissionText.relaunchShort, action: onGrant)
-                .buttonStyle(.borderedProminent)
+            if AppRelauncher.isAvailable {
+                Button(PermissionText.relaunchShort, action: onGrant)
+                    .buttonStyle(.borderedProminent)
+            }
         }
     }
 }

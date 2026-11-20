@@ -338,4 +338,263 @@ final class HotkeyAndPermissionsTests: XCTestCase {
         XCTAssertEqual(cancelCount, 1)
         XCTAssertEqual(harness.activeRegistrations().count, HotkeyAction.allCases.count)
     }
+
+    @MainActor
+    func testPermissionCenterNotifiesOnChangeWhenRecorderPermissionFlipsOnFirstLaunch() async {
+        var recorderHasPermission = false
+        var requestCount = 0
+        var changeCount = 0
+
+        let center = PermissionCenter(
+            hasScreenRecordingPermission: { recorderHasPermission },
+            requestScreenRecordingPermission: {
+                requestCount += 1
+                recorderHasPermission = true
+            },
+            preflightScreenRecording: { true },
+            probeScreenRecording: { false },
+            authorizationStatus: { _ in .authorized },
+            requestMediaAccess: { _ in true },
+            beginGuide: { _, _ in },
+            endGuideHandler: {}
+        )
+        center.onChange = { changeCount += 1 }
+
+        // Preflight already reports granted before the recorder has fetched
+        // shareable content, yet flipping recorderHasPermission must still
+        // trigger onChange so the menu updates.
+        XCTAssertEqual(center.state(of: .screenRecording), .granted)
+
+        await center.refresh()
+        XCTAssertEqual(requestCount, 1)
+        XCTAssertEqual(center.state(of: .screenRecording), .granted)
+        XCTAssertEqual(changeCount, 1)
+
+        // A second steady-state refresh must not spuriously fire onChange.
+        await center.refresh()
+        XCTAssertEqual(changeCount, 1)
+    }
+
+    @MainActor
+    func testPermissionCenterClearsGuidingWhenSystemSettingsUnavailable() async {
+        let center = PermissionCenter(
+            hasScreenRecordingPermission: { false },
+            requestScreenRecordingPermission: {},
+            preflightScreenRecording: { false },
+            probeScreenRecording: { false },
+            authorizationStatus: { _ in .denied },
+            requestMediaAccess: { _ in false },
+            beginGuide: { permission, _ in
+                throw PermissionError.systemSettingsUnavailable(permission)
+            },
+            endGuideHandler: {}
+        )
+
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 320, height: 240),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+
+        do {
+            try await center.grant(.screenRecording, beside: window)
+            XCTFail("expected systemSettingsUnavailable error")
+        } catch let error as PermissionError {
+            if case .systemSettingsUnavailable(let permission) = error {
+                XCTAssertEqual(permission, .screenRecording)
+            } else {
+                XCTFail("unexpected PermissionError case: \(error)")
+            }
+        } catch {
+            XCTFail("unexpected error type: \(error)")
+        }
+
+        XCTAssertNil(center.guiding)
+    }
+
+    @MainActor
+    func testPermissionCenterPreventsOverlappingRefreshesAndRevertsNeedsRelaunch() async {
+        var probeAllowed = false
+        var probeCalls = 0
+        var requestCalls = 0
+        var changeCount = 0
+        var pendingProbe: CheckedContinuation<Bool, Never>?
+
+        let center = PermissionCenter(
+            hasScreenRecordingPermission: { false },
+            requestScreenRecordingPermission: { requestCalls += 1 },
+            preflightScreenRecording: { false },
+            probeScreenRecording: {
+                probeCalls += 1
+                return await withCheckedContinuation { continuation in
+                    pendingProbe = continuation
+                }
+            },
+            authorizationStatus: { _ in .denied },
+            requestMediaAccess: { _ in false },
+            beginGuide: { _, _ in },
+            endGuideHandler: {}
+        )
+        center.onChange = { changeCount += 1 }
+
+        // Start a first refresh that suspends inside the probe, then launch a
+        // second overlapping refresh; the second must return without spawning
+        // another probe.
+        let firstRefresh = Task { @MainActor in
+            await center.refresh()
+        }
+        await Task.yield()
+        XCTAssertEqual(probeCalls, 1)
+
+        await center.refresh()
+        XCTAssertEqual(probeCalls, 1)
+
+        probeAllowed = true
+        pendingProbe?.resume(returning: probeAllowed)
+        pendingProbe = nil
+        await firstRefresh.value
+
+        XCTAssertEqual(center.state(of: .screenRecording), .needsRelaunch)
+        XCTAssertEqual(requestCalls, 1)
+        XCTAssertEqual(changeCount, 1)
+
+        // Staying allowed in System Settings keeps .needsRelaunch without
+        // spamming requestPermission on every poll.
+        let secondRefresh = Task { @MainActor in
+            await center.refresh()
+        }
+        await Task.yield()
+        pendingProbe?.resume(returning: true)
+        pendingProbe = nil
+        await secondRefresh.value
+        XCTAssertEqual(center.state(of: .screenRecording), .needsRelaunch)
+        XCTAssertEqual(requestCalls, 1)
+        XCTAssertEqual(changeCount, 1)
+
+        // Unchecking Reel in System Settings reverts .needsRelaunch to .missing.
+        let thirdRefresh = Task { @MainActor in
+            await center.refresh()
+        }
+        await Task.yield()
+        pendingProbe?.resume(returning: false)
+        pendingProbe = nil
+        await thirdRefresh.value
+        XCTAssertEqual(center.state(of: .screenRecording), .missing)
+        XCTAssertEqual(changeCount, 2)
+    }
+
+    @MainActor
+    func testSystemSettingsGuideEndAbortsPendingMoveAndPhantomAnimation() async throws {
+        let window = NSWindow(
+            contentRect: NSRect(x: 120, y: 140, width: 400, height: 300),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        let initialFrame = window.frame
+        let icon = AppIconDragSourceView(frame: NSRect(x: 20, y: 20, width: 64, height: 64))
+        window.contentView?.addSubview(icon)
+
+        var sleepContinuation: CheckedContinuation<Void, Error>?
+        var animateCalls = 0
+
+        let guide = SystemSettingsGuide(
+            openURL: { _ in true },
+            settingsWindowFrameProvider: { NSRect(x: 200, y: 200, width: 700, height: 600) },
+            sleep: { _ in
+                try await withCheckedThrowingContinuation { continuation in
+                    sleepContinuation = continuation
+                }
+            },
+            shouldReduceMotion: { false },
+            animateStep: { _, _, changes in
+                animateCalls += 1
+                changes()
+            }
+        )
+
+        let beginTask = Task { @MainActor in
+            try await guide.begin(.screenRecording, beside: window)
+        }
+        await Task.yield()
+        XCTAssertEqual(window.level, .floating)
+
+        // Closing Welcome calls end() while settledSettingsWindowFrame is sleeping.
+        guide.end()
+        XCTAssertEqual(window.level, .normal)
+        sleepContinuation?.resume()
+        sleepContinuation = nil
+
+        try await beginTask.value
+        XCTAssertEqual(window.frame, initialFrame)
+        XCTAssertEqual(animateCalls, 0)
+    }
+
+    @MainActor
+    func testSystemSettingsGuideStopsPhantomMidAnimationWhenEnded() async throws {
+        let window = NSWindow(
+            contentRect: NSRect(x: 120, y: 140, width: 400, height: 300),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        let icon = AppIconDragSourceView(frame: NSRect(x: 20, y: 20, width: 64, height: 64))
+        window.contentView?.addSubview(icon)
+
+        var animateCalls = 0
+        var guideRef: SystemSettingsGuide?
+        let guide = SystemSettingsGuide(
+            openURL: { _ in true },
+            settingsWindowFrameProvider: { NSRect(x: 200, y: 200, width: 700, height: 600) },
+            sleep: { _ in },
+            shouldReduceMotion: { false },
+            animateStep: { _, _, changes in
+                animateCalls += 1
+                changes()
+                if animateCalls == 1 {
+                    guideRef?.end()
+                }
+            }
+        )
+        guideRef = guide
+
+        try await guide.begin(.screenRecording, beside: window)
+        XCTAssertEqual(animateCalls, 1)
+        XCTAssertEqual(window.level, .normal)
+    }
+
+    @MainActor
+    func testSystemSettingsGuideTaskCancellationExitsSettlementLoopPromptly() async throws {
+        let window = NSWindow(
+            contentRect: NSRect(x: 120, y: 140, width: 400, height: 300),
+            styleMask: [.titled],
+            backing: .buffered,
+            defer: false
+        )
+        let initialFrame = window.frame
+
+        var pollCount = 0
+        let guide = SystemSettingsGuide(
+            openURL: { _ in true },
+            settingsWindowFrameProvider: {
+                pollCount += 1
+                return nil
+            },
+            sleep: { duration in
+                try await Task.sleep(for: duration)
+            },
+            shouldReduceMotion: { true }
+        )
+
+        let task = Task { @MainActor in
+            try await guide.begin(.microphone, beside: window)
+        }
+        await Task.yield()
+        task.cancel()
+        try await task.value
+
+        XCTAssertLessThan(pollCount, 5)
+        XCTAssertEqual(window.frame, initialFrame)
+    }
 }

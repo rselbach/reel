@@ -171,20 +171,65 @@ final class PermissionCenter: ObservableObject {
     /// Called after any state changes, so the menu can follow.
     var onChange: (() -> Void)?
 
-    private let recorder: ScreenRecorder
-    private let guide = SystemSettingsGuide()
+    private let hasScreenRecordingPermission: () -> Bool
+    private let requestScreenRecordingPermission: () async -> Void
+    private let preflightScreenRecording: () -> Bool
+    private let probeScreenRecording: () async -> Bool
+    private let authorizationStatus: (AVMediaType) -> AVAuthorizationStatus
+    private let requestMediaAccess: (AVMediaType) async -> Bool
+    private let beginGuide: (PrivacyPermission, NSWindow) async throws -> Void
+    private let endGuideHandler: () -> Void
     private var screenRecordingAllowed = false
+    private var lastNotifiedRecorderPermission: Bool
+    private var isRefreshing = false
     private var monitorTask: Task<Void, Never>?
 
-    init(recorder: ScreenRecorder) {
-        self.recorder = recorder
+    convenience init(recorder: ScreenRecorder) {
+        let guide = SystemSettingsGuide()
+        self.init(
+            hasScreenRecordingPermission: { recorder.hasPermission },
+            requestScreenRecordingPermission: { await recorder.requestPermission() },
+            preflightScreenRecording: CGPreflightScreenCaptureAccess,
+            probeScreenRecording: ScreenRecordingProbe.isAllowed,
+            authorizationStatus: { AVCaptureDevice.authorizationStatus(for: $0) },
+            requestMediaAccess: { await AVCaptureDevice.requestAccess(for: $0) },
+            beginGuide: { try await guide.begin($0, beside: $1) },
+            endGuideHandler: { guide.end() }
+        )
+    }
+
+    init(
+        hasScreenRecordingPermission: @escaping () -> Bool,
+        requestScreenRecordingPermission: @escaping () async -> Void,
+        preflightScreenRecording: @escaping () -> Bool,
+        probeScreenRecording: @escaping () async -> Bool,
+        authorizationStatus: @escaping (AVMediaType) -> AVAuthorizationStatus = {
+            AVCaptureDevice.authorizationStatus(for: $0)
+        },
+        requestMediaAccess: @escaping (AVMediaType) async -> Bool = {
+            await AVCaptureDevice.requestAccess(for: $0)
+        },
+        beginGuide: @escaping (PrivacyPermission, NSWindow) async throws -> Void,
+        endGuideHandler: @escaping () -> Void
+    ) {
+        self.hasScreenRecordingPermission = hasScreenRecordingPermission
+        self.requestScreenRecordingPermission = requestScreenRecordingPermission
+        self.preflightScreenRecording = preflightScreenRecording
+        self.probeScreenRecording = probeScreenRecording
+        self.authorizationStatus = authorizationStatus
+        self.requestMediaAccess = requestMediaAccess
+        self.beginGuide = beginGuide
+        self.endGuideHandler = endGuideHandler
+
+        let inEffect = hasScreenRecordingPermission()
+        self.lastNotifiedRecorderPermission = inEffect
         states = [
             .screenRecording: .screenRecording(
-                inEffect: recorder.hasPermission || CGPreflightScreenCaptureAccess(),
+                inEffect: inEffect || preflightScreenRecording(),
                 allowedInSettings: false
             ),
-            .microphone: PermissionState(AVCaptureDevice.authorizationStatus(for: .audio)),
-            .camera: PermissionState(AVCaptureDevice.authorizationStatus(for: .video)),
+            .microphone: PermissionState(authorizationStatus(.audio)),
+            .camera: PermissionState(authorizationStatus(.video)),
         ]
     }
 
@@ -214,47 +259,63 @@ final class PermissionCenter: ObservableObject {
         switch state(of: permission) {
         case .notRequested:
             if let mediaType = permission.mediaType {
-                _ = await AVCaptureDevice.requestAccess(for: mediaType)
+                _ = await requestMediaAccess(mediaType)
             }
             await refresh()
         case .missing:
             guard let window else { return }
             guiding = permission
-            try await guide.begin(permission, beside: window)
+            do {
+                try await beginGuide(permission, window)
+            } catch {
+                if guiding == permission {
+                    guiding = nil
+                }
+                throw error
+            }
         case .granted, .needsRelaunch:
             break
         }
     }
 
     func refresh() async {
-        if !recorder.hasPermission, !screenRecordingAllowed {
-            let allowed = CGPreflightScreenCaptureAccess() ? true : await ScreenRecordingProbe.isAllowed()
-            if allowed {
-                screenRecordingAllowed = true
+        guard !isRefreshing else { return }
+        isRefreshing = true
+        defer { isRefreshing = false }
+
+        if !hasScreenRecordingPermission() {
+            let allowed = preflightScreenRecording() ? true : await probeScreenRecording()
+            let becameAllowed = allowed && !screenRecordingAllowed
+            screenRecordingAllowed = allowed
+            if becameAllowed {
                 // Asking ScreenCaptureKit now shows no prompt, and succeeds
                 // when macOS applies the grant without a restart.
-                await recorder.requestPermission()
+                await requestScreenRecordingPermission()
             }
         }
+        let inEffect = hasScreenRecordingPermission()
         let next: [PrivacyPermission: PermissionState] = [
             .screenRecording: .screenRecording(
-                inEffect: recorder.hasPermission,
+                inEffect: inEffect,
                 allowedInSettings: screenRecordingAllowed
             ),
-            .microphone: PermissionState(AVCaptureDevice.authorizationStatus(for: .audio)),
-            .camera: PermissionState(AVCaptureDevice.authorizationStatus(for: .video)),
+            .microphone: PermissionState(authorizationStatus(.audio)),
+            .camera: PermissionState(authorizationStatus(.video)),
         ]
         if let guiding, next[guiding] != .missing {
             endGuide()
         }
-        guard next != states else { return }
+        let statesChanged = next != states
+        let recorderPermissionChanged = inEffect != lastNotifiedRecorderPermission
+        guard statesChanged || recorderPermissionChanged else { return }
         states = next
+        lastNotifiedRecorderPermission = inEffect
         onChange?()
     }
 
     private func endGuide() {
         guiding = nil
-        guide.end()
+        endGuideHandler()
     }
 }
 

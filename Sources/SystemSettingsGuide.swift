@@ -8,58 +8,112 @@ import SwiftUI
 /// there.
 @MainActor
 final class SystemSettingsGuide {
+    typealias AnimationRunner =
+        @MainActor (TimeInterval, CAMediaTimingFunctionName, @MainActor @escaping () -> Void)
+        async -> Void
+
     private static let settingsBundleID = "com.apple.systempreferences"
+
+    private let openURL: (URL) -> Bool
+    private let settingsWindowFrameProvider: () -> NSRect?
+    private let sleep: (Duration) async throws -> Void
+    private let shouldReduceMotion: () -> Bool
+    private let animateStep: AnimationRunner
 
     private weak var window: NSWindow?
     private var phantom: NSPanel?
+    private var generation: UInt64 = 0
+
+    init(
+        openURL: @escaping (URL) -> Bool = { NSWorkspace.shared.open($0) },
+        settingsWindowFrameProvider: @escaping () -> NSRect? = { SystemSettingsGuide.liveSettingsWindowFrame() },
+        sleep: @escaping (Duration) async throws -> Void = { try await Task.sleep(for: $0) },
+        shouldReduceMotion: @escaping () -> Bool = { NSWorkspace.shared.accessibilityDisplayShouldReduceMotion },
+        animateStep: @escaping AnimationRunner = { duration, timing, changes in
+            await SystemSettingsGuide.liveAnimate(duration: duration, timing: timing, changes: changes)
+        }
+    ) {
+        self.openURL = openURL
+        self.settingsWindowFrameProvider = settingsWindowFrameProvider
+        self.sleep = sleep
+        self.shouldReduceMotion = shouldReduceMotion
+        self.animateStep = animateStep
+    }
 
     func begin(_ permission: PrivacyPermission, beside window: NSWindow) async throws {
-        guard let url = permission.settingsURL, NSWorkspace.shared.open(url) else {
+        guard let url = permission.settingsURL, openURL(url) else {
             throw PermissionError.systemSettingsUnavailable(permission)
+        }
+        generation &+= 1
+        let currentGeneration = generation
+        phantom?.orderOut(nil)
+        phantom = nil
+        if self.window !== window {
+            self.window?.level = .normal
         }
         self.window = window
         // Floating keeps the instructions in view while System Settings is
         // the active app.
         window.level = .floating
 
-        guard let settingsFrame = await settledSettingsWindowFrame() else { return }
+        guard let settingsFrame = await settledSettingsWindowFrame(generation: currentGeneration),
+            isCurrent(currentGeneration)
+        else { return }
+
         let screen = NSScreen.screens.first { $0.frame.intersects(settingsFrame) } ?? NSScreen.main
         if let visible = screen?.visibleFrame {
             let frame = GuideLayout.frame(for: window.frame.size, beside: settingsFrame, in: visible)
             window.setFrame(frame, display: true, animate: true)
         }
 
-        guard permission.acceptsDroppedApp,
+        guard isCurrent(currentGeneration),
+            permission.acceptsDroppedApp,
             let icon = window.contentView?.firstSubview(of: AppIconDragSourceView.self),
             let iconFrame = icon.window?.convertToScreen(icon.convert(icon.bounds, to: nil))
         else { return }
-        await showPhantom(from: iconFrame, to: GuideLayout.dropTarget(in: settingsFrame))
+        await showPhantom(
+            from: iconFrame,
+            to: GuideLayout.dropTarget(in: settingsFrame),
+            generation: currentGeneration
+        )
     }
 
     func end() {
+        generation &+= 1
         window?.level = .normal
         window = nil
         phantom?.orderOut(nil)
         phantom = nil
     }
 
+    private func isCurrent(_ expectedGeneration: UInt64) -> Bool {
+        !Task.isCancelled && generation == expectedGeneration
+    }
+
     /// System Settings takes a moment to open and switch panes, so this waits
     /// until its window holds still. Window bounds need no screen recording
     /// permission; only window titles do.
-    private func settledSettingsWindowFrame() async -> NSRect? {
+    private func settledSettingsWindowFrame(generation expectedGeneration: UInt64) async -> NSRect? {
         var previous: NSRect?
         for _ in 0..<50 {
-            try? await Task.sleep(for: .milliseconds(100))
-            guard let frame = settingsWindowFrame() else { continue }
+            guard isCurrent(expectedGeneration) else { return nil }
+            do {
+                try await sleep(.milliseconds(100))
+            } catch {
+                return nil
+            }
+            guard isCurrent(expectedGeneration) else { return nil }
+            guard let frame = settingsWindowFrameProvider() else { continue }
             if frame == previous {
                 return frame
             }
             previous = frame
         }
+        guard isCurrent(expectedGeneration) else { return nil }
         return previous
     }
 
-    private func settingsWindowFrame() -> NSRect? {
+    private static func liveSettingsWindowFrame() -> NSRect? {
         guard
             let pid = NSRunningApplication.runningApplications(withBundleIdentifier: Self.settingsBundleID).first?
                 .processIdentifier,
@@ -78,8 +132,8 @@ final class SystemSettingsGuide {
         return nil
     }
 
-    private func showPhantom(from start: NSRect, to target: NSPoint) async {
-        guard !NSWorkspace.shared.accessibilityDisplayShouldReduceMotion else { return }
+    private func showPhantom(from start: NSRect, to target: NSPoint, generation expectedGeneration: UInt64) async {
+        guard isCurrent(expectedGeneration), !shouldReduceMotion() else { return }
         phantom?.orderOut(nil)
 
         let panel = NSPanel(
@@ -94,12 +148,19 @@ final class SystemSettingsGuide {
         panel.ignoresMouseEvents = true
         panel.level = .popUpMenu
         panel.collectionBehavior = [.canJoinAllSpaces, .transient, .ignoresCycle]
-        let imageView = NSImageView(image: NSApp.applicationIconImage)
+        let imageView = NSImageView(image: NSApplication.shared.applicationIconImage)
         imageView.imageScaling = .scaleProportionallyUpOrDown
         panel.contentView = imageView
         panel.alphaValue = 0
         panel.orderFrontRegardless()
         phantom = panel
+
+        defer {
+            panel.orderOut(nil)
+            if phantom === panel {
+                phantom = nil
+            }
+        }
 
         // Lift the copy off the icon, carry it into the list, then let go.
         let lifted = start.insetBy(dx: -6, dy: -6)
@@ -110,24 +171,33 @@ final class SystemSettingsGuide {
             width: landedSize.width,
             height: landedSize.height
         )
-        await animate(duration: 0.2, timing: .easeOut) {
+        await animateStep(0.2, .easeOut) {
             panel.animator().alphaValue = 0.9
             panel.animator().setFrame(lifted, display: true)
         }
-        try? await Task.sleep(for: .milliseconds(150))
-        await animate(duration: 0.9, timing: .easeInEaseOut) {
+        guard isCurrent(expectedGeneration), phantom === panel else { return }
+        do {
+            try await sleep(.milliseconds(150))
+        } catch {
+            return
+        }
+        guard isCurrent(expectedGeneration), phantom === panel else { return }
+        await animateStep(0.9, .easeInEaseOut) {
             panel.animator().setFrame(landed, display: true)
         }
-        try? await Task.sleep(for: .milliseconds(450))
-        await animate(duration: 0.35, timing: .easeIn) {
+        guard isCurrent(expectedGeneration), phantom === panel else { return }
+        do {
+            try await sleep(.milliseconds(450))
+        } catch {
+            return
+        }
+        guard isCurrent(expectedGeneration), phantom === panel else { return }
+        await animateStep(0.35, .easeIn) {
             panel.animator().alphaValue = 0
         }
-        guard phantom === panel else { return }
-        panel.orderOut(nil)
-        phantom = nil
     }
 
-    private func animate(
+    private static func liveAnimate(
         duration: TimeInterval,
         timing: CAMediaTimingFunctionName,
         changes: @escaping () -> Void
