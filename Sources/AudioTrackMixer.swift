@@ -1,6 +1,6 @@
 import AVFoundation
 import Foundation
-import os.log
+import os
 
 private let logger = Logger(
     subsystem: Bundle.main.bundleIdentifier ?? "com.rselbach.reel",
@@ -91,16 +91,19 @@ enum AudioTrackMixer {
             )
             input.transform = try await track.load(.preferredTransform)
             try connect(output, to: input, reader: reader, writer: writer, mediaType: track.mediaType)
-            pipes.append(Pipe(output: output, input: input))
+            pipes.append(Pipe(reader: reader, writer: writer, output: output, input: input))
         }
 
         let mixOutput = AVAssetReaderAudioMixOutput(audioTracks: audioTracks, audioSettings: mixSettings)
         let audioInput = AVAssetWriterInput(mediaType: .audio, outputSettings: encodedSettings)
         try connect(mixOutput, to: audioInput, reader: reader, writer: writer, mediaType: .audio)
-        pipes.append(Pipe(output: mixOutput, input: audioInput))
+        pipes.append(Pipe(reader: reader, writer: writer, output: mixOutput, input: audioInput))
 
         guard reader.startReading() else { throw MixError.cannotRead(reader.error) }
-        guard writer.startWriting() else { throw MixError.cannotWrite(writer.error) }
+        guard writer.startWriting() else {
+            reader.cancelReading()
+            throw MixError.cannotWrite(writer.error)
+        }
         writer.startSession(atSourceTime: .zero)
 
         // Every track is copied at once: the writer interleaves them and
@@ -116,6 +119,10 @@ enum AudioTrackMixer {
         guard reader.status != .failed else {
             writer.cancelWriting()
             throw MixError.cannotRead(reader.error)
+        }
+        guard writer.status == .writing else {
+            reader.cancelReading()
+            throw MixError.cannotWrite(writer.error)
         }
         await writer.finishWriting()
         guard writer.status == .completed else { throw MixError.cannotWrite(writer.error) }
@@ -137,23 +144,86 @@ enum AudioTrackMixer {
         writer.add(input)
     }
 
+    private final class PipeCompletion: @unchecked Sendable {
+        private let state = OSAllocatedUnfairLock(initialState: false)
+        private let continuation: CheckedContinuation<Void, Never>
+
+        init(continuation: CheckedContinuation<Void, Never>) {
+            self.continuation = continuation
+        }
+
+        deinit {
+            // AVAssetWriterInput releases its readiness callback without
+            // invoking it if the writer fails or is cancelled mid-copy.
+            finish(markInputFinished: nil)
+        }
+
+        var hasFinished: Bool {
+            state.withLock { $0 }
+        }
+
+        func finish(markInputFinished: (() -> Void)?) {
+            let shouldFinish = state.withLock { finished -> Bool in
+                guard !finished else { return false }
+                finished = true
+                return true
+            }
+            guard shouldFinish else { return }
+            markInputFinished?()
+            continuation.resume()
+        }
+    }
+
     /// One track's samples flowing from the reader to the writer. Each pipe
     /// is only touched on its own queue.
-    private struct Pipe: @unchecked Sendable {
+    struct Pipe: @unchecked Sendable {
+        let reader: AVAssetReader
+        let writer: AVAssetWriter
         let output: AVAssetReaderOutput
         let input: AVAssetWriterInput
 
         func copy(on queue: DispatchQueue) async {
+            guard reader.status == .reading, writer.status == .writing else {
+                if writer.status == .writing {
+                    input.markAsFinished()
+                }
+                return
+            }
+
             await withCheckedContinuation { continuation in
-                input.requestMediaDataWhenReady(on: queue) {
-                    while input.isReadyForMoreMediaData {
-                        guard let sample = output.copyNextSampleBuffer(), input.append(sample) else {
-                            // The end of the track, or a failure the reader or
-                            // writer status reports once every pipe is done.
+                let completion = PipeCompletion(continuation: continuation)
+                let finish: @Sendable () -> Void = {
+                    completion.finish {
+                        if writer.status == .writing {
                             input.markAsFinished()
-                            continuation.resume()
+                        }
+                    }
+                }
+
+                input.requestMediaDataWhenReady(on: queue) {
+                    guard !completion.hasFinished else { return }
+                    if reader.status != .reading || writer.status != .writing {
+                        finish()
+                        return
+                    }
+                    while input.isReadyForMoreMediaData {
+                        if reader.status != .reading || writer.status != .writing {
+                            finish()
                             return
                         }
+                        let appended = autoreleasepool { () -> Bool in
+                            guard let sample = output.copyNextSampleBuffer() else {
+                                return false
+                            }
+                            return input.append(sample)
+                        }
+                        if !appended {
+                            finish()
+                            return
+                        }
+                    }
+                    if reader.status != .reading || writer.status != .writing {
+                        finish()
                     }
                 }
             }

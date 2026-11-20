@@ -55,6 +55,189 @@ final class AudioTrackMixerTests: XCTestCase {
         XCTAssertEqual(modified, after)
     }
 
+    func testPipeCompletesWithoutHangingWhenReaderIsCancelled() async throws {
+        let sourceURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("Reel-Troy-ReaderCancel-\(UUID().uuidString).mp4")
+        let outputURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("Reel-Troy-ReaderCancelOut-\(UUID().uuidString).mp4")
+        addTeardownBlock {
+            for url in [sourceURL, outputURL] where FileManager.default.fileExists(atPath: url.path()) {
+                try FileManager.default.removeItem(at: url)
+            }
+        }
+        try await Self.writeFixture(to: sourceURL, toneSeconds: [0, 1])
+
+        let asset = AVURLAsset(url: sourceURL)
+        let videoTracks = try await asset.loadTracks(withMediaType: .video)
+        let videoTrack = try XCTUnwrap(videoTracks.first)
+        let reader = try AVAssetReader(asset: asset)
+        let writer = try AVAssetWriter(outputURL: outputURL, fileType: .mp4)
+        let output = AVAssetReaderTrackOutput(track: videoTrack, outputSettings: nil)
+        let input = AVAssetWriterInput(
+            mediaType: .video,
+            outputSettings: nil,
+            sourceFormatHint: try await videoTrack.load(.formatDescriptions).first
+        )
+        reader.add(output)
+        writer.add(input)
+
+        XCTAssertTrue(reader.startReading())
+        XCTAssertTrue(writer.startWriting())
+        writer.startSession(atSourceTime: .zero)
+        reader.cancelReading()
+
+        let pipe = AudioTrackMixer.Pipe(reader: reader, writer: writer, output: output, input: input)
+        await pipe.copy(on: DispatchQueue(label: "com.rselbach.reel.test.reader-cancel"))
+        XCTAssertEqual(reader.status, .cancelled)
+        writer.cancelWriting()
+    }
+
+    func testPipeCompletesWithoutHangingWhenWriterFailsOnPeerTrack() async throws {
+        let sourceURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("Reel-Abed-WriterFail-\(UUID().uuidString).mp4")
+        let outputURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("Reel-Abed-WriterFailOut-\(UUID().uuidString).mp4")
+        addTeardownBlock {
+            for url in [sourceURL, outputURL] where FileManager.default.fileExists(atPath: url.path()) {
+                try FileManager.default.removeItem(at: url)
+            }
+        }
+        try await Self.writeFixture(to: sourceURL, toneSeconds: [0, 1])
+
+        let asset = AVURLAsset(url: sourceURL)
+        let videoTracks = try await asset.loadTracks(withMediaType: .video)
+        let videoTrack = try XCTUnwrap(videoTracks.first)
+        let reader = try AVAssetReader(asset: asset)
+        let writer = try AVAssetWriter(outputURL: outputURL, fileType: .mp4)
+
+        let videoOutput = AVAssetReaderTrackOutput(track: videoTrack, outputSettings: nil)
+        let videoInput = AVAssetWriterInput(
+            mediaType: .video,
+            outputSettings: nil,
+            sourceFormatHint: try await videoTrack.load(.formatDescriptions).first
+        )
+        let item = AVMutableMetadataItem()
+        item.identifier = CursorMetadataTrack.identifier
+        item.dataType = kCMMetadataBaseDataType_JSON as String
+        item.value = ["version": 1] as NSDictionary
+        let firstGroup = AVTimedMetadataGroup(
+            items: [item],
+            timeRange: CMTimeRange(
+                start: CMTime(value: 1, timescale: 1),
+                duration: CMTime(value: 1, timescale: 1)
+            )
+        )
+        let peerInput = AVAssetWriterInput(
+            mediaType: .metadata,
+            outputSettings: nil,
+            sourceFormatHint: try XCTUnwrap(firstGroup.copyFormatDescription())
+        )
+        let peerAdaptor = AVAssetWriterInputMetadataAdaptor(assetWriterInput: peerInput)
+        reader.add(videoOutput)
+        writer.add(videoInput)
+        writer.add(peerInput)
+
+        XCTAssertTrue(reader.startReading())
+        XCTAssertTrue(writer.startWriting())
+        writer.startSession(atSourceTime: .zero)
+
+        let queue = DispatchQueue(label: "com.rselbach.reel.test.writer-fail")
+        queue.suspend()
+        let videoPipe = AudioTrackMixer.Pipe(
+            reader: reader,
+            writer: writer,
+            output: videoOutput,
+            input: videoInput
+        )
+        let copyTask = Task {
+            await videoPipe.copy(on: queue)
+        }
+        try await Task.sleep(for: .milliseconds(20))
+
+        // Fail the writer on the peer metadata track with a backwards timestamp.
+        let backwardsGroup = AVTimedMetadataGroup(
+            items: [item],
+            timeRange: CMTimeRange(
+                start: .zero,
+                duration: CMTime(value: 1, timescale: 1)
+            )
+        )
+        try await Self.waitUntilReady(peerInput)
+        XCTAssertTrue(peerAdaptor.append(firstGroup))
+        try await Self.waitUntilReady(peerInput)
+        _ = peerAdaptor.append(backwardsGroup)
+        peerInput.markAsFinished()
+
+        queue.resume()
+        await copyTask.value
+        XCTAssertEqual(writer.status, .failed)
+        reader.cancelReading()
+    }
+
+    func testPipeCompletesWithoutHangingWhenWriterIsCancelledDuringCopy() async throws {
+        let sourceURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("Reel-Britta-WriterCancel-\(UUID().uuidString).mp4")
+        let outputURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent("Reel-Britta-WriterCancelOut-\(UUID().uuidString).mp4")
+        addTeardownBlock {
+            for url in [sourceURL, outputURL] where FileManager.default.fileExists(atPath: url.path()) {
+                try FileManager.default.removeItem(at: url)
+            }
+        }
+        try await Self.writeFixture(to: sourceURL, toneSeconds: [0, 1])
+
+        let asset = AVURLAsset(url: sourceURL)
+        let videoTracks = try await asset.loadTracks(withMediaType: .video)
+        let videoTrack = try XCTUnwrap(videoTracks.first)
+        let audioTracks = try await asset.loadTracks(withMediaType: .audio)
+        let audioTrack = try XCTUnwrap(audioTracks.first)
+        let reader = try AVAssetReader(asset: asset)
+        let writer = try AVAssetWriter(outputURL: outputURL, fileType: .mp4)
+
+        let videoOutput = AVAssetReaderTrackOutput(track: videoTrack, outputSettings: nil)
+        let videoInput = AVAssetWriterInput(
+            mediaType: .video,
+            outputSettings: nil,
+            sourceFormatHint: try await videoTrack.load(.formatDescriptions).first
+        )
+        let audioOutput = AVAssetReaderTrackOutput(track: audioTrack, outputSettings: nil)
+        let audioInput = AVAssetWriterInput(
+            mediaType: .audio,
+            outputSettings: nil,
+            sourceFormatHint: try await audioTrack.load(.formatDescriptions).first
+        )
+        reader.add(videoOutput)
+        reader.add(audioOutput)
+        writer.add(videoInput)
+        writer.add(audioInput)
+
+        XCTAssertTrue(reader.startReading())
+        XCTAssertTrue(writer.startWriting())
+        writer.startSession(atSourceTime: .zero)
+
+        let queue = DispatchQueue(label: "com.rselbach.reel.test.writer-cancel")
+        queue.suspend()
+        let videoPipe = AudioTrackMixer.Pipe(
+            reader: reader,
+            writer: writer,
+            output: videoOutput,
+            input: videoInput
+        )
+        let copyTask = Task {
+            await videoPipe.copy(on: queue)
+        }
+        // Let requestMediaDataWhenReady register before cancelling the writer,
+        // then resume the queue so the callback observes a non-writing writer
+        // even when isReadyForMoreMediaData is false.
+        try await Task.sleep(for: .milliseconds(20))
+        writer.cancelWriting()
+        queue.resume()
+
+        await copyTask.value
+        XCTAssertEqual(writer.status, .cancelled)
+        reader.cancelReading()
+    }
+
     /// Writes two seconds of video and cursor data plus one audio track per
     /// entry in `toneSeconds`, each holding a tone during that second only.
     private static func writeFixture(to url: URL, toneSeconds: [Int]) async throws {
