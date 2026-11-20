@@ -13,39 +13,44 @@ permissions:
 jobs:
   build:
     runs-on: macos-26
-    
+
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      
+
       - name: Setup Xcode
         uses: maxim-lobanov/setup-xcode@v1
         with:
           xcode-version: latest-stable
-      
+
       - name: Setup just
         uses: extractions/setup-just@v2
-      
+
+      - name: Validate repository
+        run: just validate
+
+      - name: Test with coverage
+        run: just test-coverage
+
       - name: Import certificate
         env:
           CERTIFICATE_P12: ${{ secrets.CERTIFICATE_P12 }}
           CERTIFICATE_PASSWORD: ${{ secrets.CERTIFICATE_PASSWORD }}
+          SIGNING_IDENTITY_OVERRIDE: ${{ secrets.SIGNING_IDENTITY }}
         run: |
           set -euo pipefail
           CERTIFICATE_P12_PATH="$RUNNER_TEMP/certificate.p12"
           trap 'shred -u "$CERTIFICATE_P12_PATH" 2>/dev/null || rm -f "$CERTIFICATE_P12_PATH"' EXIT
 
-          # Create temporary keychain
-          KEYCHAIN_PATH=$RUNNER_TEMP/signing.keychain-db
-          KEYCHAIN_PASSWORD=$(openssl rand -base64 32)
-          
+          KEYCHAIN_PATH="$RUNNER_TEMP/signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -base64 32)"
+
           security create-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
           security set-keychain-settings -lut 21600 "$KEYCHAIN_PATH"
           security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-          
-          # Import certificate
-          echo "$CERTIFICATE_P12" | base64 --decode > "$CERTIFICATE_P12_PATH"
+
+          printf '%s' "$CERTIFICATE_P12" | base64 --decode > "$CERTIFICATE_P12_PATH"
           chmod 600 "$CERTIFICATE_P12_PATH"
           security import "$CERTIFICATE_P12_PATH" \
             -P "$CERTIFICATE_PASSWORD" \
@@ -53,22 +58,37 @@ jobs:
             -t cert \
             -f pkcs12 \
             -k "$KEYCHAIN_PATH"
-          
-          # Set keychain for codesign
+
           security list-keychain -d user -s "$KEYCHAIN_PATH"
           security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" "$KEYCHAIN_PATH"
-      
-      - name: Set version from tag
-        run: |
-          VERSION=${GITHUB_REF#refs/tags/v}
-          ./scripts/release/set-version.sh "$VERSION" Sources/Info.plist
-      
+
+          if [[ -n "${SIGNING_IDENTITY_OVERRIDE:-}" ]]; then
+            SIGNING_IDENTITY="$SIGNING_IDENTITY_OVERRIDE"
+          else
+            IDENTITY_OUTPUT="$(security find-identity -v -p codesigning "$KEYCHAIN_PATH")"
+            SIGNING_IDENTITY="$(awk -F'"' '/"Developer ID Application:/ { print $2; exit }' <<< "$IDENTITY_OUTPUT")"
+            if [[ -z "$SIGNING_IDENTITY" ]]; then
+              SIGNING_IDENTITY="$(awk -F'"' '/^[[:space:]]*[0-9]+\)[[:space:]]+[0-9A-Fa-f]{40}[[:space:]]+"/ { print $2; exit }' <<< "$IDENTITY_OUTPUT")"
+            fi
+          fi
+
+          if [[ -z "$SIGNING_IDENTITY" ]]; then
+            echo "Error: no codesigning identity found in $KEYCHAIN_PATH (and secrets.SIGNING_IDENTITY is unset)" >&2
+            exit 1
+          fi
+
+          {
+            echo "KEYCHAIN_PATH=$KEYCHAIN_PATH"
+            echo "SIGNING_IDENTITY=$SIGNING_IDENTITY"
+          } >> "$GITHUB_ENV"
+
       - name: Build and sign
-        env:
-          SIGNING_IDENTITY: "Developer ID Application: Roberto Teixeira (LS8YD2TR79)"
-        run: just sign
-      
-      - name: Notarize
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          VERSION="$VERSION" just sign
+
+      - name: Notarize app
         env:
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
@@ -77,55 +97,58 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Store credentials for notarytool
-          xcrun notarytool store-credentials "NOTARIZE_PROFILE" \
+          xcrun notarytool store-credentials "$NOTARIZE_PROFILE" \
             --apple-id "$APPLE_ID" \
             --team-id "$APPLE_TEAM_ID" \
-            --password "$APPLE_APP_PASSWORD"
-          
-          # Create zip for notarization
+            --password "$APPLE_APP_PASSWORD" \
+            --keychain "$KEYCHAIN_PATH"
+
+          trap 'rm -f .build/Reel.zip' EXIT
           ditto -c -k --keepParent .build/Reel.app .build/Reel.zip
-          
-          # Submit and wait, capture submission ID
           ./scripts/release/notarize-and-staple.sh .build/Reel.app .build/Reel.zip
-      
-      - name: Create DMG
+
+      - name: Create, sign, and notarize DMG
         env:
-          SIGNING_IDENTITY: "Developer ID Application: Roberto Teixeira (LS8YD2TR79)"
-        run: just _dmg-only _sign-dmg
-      
+          NOTARIZE_PROFILE: NOTARIZE_PROFILE
+        run: |
+          set -euo pipefail
+          just _dmg-only _sign-dmg _notarize-dmg
+
       - name: Sign update for Sparkle
         env:
           SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
         run: |
+          set -euo pipefail
           SIGN_UPDATE=".build/artifacts/sparkle/Sparkle/bin/sign_update"
-          SIGNATURE=$("$SIGN_UPDATE" .build/Reel.dmg --ed-key-file <(echo "$SPARKLE_PRIVATE_KEY"))
+          SIGNATURE="$(printf '%s' "$SPARKLE_PRIVATE_KEY" | "$SIGN_UPDATE" .build/Reel.dmg --ed-key-file -)"
           {
             echo "SPARKLE_SIGNATURE<<EOF"
             printf '%s\n' "$SIGNATURE"
-            echo EOF
+            echo "EOF"
           } >> "$GITHUB_ENV"
           echo "Sparkle signature generated"
-      
+
       - name: Generate appcast.xml
         run: |
-          VERSION=${GITHUB_REF#refs/tags/v}
+          set -euo pipefail
+          VERSION="${GITHUB_REF#refs/tags/v}"
           ./scripts/release/generate-appcast.sh "$VERSION" "$SPARKLE_SIGNATURE"
-      
+
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
           path: _site
-      
+
       - name: Generate changelog
         run: |
-          PREV_TAG=$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || echo "")
-          if [ -n "$PREV_TAG" ]; then
+          set -euo pipefail
+          PREV_TAG="$(git describe --tags --abbrev=0 HEAD^ 2>/dev/null || true)"
+          if [[ -n "$PREV_TAG" ]]; then
             git log --pretty=format:"- %s" "$PREV_TAG"..HEAD > release_notes.md
           else
             git log --pretty=format:"- %s" > release_notes.md
           fi
-      
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
