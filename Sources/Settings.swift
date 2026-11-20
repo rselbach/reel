@@ -44,6 +44,28 @@ enum RecentRecordingsLogic {
         guard !fileExists(path), let decoded = path.removingPercentEncoding else { return path }
         return decoded
     }
+
+    /// Preserves most-recent-first order while decoding legacy percent-encoded
+    /// paths, removing duplicates, and capping to `limit`.
+    static func normalizedPaths(
+        _ stored: [String],
+        limit: Int,
+        fileExists: (String) -> Bool
+    ) -> [String] {
+        guard limit > 0 else { return [] }
+        var seen: Set<String> = []
+        var result: [String] = []
+        result.reserveCapacity(min(stored.count, limit))
+        for rawPath in stored {
+            let path = storedPath(rawPath, fileExists: fileExists)
+            guard seen.insert(path).inserted else { continue }
+            result.append(path)
+            if result.count == limit {
+                break
+            }
+        }
+        return result
+    }
 }
 
 /// The recording target remembered between launches.
@@ -155,8 +177,9 @@ enum KeyCode {
 
 @MainActor
 class AppSettings: ObservableObject {
-    static let shared = AppSettings()
+    static let shared = AppSettings(defaults: .standard)
 
+    private let defaults: UserDefaults
     private var isSyncingLaunchAtLogin = false
 
     private enum DefaultsKey {
@@ -197,9 +220,9 @@ class AppSettings: ObservableObject {
 
     private func persist(_ value: Any?, key: String) {
         if let value {
-            UserDefaults.standard.set(value, forKey: key)
+            defaults.set(value, forKey: key)
         } else {
-            UserDefaults.standard.removeObject(forKey: key)
+            defaults.removeObject(forKey: key)
         }
     }
 
@@ -408,7 +431,7 @@ class AppSettings: ObservableObject {
     private func persistHotkey(_ combo: HotkeyCombo?, key: String) {
         do {
             let data = try JSONEncoder().encode(combo)
-            UserDefaults.standard.set(data, forKey: key)
+            defaults.set(data, forKey: key)
         } catch {
             logger.warning("Failed to persist \(key): \(error.localizedDescription)")
         }
@@ -496,12 +519,12 @@ class AppSettings: ObservableObject {
     @Published var rememberedTarget: RememberedTarget? {
         didSet {
             guard let rememberedTarget else {
-                UserDefaults.standard.removeObject(forKey: DefaultsKey.rememberedTarget)
+                defaults.removeObject(forKey: DefaultsKey.rememberedTarget)
                 return
             }
             do {
                 let data = try JSONEncoder().encode(rememberedTarget)
-                UserDefaults.standard.set(data, forKey: DefaultsKey.rememberedTarget)
+                defaults.set(data, forKey: DefaultsKey.rememberedTarget)
             } catch {
                 logger.warning("Failed to persist remembered recording target: \(error.localizedDescription)")
             }
@@ -960,8 +983,33 @@ class AppSettings: ObservableObject {
         return fallback
     }
 
-    private init() {
-        let defaults = UserDefaults.standard
+    static func deduplicatedHotkeys(_ loaded: [HotkeyAction: HotkeyCombo?]) -> [HotkeyAction: HotkeyCombo?] {
+        var resolved: [HotkeyAction: HotkeyCombo?] = [:]
+        var used: Set<HotkeyCombo> = []
+
+        for action in HotkeyAction.allCases {
+            guard let combo = loaded[action] ?? nil else {
+                resolved[action] = nil
+                continue
+            }
+            if used.insert(combo).inserted {
+                resolved[action] = combo
+            } else if used.insert(action.defaultCombo).inserted {
+                logger.warning(
+                    "Stored hotkey for \(action.displayName) collided with another action; falling back to default")
+                resolved[action] = action.defaultCombo
+            } else {
+                logger.warning(
+                    "Stored hotkey and default for \(action.displayName) collided with another action; turning off")
+                resolved[action] = nil
+            }
+        }
+
+        return resolved
+    }
+
+    init(defaults: UserDefaults) {
+        self.defaults = defaults
 
         self.launchAtLogin = defaults.bool(forKey: DefaultsKey.launchAtLogin)
         self.hasShownWelcome = defaults.bool(forKey: DefaultsKey.hasShownWelcome)
@@ -985,10 +1033,8 @@ class AppSettings: ObservableObject {
             if Self.isWritableDirectory(candidate) {
                 self.outputDirectory = candidate
             } else {
-                logger.warning("Stored outputDirectory is invalid, using default: \(path)")
-                let fallbackDirectory = Self.defaultOutputDirectory()
-                self.outputDirectory = fallbackDirectory
-                defaults.set(fallbackDirectory.path(percentEncoded: false), forKey: DefaultsKey.outputDirectory)
+                logger.warning("Stored outputDirectory is currently unwritable, using default in memory: \(path)")
+                self.outputDirectory = Self.defaultOutputDirectory()
             }
         } else {
             self.outputDirectory = Self.defaultOutputDirectory()
@@ -996,21 +1042,27 @@ class AppSettings: ObservableObject {
 
         self.askWhereToSave = defaults.bool(forKey: DefaultsKey.askWhereToSave)
 
-        self.recordingHotkey = Self.loadHotkey(
-            from: defaults,
-            key: DefaultsKey.recordingHotkey,
-            fallback: .default
-        )
-        self.discardHotkey = Self.loadHotkey(
-            from: defaults,
-            key: DefaultsKey.discardHotkey,
-            fallback: .discardDefault
-        )
-        self.pauseHotkey = Self.loadHotkey(
-            from: defaults,
-            key: DefaultsKey.pauseHotkey,
-            fallback: .pauseDefault
-        )
+        let loadedHotkeys: [HotkeyAction: HotkeyCombo?] = [
+            .toggleRecording: Self.loadHotkey(
+                from: defaults,
+                key: DefaultsKey.recordingHotkey,
+                fallback: .default
+            ),
+            .discardRecording: Self.loadHotkey(
+                from: defaults,
+                key: DefaultsKey.discardHotkey,
+                fallback: .discardDefault
+            ),
+            .pauseRecording: Self.loadHotkey(
+                from: defaults,
+                key: DefaultsKey.pauseHotkey,
+                fallback: .pauseDefault
+            ),
+        ]
+        let resolvedHotkeys = Self.deduplicatedHotkeys(loadedHotkeys)
+        self.recordingHotkey = resolvedHotkeys[.toggleRecording] ?? nil
+        self.discardHotkey = resolvedHotkeys[.discardRecording] ?? nil
+        self.pauseHotkey = resolvedHotkeys[.pauseRecording] ?? nil
 
         self.countdownDuration = Self.sanitizedCountdownDuration(
             defaults.object(forKey: DefaultsKey.countdownDuration) as? Int ?? 3
@@ -1038,9 +1090,11 @@ class AppSettings: ObservableObject {
         self.textOverlayPosition =
             TextOverlayPosition.fromStored(defaults.string(forKey: DefaultsKey.textOverlayPosition)) ?? .center
 
-        self.recentRecordingPaths = (defaults.stringArray(forKey: DefaultsKey.recentRecordings) ?? []).map {
-            RecentRecordingsLogic.storedPath($0, fileExists: FileManager.default.fileExists(atPath:))
-        }
+        self.recentRecordingPaths = RecentRecordingsLogic.normalizedPaths(
+            defaults.stringArray(forKey: DefaultsKey.recentRecordings) ?? [],
+            limit: Self.maxRecentRecordings,
+            fileExists: FileManager.default.fileExists(atPath:)
+        )
         self.rememberedTarget = Self.loadRememberedTarget(from: defaults)
     }
 

@@ -229,6 +229,12 @@ struct GeneralPane: View {
                 }
             }
         }
+        .onChange(of: settings.askWhereToSave) {
+            outputDirectoryError = nil
+        }
+        .onDisappear {
+            outputDirectoryError = nil
+        }
     }
 
     private func selectOutputDirectory() {
