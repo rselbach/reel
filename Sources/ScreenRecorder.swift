@@ -1663,6 +1663,15 @@ class ScreenRecorder: NSObject, ObservableObject {
         // recordings go while this one was running.
         let options = activeOptions ?? RecordingOptions(settings: settings)
 
+        let hasCapturedFrames = withFrameLock { frameState.frameWriter?.startTime != nil }
+        guard hasCapturedFrames else {
+            assetWriter?.cancelWriting()
+            if let tempURL = outputURL {
+                discardTempRecording(tempURL)
+            }
+            return
+        }
+
         await finishWriting()
 
         guard let tempURL = outputURL else { return }
@@ -2194,7 +2203,7 @@ extension ScreenRecorder: SCStreamOutput {
 
             withFrameLock {
                 guard !frameState.isCaptureStopped else { return }
-                guard var writer = frameState.frameWriter else { return }
+                guard let writer = frameState.frameWriter else { return }
                 guard !writer.hasWriteFailure else { return }
                 guard let outputTime = writer.pauses.outputTime(forCaptureTime: presentationTime),
                     writer.lastVideoOutputTime.map({ outputTime > $0 }) ?? true
@@ -2202,12 +2211,6 @@ extension ScreenRecorder: SCStreamOutput {
                 adjustedTime = outputTime
 
                 cameraBuffer = frameState.latestCameraPixelBuffer
-
-                if writer.startTime == nil {
-                    writer.startTime = adjustedTime
-                    writer.assetWriter.startSession(atSourceTime: adjustedTime)
-                    frameState.frameWriter = writer
-                }
 
                 guard writer.videoInput.isReadyForMoreMediaData else { return }
 
@@ -2290,6 +2293,11 @@ extension ScreenRecorder: SCStreamOutput {
                 guard !writer.hasWriteFailure else { return }
                 guard writer.videoInput.isReadyForMoreMediaData else { return }
 
+                let isFirstFrame = writer.startTime == nil
+                if isFirstFrame {
+                    writer.assetWriter.startSession(atSourceTime: adjustedTime)
+                }
+
                 if !writer.adaptor.append(frameToWrite, withPresentationTime: adjustedTime) {
                     let context =
                         usedCompositedBuffer
@@ -2299,6 +2307,10 @@ extension ScreenRecorder: SCStreamOutput {
                     frameState.frameWriter = writer
                     frameState.isCaptureStopped = true
                     return
+                }
+
+                if isFirstFrame {
+                    writer.startTime = adjustedTime
                 }
 
                 guard
