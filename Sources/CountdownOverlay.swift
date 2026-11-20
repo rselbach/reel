@@ -13,14 +13,45 @@ enum CountdownLayout {
         return Array((1...duration).reversed())
     }
 
-    /// Small HUD centered over the area about to be recorded.
-    static func hudFrame(referenceFrame: CGRect) -> CGRect {
-        CGRect(
-            x: referenceFrame.midX - hudSize / 2,
-            y: referenceFrame.midY - hudSize / 2,
+    /// Small HUD centered over the area about to be recorded, clamped inside
+    /// `screenFrame` when provided so windows near or past a display edge do
+    /// not clip the HUD off-screen.
+    static func hudFrame(referenceFrame: CGRect, screenFrame: CGRect? = nil) -> CGRect {
+        var x = referenceFrame.midX - hudSize / 2
+        var y = referenceFrame.midY - hudSize / 2
+        if let screenFrame {
+            let maxX = max(screenFrame.minX, screenFrame.maxX - hudSize)
+            let maxY = max(screenFrame.minY, screenFrame.maxY - hudSize)
+            x = min(max(x, screenFrame.minX), maxX)
+            y = min(max(y, screenFrame.minY), maxY)
+        }
+        return CGRect(
+            x: x,
+            y: y,
             width: hudSize,
             height: hudSize
         )
+    }
+
+    /// Picks the screen frame containing `referenceFrame`'s center, falling
+    /// back to the screen with the largest overlap and then the primary screen.
+    static func containingScreenFrame(for referenceFrame: CGRect, screens: [CGRect]) -> CGRect? {
+        let center = CGPoint(x: referenceFrame.midX, y: referenceFrame.midY)
+        if let containing = screens.first(where: { $0.contains(center) }) {
+            return containing
+        }
+        let bestOverlap =
+            screens
+            .map { screen -> (CGRect, CGFloat) in
+                let overlap = screen.intersection(referenceFrame)
+                let area = overlap.isNull ? 0 : overlap.width * overlap.height
+                return (screen, area)
+            }
+            .max { $0.1 < $1.1 }
+        if let bestOverlap, bestOverlap.1 > 0 {
+            return bestOverlap.0
+        }
+        return screens.first
     }
 
     /// The HUD never takes key focus, so Esc cannot reach it. Clicking it and
@@ -103,35 +134,62 @@ struct CountdownHUDView: View {
 class CountdownOverlay {
     private var window: CountdownWindow?
     private var cancelled = false
+    private var isShowing = false
+    private var sleepTask: Task<Void, Never>?
+    private let tickDuration: Duration
+    private let cancelDisplayDuration: Duration
+
+    init(
+        tickDuration: Duration = .seconds(1),
+        cancelDisplayDuration: Duration = .milliseconds(500)
+    ) {
+        self.tickDuration = tickDuration
+        self.cancelDisplayDuration = cancelDisplayDuration
+    }
 
     /// Cancels a countdown in progress (e.g. the hotkey was pressed again).
     func cancel() {
         cancelled = true
+        sleepTask?.cancel()
     }
 
     /// Shows the countdown and returns true when recording should start.
     /// A duration of 0 means the countdown is disabled and recording starts
-    /// immediately. Cancellable by clicking the HUD, pressing Esc, or calling
-    /// cancel().
+    /// immediately. Cancellable by clicking the HUD or calling cancel().
     func show(targetFrame: CGRect? = nil, duration: Int) async -> Bool {
         guard duration > 0 else { return true }
+        guard !isShowing else {
+            logger.warning("Countdown is already showing; ignoring overlapping call")
+            return false
+        }
+        isShowing = true
+        defer { isShowing = false }
         cancelled = false
 
         let referenceFrame: NSRect
+        let screenFrame: NSRect?
         if let targetFrame {
             guard let converted = cocoaRect(fromQuartz: targetFrame) else {
                 logger.error("Cannot show countdown: no screens available for coordinate conversion")
                 return false
             }
             referenceFrame = converted
+            screenFrame = CountdownLayout.containingScreenFrame(
+                for: converted,
+                screens: NSScreen.screens.map(\.frame)
+            )
         } else if let screen = NSScreen.main {
             referenceFrame = screen.frame
+            screenFrame = screen.frame
         } else {
             logger.error("Cannot show countdown: no target frame and no main screen available")
             return false
         }
 
-        let hudFrame = CountdownLayout.hudFrame(referenceFrame: referenceFrame)
+        let hudFrame = CountdownLayout.hudFrame(
+            referenceFrame: referenceFrame,
+            screenFrame: screenFrame
+        )
 
         let window = CountdownWindow(
             contentRect: hudFrame,
@@ -155,7 +213,7 @@ class CountdownOverlay {
         )
         let content = CountdownContentView(frame: NSRect(origin: .zero, size: hudFrame.size))
         content.onClick = { [weak self] in
-            self?.cancelled = true
+            self?.cancel()
         }
 
         // The blur system HUDs use, rather than a flat black box, darkened
@@ -194,39 +252,67 @@ class CountdownOverlay {
 
         defer {
             window.orderOut(nil)
+            window.close()
             self.window = nil
         }
 
+        let clock = ContinuousClock()
+        var nextDeadline = clock.now
         var interrupted = false
-        countdown: for count in CountdownLayout.sequence(duration: duration) {
-            if cancelled { break }
+
+        for count in CountdownLayout.sequence(duration: duration) {
+            if cancelled || Task.isCancelled {
+                interrupted = !cancelled
+                break
+            }
             withAnimation(.snappy) {
                 model.count = count
             }
             model.tickStart = Date()
-            // Sleep in short slices so cancellation reacts promptly.
-            for _ in 0..<10 {
-                if cancelled { break countdown }
-                do {
-                    try await Task.sleep(for: .milliseconds(100))
-                } catch {
-                    logger.warning("Countdown sleep interrupted: \(error.localizedDescription)")
-                    interrupted = true
-                    break countdown
-                }
+            nextDeadline = nextDeadline.advanced(by: tickDuration)
+
+            let completedTick = await waitUntil(deadline: nextDeadline, clock: clock)
+            if !completedTick {
+                interrupted = !cancelled
+                break
             }
         }
 
         if cancelled {
             model.isCancelled = true
-            do {
-                try await Task.sleep(for: .milliseconds(500))
-            } catch {
-                logger.warning("Countdown cancel display interrupted: \(error.localizedDescription)")
-            }
+            let displayDuration = cancelDisplayDuration
+            await Task<Void, Never> {
+                _ = try? await clock.sleep(for: displayDuration)
+            }.value
         }
 
         return !cancelled && !interrupted
+    }
+
+    private func waitUntil(
+        deadline: ContinuousClock.Instant,
+        clock: ContinuousClock
+    ) async -> Bool {
+        guard !cancelled, !Task.isCancelled else { return false }
+
+        let task = Task<Void, Never> { @MainActor in
+            _ = try? await clock.sleep(until: deadline)
+        }
+        sleepTask = task
+        defer {
+            if sleepTask == task {
+                sleepTask = nil
+            }
+            task.cancel()
+        }
+
+        await withTaskCancellationHandler {
+            await task.value
+        } onCancel: {
+            task.cancel()
+        }
+
+        return !cancelled && !Task.isCancelled
     }
 }
 

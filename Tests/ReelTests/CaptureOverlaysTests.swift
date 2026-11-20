@@ -212,4 +212,80 @@ final class CaptureOverlaysTests: XCTestCase {
 
         XCTAssertEqual(endedCalls, 0)
     }
+
+    @MainActor
+    func testCountdownHUDFrameClampsToContainingScreenEdges() {
+        let screen = CGRect(x: 0, y: 0, width: 1440, height: 900)
+        let hud = CountdownLayout.hudSize
+
+        let centered = CountdownLayout.hudFrame(
+            referenceFrame: CGRect(x: 400, y: 300, width: 400, height: 300),
+            screenFrame: screen
+        )
+        XCTAssertEqual(centered.midX, 600, accuracy: 0.001)
+        XCTAssertEqual(centered.midY, 450, accuracy: 0.001)
+
+        let offBottomLeft = CountdownLayout.hudFrame(
+            referenceFrame: CGRect(x: -100, y: -100, width: 120, height: 120),
+            screenFrame: screen
+        )
+        XCTAssertEqual(offBottomLeft.minX, screen.minX)
+        XCTAssertEqual(offBottomLeft.minY, screen.minY)
+        XCTAssertTrue(screen.contains(offBottomLeft))
+
+        let offTopRight = CountdownLayout.hudFrame(
+            referenceFrame: CGRect(x: 1380, y: 840, width: 160, height: 160),
+            screenFrame: screen
+        )
+        XCTAssertEqual(offTopRight.maxX, screen.maxX)
+        XCTAssertEqual(offTopRight.maxY, screen.maxY)
+        XCTAssertEqual(offTopRight.width, hud)
+        XCTAssertEqual(offTopRight.height, hud)
+        XCTAssertTrue(screen.contains(offTopRight))
+
+        let secondaryScreen = CGRect(x: 1440, y: 0, width: 1920, height: 1080)
+        let picked = CountdownLayout.containingScreenFrame(
+            for: CGRect(x: 1500, y: 100, width: 300, height: 200),
+            screens: [screen, secondaryScreen]
+        )
+        XCTAssertEqual(picked, secondaryScreen)
+
+        let overlapping = CountdownLayout.containingScreenFrame(
+            for: CGRect(x: -400, y: 100, width: 500, height: 200),
+            screens: [screen, secondaryScreen]
+        )
+        XCTAssertEqual(overlapping, screen)
+    }
+
+    @MainActor
+    func testCountdownRejectsOverlappingShowAndDisplaysCancelFeedbackWhenTaskCancelled() async {
+        let cancelDisplayDuration: Duration = .milliseconds(80)
+        let overlay = CountdownOverlay(
+            tickDuration: .seconds(5),
+            cancelDisplayDuration: cancelDisplayDuration
+        )
+
+        let firstTask = Task { @MainActor in
+            await overlay.show(duration: 3)
+        }
+
+        await Task.yield()
+
+        let overlappingResult = await overlay.show(duration: 3)
+        XCTAssertFalse(overlappingResult)
+
+        let clock = ContinuousClock()
+        let cancelStart = clock.now
+        // Mirror AppDelegate.cancelPendingRecordingStart(): parent Task is
+        // cancelled right before cancel() runs.
+        firstTask.cancel()
+        overlay.cancel()
+
+        let firstResult = await firstTask.value
+        let elapsed = cancelStart.duration(to: clock.now)
+
+        XCTAssertFalse(firstResult)
+        XCTAssertGreaterThanOrEqual(elapsed, .milliseconds(60))
+        XCTAssertLessThan(elapsed, .seconds(2))
+    }
 }
