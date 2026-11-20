@@ -152,4 +152,26 @@ final class CaptureEngineTests: XCTestCase {
         XCTAssertEqual(layout.y, expected.y, accuracy: 0.000_1)
         XCTAssertEqual(layout.sizeFraction, 0.25, accuracy: 0.000_1)
     }
+
+    @MainActor
+    func testStaleWriteFailureCallbackDoesNotOverwriteCurrentSessionError() async {
+        let recorder = ScreenRecorder()
+        let firstSession = recorder.advanceRecordingSessionID()
+        let secondSession = recorder.advanceRecordingSessionID()
+        XCTAssertGreaterThan(secondSession, firstSession)
+
+        await recorder.stopAfterWriteFailure(
+            sessionID: firstSession,
+            context: "Stale take 1",
+            reason: "Late callback"
+        )
+        XCTAssertNil(recorder.errorMessage)
+
+        await recorder.stopAfterWriteFailure(
+            sessionID: secondSession,
+            context: "Current take 2",
+            reason: "Disk full"
+        )
+        XCTAssertEqual(recorder.errorMessage, "Current take 2: Disk full")
+    }
 }

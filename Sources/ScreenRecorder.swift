@@ -292,6 +292,7 @@ struct RecordingOptions {
 }
 
 private struct FrameWriter {
+    let sessionID: UInt64
     let adaptor: AVAssetWriterInputPixelBufferAdaptor
     let videoInput: AVAssetWriterInput
     let microphoneInput: AVAssetWriterInput?
@@ -334,6 +335,10 @@ private final class FrameCaptureState {
     var currentCameraSizeFraction: CGFloat = 0.2
     /// Pointer state over the captured content, sampled on the main actor.
     var cursorState = CursorMetadataTrack.CapturedState.outside
+}
+
+private struct StreamRef: @unchecked Sendable {
+    let stream: SCStream
 }
 
 @MainActor
@@ -488,6 +493,7 @@ class ScreenRecorder: NSObject, ObservableObject {
         return availableDisplays.first { $0.displayID == selectedDisplayID }
     }
 
+    private(set) var recordingSessionID: UInt64 = 0
     private var stream: SCStream?
     private var assetWriter: AVAssetWriter?
     private var videoInput: AVAssetWriterInput?
@@ -803,10 +809,18 @@ class ScreenRecorder: NSObject, ObservableObject {
     }
 
     @discardableResult
+    func advanceRecordingSessionID() -> UInt64 {
+        recordingSessionID &+= 1
+        return recordingSessionID
+    }
+
+    @discardableResult
     func startRecording(overrides: RecordingOverrides = .none) async -> Bool {
         guard !isRecording, !isStarting else { return false }
         isStarting = true
         defer { finishStarting() }
+
+        let sessionID = advanceRecordingSessionID()
 
         // Reset stop signal for new recording
         resetCaptureStopSignal()
@@ -964,6 +978,7 @@ class ScreenRecorder: NSObject, ObservableObject {
             }
 
             try setupAssetWriter(
+                sessionID: sessionID,
                 width: outputWidth,
                 height: outputHeight,
                 options: options,
@@ -994,6 +1009,7 @@ class ScreenRecorder: NSObject, ObservableObject {
             errorMessage = nil
             return true
         } catch {
+            signalCaptureStop()
             if let stream {
                 do {
                     try await stream.stopCapture()
@@ -1006,6 +1022,7 @@ class ScreenRecorder: NSObject, ObservableObject {
     }
 
     private func failStart(_ message: String) -> Bool {
+        signalCaptureStop()
         errorMessage = message
         stopCaptureSessions()
         if let assetWriter, assetWriter.status == .writing {
@@ -1268,6 +1285,7 @@ class ScreenRecorder: NSObject, ObservableObject {
     }
 
     private func setupAssetWriter(
+        sessionID: UInt64,
         width: Int,
         height: Int,
         options: RecordingOptions,
@@ -1311,6 +1329,7 @@ class ScreenRecorder: NSObject, ObservableObject {
         )
 
         updateFrameWriter(
+            sessionID: sessionID,
             adaptor: adaptor,
             videoInput: videoInput,
             microphoneInput: microphoneInput,
@@ -1465,6 +1484,7 @@ class ScreenRecorder: NSObject, ObservableObject {
     }
 
     private func updateFrameWriter(
+        sessionID: UInt64,
         adaptor: AVAssetWriterInputPixelBufferAdaptor,
         videoInput: AVAssetWriterInput,
         microphoneInput: AVAssetWriterInput?,
@@ -1479,6 +1499,7 @@ class ScreenRecorder: NSObject, ObservableObject {
         applyCameraLayoutForRecordingStart(options: options)
         withFrameLock {
             frameState.frameWriter = FrameWriter(
+                sessionID: sessionID,
                 adaptor: adaptor,
                 videoInput: videoInput,
                 microphoneInput: microphoneInput,
@@ -1813,7 +1834,8 @@ class ScreenRecorder: NSObject, ObservableObject {
 
     /// Ends the recording after the stream stopped on its own (recorded window
     /// closed, display disconnected, screen locked).
-    private func handleStreamStopped(dueTo error: Error) async {
+    private func handleStreamStopped(_ stoppedStream: SCStream, dueTo error: Error) async {
+        guard self.stream === stoppedStream else { return }
         await endRecordingUnexpectedly(
             savedMessage:
                 "Recording stopped unexpectedly (\(error.localizedDescription)). The partial recording was saved.",
@@ -2109,13 +2131,14 @@ class ScreenRecorder: NSObject, ObservableObject {
         reason explicitReason: String? = nil
     ) {
         writer.hasWriteFailure = true
+        let sessionID = writer.sessionID
         let reason =
             explicitReason
             ?? writer.assetWriter.error?.localizedDescription
             ?? "Unknown writer error"
         logger.error("\(context, privacy: .public): \(reason, privacy: .public)")
         Task { @MainActor in
-            await stopAfterWriteFailure(context: context, reason: reason)
+            await stopAfterWriteFailure(sessionID: sessionID, context: context, reason: reason)
         }
     }
 
@@ -2123,7 +2146,8 @@ class ScreenRecorder: NSObject, ObservableObject {
     /// A failed writer cannot be finalized, so the file is discarded and the
     /// session ended instead of silently dropping every subsequent frame while
     /// the UI still claims to be recording.
-    private func stopAfterWriteFailure(context: String, reason: String) async {
+    func stopAfterWriteFailure(sessionID: UInt64, context: String, reason: String) async {
+        guard sessionID == recordingSessionID else { return }
         guard isRecording, !isStopping else {
             errorMessage = "\(context): \(reason)"
             return
@@ -2152,8 +2176,9 @@ class ScreenRecorder: NSObject, ObservableObject {
 
 extension ScreenRecorder: SCStreamDelegate {
     nonisolated func stream(_ stream: SCStream, didStopWithError error: Error) {
+        let stoppedStream = StreamRef(stream: stream)
         Task { @MainActor in
-            await handleStreamStopped(dueTo: error)
+            await handleStreamStopped(stoppedStream.stream, dueTo: error)
         }
     }
 }
@@ -2272,7 +2297,9 @@ extension ScreenRecorder: SCStreamOutput {
                     hasWindowFrame: snapshot.windowFrame != nil
                 ) {
                     withFrameLock {
+                        guard !frameState.isCaptureStopped else { return }
                         guard var writer = frameState.frameWriter else { return }
+                        guard !writer.hasWriteFailure else { return }
                         handleAppendFailure(
                             &writer,
                             context: "Failed to composite framed window",
