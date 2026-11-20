@@ -47,28 +47,32 @@ package-unsigned: dmg
 # Build the .app bundle
 build-app: build
     #!/usr/bin/env bash
-    set -e
+    set -euo pipefail
     rm -rf "{{ app_dir }}"
     mkdir -p "{{ app_dir }}/Contents/MacOS"
     mkdir -p "{{ app_dir }}/Contents/Resources"
     mkdir -p "{{ app_dir }}/Contents/Frameworks"
     cp .build/release/Reel "{{ app_dir }}/Contents/MacOS/"
     cp Sources/Info.plist "{{ app_dir }}/Contents/Info.plist"
-    latest_tag="$(git describe --tags --abbrev=0 --match 'v[0-9]*' 2>/dev/null || true)"
-    if [[ -n "${latest_tag}" ]]; then
-        ./scripts/release/set-version.sh "${latest_tag#v}" "{{ app_dir }}/Contents/Info.plist"
+    version="${VERSION:-}"
+    if [[ -n "${version}" ]]; then
+        ./scripts/release/set-version.sh "${version}" "{{ app_dir }}/Contents/Info.plist"
+    else
+        latest_tag="$(git describe --tags --abbrev=0 --match 'v[0-9]*.[0-9]*.[0-9]*' 2>/dev/null || true)"
+        if [[ -n "${latest_tag}" ]] && ./scripts/release/validate-release-tag.sh "${latest_tag#v}" >/dev/null 2>&1; then
+            ./scripts/release/set-version.sh "${latest_tag#v}" "{{ app_dir }}/Contents/Info.plist"
+        fi
     fi
-    # Inject git commit hash
-    GIT_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "dev")
-    /usr/libexec/PlistBuddy -c "Set :GitCommit $GIT_COMMIT" "{{ app_dir }}/Contents/Info.plist"
-    echo "Embedded commit: $GIT_COMMIT"
+    git_commit="$(git rev-parse --short HEAD 2>/dev/null || echo "dev")"
+    /usr/libexec/PlistBuddy -c "Set :GitCommit ${git_commit}" "{{ app_dir }}/Contents/Info.plist"
+    echo "Embedded commit: ${git_commit}"
     cp Sources/AppIcon.icns "{{ app_dir }}/Contents/Resources/"
-    sparkle_framework_path="$(find .build -type d -ipath "*/release/Sparkle.framework" | head -n 1)"
-    if [[ -z "$sparkle_framework_path" ]]; then
-        echo "Error: Sparkle.framework not found in .build"
+    sparkle_framework_path="$(find .build -type d -ipath "*/release/Sparkle.framework" -print -quit)"
+    if [[ -z "${sparkle_framework_path}" ]]; then
+        echo "Error: Sparkle.framework not found in .build" >&2
         exit 1
     fi
-    cp -R "$sparkle_framework_path" "{{ app_dir }}/Contents/Frameworks/"
+    cp -R "${sparkle_framework_path}" "{{ app_dir }}/Contents/Frameworks/"
     install_name_tool -add_rpath @executable_path/../Frameworks "{{ app_dir }}/Contents/MacOS/Reel"
     echo "Built: {{ app_dir }}"
     echo "Run: open '{{ app_dir }}'"
@@ -76,22 +80,43 @@ build-app: build
 # Code sign the app (requires SIGNING_IDENTITY env var)
 sign: build-app
     #!/usr/bin/env bash
-    set -e
+    set -euo pipefail
     if [[ -z "${SIGNING_IDENTITY:-}" ]]; then
-        echo "Error: SIGNING_IDENTITY not set"
-        echo "Find your identity with: security find-identity -v -p codesigning"
-        echo "Then: export SIGNING_IDENTITY='Developer ID Application: Your Name (TEAMID)'"
+        echo "Error: SIGNING_IDENTITY not set" >&2
+        echo "Find your identity with: security find-identity -v -p codesigning" >&2
+        echo "Then: export SIGNING_IDENTITY='Developer ID Application: Your Name (TEAMID)'" >&2
         exit 1
     fi
-    echo "Signing with: $SIGNING_IDENTITY"
-    codesign --force --options runtime --deep \
-        --sign "$SIGNING_IDENTITY" \
-        "{{ app_dir }}/Contents/Frameworks/Sparkle.framework"
-    codesign --force --options runtime --entitlements "{{ entitlements }}" \
-        --sign "$SIGNING_IDENTITY" \
+    sparkle_framework="{{ app_dir }}/Contents/Frameworks/Sparkle.framework"
+    if [[ ! -d "${sparkle_framework}" ]]; then
+        echo "Error: Sparkle.framework not found at ${sparkle_framework}" >&2
+        exit 1
+    fi
+    echo "Signing with: ${SIGNING_IDENTITY}"
+    if [[ -d "${sparkle_framework}/Versions/Current" ]]; then
+        sparkle_root="$(cd "${sparkle_framework}/Versions/Current" && pwd -P)"
+    else
+        sparkle_root="${sparkle_framework}"
+    fi
+    for component in \
+        "${sparkle_root}/XPCServices/Installer.xpc" \
+        "${sparkle_root}/XPCServices/Downloader.xpc" \
+        "${sparkle_root}/Autoupdate" \
+        "${sparkle_root}/Updater.app"; do
+        if [[ -e "${component}" ]]; then
+            codesign --force --options runtime --timestamp \
+                --sign "${SIGNING_IDENTITY}" \
+                "${component}"
+        fi
+    done
+    codesign --force --options runtime --timestamp \
+        --sign "${SIGNING_IDENTITY}" \
+        "${sparkle_framework}"
+    codesign --force --options runtime --timestamp --entitlements "{{ entitlements }}" \
+        --sign "${SIGNING_IDENTITY}" \
         "{{ app_dir }}/Contents/MacOS/Reel"
-    codesign --force --options runtime --entitlements "{{ entitlements }}" \
-        --sign "$SIGNING_IDENTITY" \
+    codesign --force --options runtime --timestamp --entitlements "{{ entitlements }}" \
+        --sign "${SIGNING_IDENTITY}" \
         "{{ app_dir }}"
     echo "Verifying signature..."
     codesign --verify --deep --strict --verbose=2 "{{ app_dir }}"
@@ -100,32 +125,32 @@ sign: build-app
 # Sign and notarize the app (requires SIGNING_IDENTITY and NOTARIZE_PROFILE env vars)
 notarize: sign
     #!/usr/bin/env bash
-    set -e
+    set -euo pipefail
     if [[ -z "${NOTARIZE_PROFILE:-}" ]]; then
-        echo "Error: NOTARIZE_PROFILE is not set"
+        echo "Error: NOTARIZE_PROFILE is not set" >&2
         exit 1
     fi
     zip_path=".build/{{ app_name }}.zip"
+    trap 'rm -f "${zip_path}"' EXIT
     echo "Creating zip for notarization..."
-    ditto -c -k --keepParent "{{ app_dir }}" "$zip_path"
-    ./scripts/release/notarize-and-staple.sh "{{ app_dir }}" "$zip_path"
-    rm "$zip_path"
+    ditto -c -k --keepParent "{{ app_dir }}" "${zip_path}"
+    ./scripts/release/notarize-and-staple.sh "{{ app_dir }}" "${zip_path}"
     echo "Notarization complete!"
 
 # Create a .dmg installer from existing app bundle (no rebuild)
 _dmg-only:
     #!/usr/bin/env bash
-    set -e
+    set -euo pipefail
     dmg_path=".build/{{ app_name }}.dmg"
     dmg_staging=".build/dmg"
     echo "Creating DMG..."
-    rm -rf "$dmg_staging" "$dmg_path"
-    mkdir -p "$dmg_staging"
-    cp -R "{{ app_dir }}" "$dmg_staging/"
-    ln -s /Applications "$dmg_staging/Applications"
-    diskutil image create from --format UDZO --volumeName "{{ app_name }}" "$dmg_staging" "$dmg_path"
-    rm -rf "$dmg_staging"
-    echo "Created: $dmg_path"
+    rm -rf "${dmg_staging}" "${dmg_path}"
+    mkdir -p "${dmg_staging}"
+    cp -R "{{ app_dir }}" "${dmg_staging}/"
+    ln -s /Applications "${dmg_staging}/Applications"
+    diskutil image create from --format UDZO --volumeName "{{ app_name }}" "${dmg_staging}" "${dmg_path}"
+    rm -rf "${dmg_staging}"
+    echo "Created: ${dmg_path}"
 
 # Create a .dmg installer (unsigned)
 dmg: build-app _dmg-only
@@ -133,18 +158,38 @@ dmg: build-app _dmg-only
 # Sign an existing DMG (requires SIGNING_IDENTITY env var)
 _sign-dmg:
     #!/usr/bin/env bash
-    set -e
+    set -euo pipefail
     dmg_path=".build/{{ app_name }}.dmg"
     if [[ -z "${SIGNING_IDENTITY:-}" ]]; then
-        echo "Error: SIGNING_IDENTITY not set"
+        echo "Error: SIGNING_IDENTITY not set" >&2
         exit 1
     fi
     echo "Signing DMG..."
-    codesign --force --sign "$SIGNING_IDENTITY" "$dmg_path"
-    echo "Signed: $dmg_path"
+    codesign --force --timestamp --sign "${SIGNING_IDENTITY}" "${dmg_path}"
+    echo "Signed: ${dmg_path}"
+
+# Notarize and staple an existing DMG (requires NOTARIZE_PROFILE env var)
+_notarize-dmg:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    dmg_path=".build/{{ app_name }}.dmg"
+    if [[ -z "${NOTARIZE_PROFILE:-}" ]]; then
+        echo "Error: NOTARIZE_PROFILE is not set" >&2
+        exit 1
+    fi
+    if [[ ! -f "${dmg_path}" ]]; then
+        echo "Error: DMG not found at ${dmg_path}" >&2
+        exit 1
+    fi
+    echo "Notarizing DMG..."
+    ./scripts/release/notarize-and-staple.sh "${dmg_path}" "${dmg_path}"
+    echo "Notarized and stapled: ${dmg_path}"
 
 # Create a signed .dmg installer (requires SIGNING_IDENTITY env var)
 dmg-signed: sign _dmg-only _sign-dmg
+
+# Create a signed, notarized, and stapled .dmg installer
+dmg-notarized: notarize _dmg-only _sign-dmg _notarize-dmg
 
 # Open the built app
 run: build-app
@@ -206,6 +251,7 @@ help:
     @echo "  notarize       Sign and notarize the app"
     @echo "  dmg            Create unsigned .dmg"
     @echo "  dmg-signed     Create signed .dmg"
+    @echo "  dmg-notarized  Create signed, notarized, and stapled .dmg"
     @echo "  validate-docs  Validate feature tracker docs"
     @echo "  generate-checklist Regenerate manual checklist from CSV"
     @echo "  record-manual  Record manual validation result in CSV"
@@ -217,5 +263,6 @@ help:
     @echo "  list-identities Show available signing certs"
     @echo ""
     @echo "Environment variables:"
+    @echo "  VERSION            Override bundle version (X.Y.Z)"
     @echo "  SIGNING_IDENTITY   Developer ID Application certificate"
     @echo "  NOTARIZE_PROFILE   Keychain profile for notarytool"
