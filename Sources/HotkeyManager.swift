@@ -72,33 +72,90 @@ private let hotkeyEventHandler: EventHandlerUPP = { _, event, userData in
 /// key combination system-wide by design.
 @MainActor
 class HotkeyManager {
+    @MainActor
+    struct RegistrationBackend {
+        var installEventHandler: (HotkeyManager) -> (status: OSStatus, remove: (() -> Void)?)
+        var registerHotKey: (HotkeyAction, AppSettings.HotkeyCombo) -> (status: OSStatus, unregister: (() -> Void)?)
+
+        static let live = RegistrationBackend(
+            installEventHandler: { manager in
+                var eventTypes = [
+                    EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed)),
+                    EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyReleased)),
+                ]
+                var ref: EventHandlerRef?
+                let selfPtr = Unmanaged.passUnretained(manager).toOpaque()
+                let status = InstallEventHandler(
+                    GetEventDispatcherTarget(),
+                    hotkeyEventHandler,
+                    eventTypes.count,
+                    &eventTypes,
+                    selfPtr,
+                    &ref
+                )
+                return (status, ref.map { handler in { RemoveEventHandler(handler) } })
+            },
+            registerHotKey: { action, combo in
+                let hotKeyID = EventHotKeyID(signature: HotkeyManager.signature, id: action.rawValue)
+                var ref: EventHotKeyRef?
+                let status = RegisterEventHotKey(
+                    UInt32(combo.keyCode),
+                    CarbonModifierTranslation.carbonModifiers(fromEventModifiers: combo.modifiers),
+                    hotKeyID,
+                    GetEventDispatcherTarget(),
+                    0,
+                    &ref
+                )
+                return (status, ref.map { hotKeyRef in { UnregisterEventHotKey(hotKeyRef) } })
+            }
+        )
+    }
+
     static let shared = HotkeyManager()
+    static let signature: OSType = 0x5245_454C  // "REEL"
 
     /// Fired once per press of a registered shortcut.
     var onTrigger: ((HotkeyAction) -> Void)?
     var onHotkeyDisabled: ((String) -> Void)?
 
-    private var hotKeyRefs: [HotkeyAction: EventHotKeyRef] = [:]
+    private let backend: RegistrationBackend
+    private let workspaceNotificationCenter: NotificationCenter
+    private let comboProvider: (HotkeyAction) -> AppSettings.HotkeyCombo?
+    private var unregisterHandlers: [HotkeyAction: () -> Void] = [:]
     private var combos: [HotkeyAction: AppSettings.HotkeyCombo] = [:]
-    private var eventHandler: EventHandlerRef?
+    private var removeEventHandler: (() -> Void)?
+    private var workspaceObservers: [NSObjectProtocol] = []
     private var isStarted = false
     private var suspensionCount = 0
     // Carbon delivers repeated kEventHotKeyPressed events while a key is held
     // (auto-repeat); only the first press before a release should fire.
     private var heldActions: Set<HotkeyAction> = []
 
-    private static let signature: OSType = 0x5245_454C  // "REEL"
+    init(
+        backend: RegistrationBackend = .live,
+        workspaceNotificationCenter: NotificationCenter = NSWorkspace.shared.notificationCenter,
+        comboProvider: @escaping (HotkeyAction) -> AppSettings.HotkeyCombo? = { AppSettings.shared.hotkey(for: $0) }
+    ) {
+        self.backend = backend
+        self.workspaceNotificationCenter = workspaceNotificationCenter
+        self.comboProvider = comboProvider
+    }
 
-    private init() {}
+    isolated deinit {
+        stop()
+    }
 
     func start() {
         guard !isStarted else { return }
         guard installEventHandlerIfNeeded() else { return }
         isStarted = true
+        installWorkspaceObserversIfNeeded()
 
         for action in HotkeyAction.allCases {
-            combos[action] = AppSettings.shared.hotkey(for: action)
-            _ = register(action)
+            combos[action] = comboProvider(action)
+            if suspensionCount == 0 {
+                _ = register(action)
+            }
         }
     }
 
@@ -106,10 +163,12 @@ class HotkeyManager {
         for action in HotkeyAction.allCases {
             unregister(action)
         }
-        if let eventHandler {
-            RemoveEventHandler(eventHandler)
-            self.eventHandler = nil
+        removeWorkspaceObservers()
+        if let removeEventHandler {
+            removeEventHandler()
+            self.removeEventHandler = nil
         }
+        heldActions.removeAll()
         isStarted = false
     }
 
@@ -130,8 +189,14 @@ class HotkeyManager {
         suspensionCount -= 1
         guard suspensionCount == 0, isStarted else { return }
         for action in HotkeyAction.allCases {
-            _ = register(action)
+            _ = register(action, notifyOnFailure: false)
         }
+    }
+
+    /// Drops latched press state when macOS may have dropped the matching key
+    /// release (for example, fast user switching or display sleep).
+    func clearHeldActions() {
+        heldActions.removeAll()
     }
 
     /// Re-registers one shortcut after the user records a new combination,
@@ -143,14 +208,17 @@ class HotkeyManager {
             return true
         }
         guard combo.isUsableGlobalShortcut else { return false }
+        guard !combos.contains(where: { $0.key != action && $0.value == combo }) else {
+            return false
+        }
 
         let previousCombo = combos[action]
         combos[action] = combo
-        guard isStarted else { return true }
+        guard isStarted, suspensionCount == 0 else { return true }
         guard register(action, notifyOnFailure: false) else {
             combos[action] = previousCombo
             if previousCombo != nil {
-                _ = register(action)
+                _ = register(action, notifyOnFailure: false)
             }
             return false
         }
@@ -177,7 +245,7 @@ class HotkeyManager {
         for (action, combo) in replacements {
             combos[action] = combo
         }
-        guard isStarted else { return true }
+        guard isStarted, suspensionCount == 0 else { return true }
 
         for action in HotkeyAction.allCases {
             unregister(action)
@@ -189,7 +257,7 @@ class HotkeyManager {
                 }
                 combos = previousCombos
                 for previousAction in HotkeyAction.allCases where previousCombos[previousAction] != nil {
-                    _ = register(previousAction)
+                    _ = register(previousAction, notifyOnFailure: false)
                 }
                 return false
             }
@@ -219,27 +287,42 @@ class HotkeyManager {
     }
 
     private func installEventHandlerIfNeeded() -> Bool {
-        guard eventHandler == nil else { return true }
+        guard removeEventHandler == nil else { return true }
 
-        var eventTypes = [
-            EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyPressed)),
-            EventTypeSpec(eventClass: OSType(kEventClassKeyboard), eventKind: UInt32(kEventHotKeyReleased)),
-        ]
-        let selfPtr = Unmanaged.passUnretained(self).toOpaque()
-        let status = InstallEventHandler(
-            GetEventDispatcherTarget(),
-            hotkeyEventHandler,
-            eventTypes.count,
-            &eventTypes,
-            selfPtr,
-            &eventHandler
-        )
-        if status != noErr {
-            logger.error("InstallEventHandler failed (status: \(status))")
-            onHotkeyDisabled?("Failed to enable global hotkeys (error \(status)).")
+        let result = backend.installEventHandler(self)
+        guard result.status == noErr, let remove = result.remove else {
+            logger.error("InstallEventHandler failed (status: \(result.status))")
+            onHotkeyDisabled?("Failed to enable global hotkeys (error \(result.status)).")
             return false
         }
+        removeEventHandler = remove
         return true
+    }
+
+    private func installWorkspaceObserversIfNeeded() {
+        guard workspaceObservers.isEmpty else { return }
+        let names: [Notification.Name] = [
+            NSWorkspace.sessionDidResignActiveNotification,
+            NSWorkspace.screensDidSleepNotification,
+        ]
+        workspaceObservers = names.map { name in
+            workspaceNotificationCenter.addObserver(
+                forName: name,
+                object: nil,
+                queue: .main
+            ) { [weak self] _ in
+                MainActor.assumeIsolated {
+                    self?.clearHeldActions()
+                }
+            }
+        }
+    }
+
+    private func removeWorkspaceObservers() {
+        for observer in workspaceObservers {
+            workspaceNotificationCenter.removeObserver(observer)
+        }
+        workspaceObservers.removeAll()
     }
 
     private func register(_ action: HotkeyAction, notifyOnFailure: Bool = true) -> Bool {
@@ -250,19 +333,10 @@ class HotkeyManager {
         }
 
         unregister(action)
-        let hotKeyID = EventHotKeyID(signature: Self.signature, id: action.rawValue)
-        var ref: EventHotKeyRef?
-        let status = RegisterEventHotKey(
-            UInt32(combo.keyCode),
-            CarbonModifierTranslation.carbonModifiers(fromEventModifiers: combo.modifiers),
-            hotKeyID,
-            GetEventDispatcherTarget(),
-            0,
-            &ref
-        )
+        let result = backend.registerHotKey(action, combo)
 
-        guard status == noErr, let ref else {
-            logger.error("RegisterEventHotKey failed for \(action.rawValue) (status: \(status))")
+        guard result.status == noErr, let unregister = result.unregister else {
+            logger.error("RegisterEventHotKey failed for \(action.rawValue) (status: \(result.status))")
             if notifyOnFailure {
                 onHotkeyDisabled?(
                     "Failed to register the global shortcut \(combo.displayString). It may already be in use by another app."
@@ -271,14 +345,14 @@ class HotkeyManager {
             return false
         }
 
-        hotKeyRefs[action] = ref
+        unregisterHandlers[action] = unregister
         heldActions.remove(action)
         return true
     }
 
     private func unregister(_ action: HotkeyAction) {
-        guard let ref = hotKeyRefs.removeValue(forKey: action) else { return }
-        UnregisterEventHotKey(ref)
+        guard let unregister = unregisterHandlers.removeValue(forKey: action) else { return }
+        unregister()
         heldActions.remove(action)
     }
 }

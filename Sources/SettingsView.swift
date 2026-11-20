@@ -590,11 +590,15 @@ struct ShortcutsPane: View {
                     CaptionText(SettingsText.shortcutHelp)
                     Spacer()
                     Button(SettingsText.restoreDefaultShortcuts) {
+                        recordingAction = nil
                         settings.resetHotkeys()
                     }
                     .disabled(settings.usesDefaultHotkeys)
                 }
             }
+        }
+        .onDisappear {
+            recordingAction = nil
         }
     }
 }
@@ -707,20 +711,29 @@ enum HotkeyRecorderLogic {
 class HotkeyRecorderView: NSView {
     var onHotkeyRecorded: ((UInt16, UInt32) -> Void)?
     var onCancel: (() -> Void)?
-    private nonisolated(unsafe) var monitor: Any?
+    private let hotkeyManager: HotkeyManager
+    private var monitor: Any?
 
-    deinit {
+    init(frame frameRect: NSRect = .zero, hotkeyManager: HotkeyManager = .shared) {
+        self.hotkeyManager = hotkeyManager
+        super.init(frame: frameRect)
+    }
+
+    required init?(coder: NSCoder) {
+        self.hotkeyManager = .shared
+        super.init(coder: coder)
+    }
+
+    isolated deinit {
         if let monitor {
             NSEvent.removeMonitor(monitor)
-            Task { @MainActor in
-                HotkeyManager.shared.resume()
-            }
+            hotkeyManager.resume()
         }
     }
 
     func startRecording() {
         guard monitor == nil else { return }
-        HotkeyManager.shared.suspend()
+        hotkeyManager.suspend()
         monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { [weak self] event in
             switch HotkeyRecorderLogic.decision(keyCode: event.keyCode, modifierFlags: event.modifierFlags) {
             case .cancel:
@@ -746,15 +759,16 @@ class HotkeyRecorderView: NSView {
         guard let monitor else { return }
         NSEvent.removeMonitor(monitor)
         self.monitor = nil
-        HotkeyManager.shared.resume()
+        hotkeyManager.resume()
     }
 
     /// Closing Settings or switching tabs mid-capture must not leave the
-    /// global shortcuts suspended.
+    /// global shortcuts suspended or the row wedged in capture mode.
     override func viewWillMove(toWindow newWindow: NSWindow?) {
         super.viewWillMove(toWindow: newWindow)
-        if newWindow == nil {
+        if newWindow == nil, monitor != nil {
             stopRecording()
+            onCancel?()
         }
     }
 }
