@@ -465,7 +465,8 @@ class AppSettings: ObservableObject {
     }
 
     static func sanitizedCameraSizeFraction(_ fraction: CGFloat) -> CGFloat {
-        min(max(fraction, CameraOverlayResizeLogic.minFraction), CameraOverlayResizeLogic.maxFraction)
+        guard fraction.isFinite else { return CameraOverlaySize.medium.fraction }
+        return min(max(fraction, CameraOverlayResizeLogic.minFraction), CameraOverlayResizeLogic.maxFraction)
     }
 
     /// The preset matching the current fraction, or nil for a custom size
