@@ -33,6 +33,56 @@ final class CameraOverlayCompositingTests: XCTestCase {
         XCTAssertLessThan(retina.pixel(x: 200, y: 75).red, frame.pixel(x: 200, y: 75).red)
     }
 
+    func testUnrenderableCameraOverlayIsSkippedInsteadOfFailingFramedComposite() throws {
+        let screen = try makeSolidBuffer(width: screenSize.width, height: screenSize.height, bgra: (255, 255, 255))
+        let camera = try makeSolidBuffer(width: 64, height: 48, bgra: (0, 0, 255))
+        let compositor = FrameCompositor(ciContext: CIContext(options: [.workingColorSpace: NSNull()]))
+        let windowFrame = FrameCompositor.WindowFrame(
+            canvasSize: CGSize(width: 440, height: 340),
+            contentOrigin: CGPoint(x: 20, y: 20),
+            cornerRadius: 8,
+            shadowBlur: 0,
+            background: .solid(CIColor(red: 0, green: 0, blue: 0, alpha: 1))
+        )
+        let invalidCamera = FrameCompositor.CameraOverlay(
+            buffer: camera,
+            x: 0.5,
+            y: 0.5,
+            sizeFraction: 0,
+            shape: .circle,
+            mirrored: false,
+            pixelsPerPoint: 1
+        )
+
+        let framedOutput = compositor.composite(
+            screenBuffer: screen,
+            camera: invalidCamera,
+            text: nil,
+            click: nil,
+            windowFrame: windowFrame,
+            bufferPool: nil
+        )
+        let rendered = RenderedFrame(buffer: try XCTUnwrap(framedOutput))
+        XCTAssertEqual(CVPixelBufferGetWidth(rendered.buffer), 440)
+        XCTAssertEqual(CVPixelBufferGetHeight(rendered.buffer), 340)
+        // Center shows the white screen content instead of the skipped red camera.
+        XCTAssertEqual(rendered.pixel(x: 220, y: 170).red, 255)
+        XCTAssertEqual(rendered.pixel(x: 220, y: 170).green, 255)
+        XCTAssertEqual(rendered.pixel(x: 220, y: 170).blue, 255)
+
+        // With no other overlay or window frame, skipping the camera returns nil
+        // so the caller can fall back to the untouched screen buffer.
+        let screenOnlyOutput = compositor.composite(
+            screenBuffer: screen,
+            camera: invalidCamera,
+            text: nil,
+            click: nil,
+            windowFrame: nil,
+            bufferPool: nil
+        )
+        XCTAssertNil(screenOnlyOutput)
+    }
+
     private func composite(
         shape: AppSettings.CameraOverlayShape,
         pixelsPerPoint: CGFloat

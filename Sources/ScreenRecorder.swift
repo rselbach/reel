@@ -1023,6 +1023,8 @@ class ScreenRecorder: NSObject, ObservableObject {
 
     private func failStart(_ message: String) -> Bool {
         signalCaptureStop()
+        stopLowSpaceMonitor()
+        stopCursorSampling()
         errorMessage = message
         stopCaptureSessions()
         if let assetWriter, assetWriter.status == .writing {
@@ -1052,6 +1054,8 @@ class ScreenRecorder: NSObject, ObservableObject {
 
         // Signal callbacks to stop processing immediately
         signalCaptureStop()
+        stopLowSpaceMonitor()
+        stopCursorSampling()
 
         stopCaptureSessions()
 
@@ -1110,6 +1114,8 @@ class ScreenRecorder: NSObject, ObservableObject {
         defer { finishStopping() }
 
         signalCaptureStop()
+        stopLowSpaceMonitor()
+        stopCursorSampling()
         stopCaptureSessions()
 
         do {
@@ -1617,6 +1623,7 @@ class ScreenRecorder: NSObject, ObservableObject {
         guard overrides.recordCamera ?? settings.recordCamera else { return false }
         guard cameraCaptureSession == nil else { return true }
         guard await ensureAVPermission(for: .video) else { return false }
+        guard cameraCaptureSession == nil else { return true }
         guard let device = settings.selectedCamera else { return false }
 
         do {
@@ -1626,9 +1633,10 @@ class ScreenRecorder: NSObject, ObservableObject {
             return false
         }
 
+        guard let session = cameraCaptureSession else { return false }
         let running = captureSessionQueue.sync { () -> Bool in
-            cameraCaptureSession?.startRunning()
-            return cameraCaptureSession?.isRunning ?? false
+            session.startRunning()
+            return session.isRunning
         }
         if !running {
             discardCameraPreview()
@@ -1643,7 +1651,7 @@ class ScreenRecorder: NSObject, ObservableObject {
 
     /// Tears down a preview-only camera session, for a cancelled countdown.
     func discardCameraPreview() {
-        guard !isRecording else { return }
+        guard !isRecording, !isStarting else { return }
         hasCountdownCameraPreview = false
         disableCameraCaptureAfterStartFailure()
     }
@@ -1786,7 +1794,9 @@ class ScreenRecorder: NSObject, ObservableObject {
         from tempURL: URL,
         to finalURL: URL
     ) throws -> FileReplacementWarning? {
-        if finalURL == tempURL {
+        if finalURL.resolvingSymlinksInPath().standardizedFileURL
+            == tempURL.resolvingSymlinksInPath().standardizedFileURL
+        {
             logger.info("Recording already at final location, skipping move")
             return nil
         }
@@ -1859,6 +1869,8 @@ class ScreenRecorder: NSObject, ObservableObject {
         defer { finishStopping() }
 
         signalCaptureStop()
+        stopLowSpaceMonitor()
+        stopCursorSampling()
         stopCaptureSessions()
 
         if stoppingStream {
@@ -2156,6 +2168,8 @@ class ScreenRecorder: NSObject, ObservableObject {
         defer { finishStopping() }
 
         signalCaptureStop()
+        stopLowSpaceMonitor()
+        stopCursorSampling()
         stopCaptureSessions()
         do {
             try await stream?.stopCapture()

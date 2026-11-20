@@ -174,4 +174,56 @@ final class CaptureEngineTests: XCTestCase {
         )
         XCTAssertEqual(recorder.errorMessage, "Current take 2: Disk full")
     }
+
+    func testFileReplacementCommitTreatsSymlinkedSameFileAsNoOp() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("reel-greendale-symlink-\(UUID().uuidString)")
+        let realDir = root.appendingPathComponent("real")
+        let linkDir = root.appendingPathComponent("link")
+        try FileManager.default.createDirectory(at: realDir, withIntermediateDirectories: true)
+        addTeardownBlock {
+            if FileManager.default.fileExists(atPath: root.path(percentEncoded: false)) {
+                try FileManager.default.removeItem(at: root)
+            }
+        }
+        try FileManager.default.createSymbolicLink(at: linkDir, withDestinationURL: realDir)
+
+        let realFile = realDir.appendingPathComponent("troy-take.mp4")
+        let symlinkedFile = linkDir.appendingPathComponent("troy-take.mp4")
+        let payload = Data("greendale-recording".utf8)
+        try payload.write(to: realFile)
+
+        let warning = try FileReplacement.commit(tempURL: realFile, to: symlinkedFile)
+        XCTAssertNil(warning)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: realFile.path(percentEncoded: false)))
+        XCTAssertEqual(try Data(contentsOf: realFile), payload)
+    }
+
+    func testAvailableCapacityWalksUpToNearestExistingAncestor() throws {
+        let missingDirectory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("reel-missing-\(UUID().uuidString)")
+            .appendingPathComponent("nested")
+            .appendingPathComponent("study-room")
+
+        XCTAssertFalse(FileManager.default.fileExists(atPath: missingDirectory.path(percentEncoded: false)))
+        let capacity = RecordingFileStore.availableCapacity(at: missingDirectory)
+        let bytes = try XCTUnwrap(capacity)
+        XCTAssertGreaterThan(bytes, 0)
+    }
+
+    func testAudioLevelScaleSelectsLoudestFiniteChannel() {
+        XCTAssertEqual(AudioLevelScale.normalized(channelDecibels: []), 0)
+        XCTAssertEqual(AudioLevelScale.normalized(channelDecibels: [-.infinity, .nan]), 0)
+        // Channel 1 silent/unplugged, channel 2 active (-12 dB -> 0.8).
+        XCTAssertEqual(
+            AudioLevelScale.normalized(channelDecibels: [-.infinity, -12]),
+            0.8,
+            accuracy: 0.000_1
+        )
+        XCTAssertEqual(
+            AudioLevelScale.normalized(channelDecibels: [-54, -6, -30]),
+            0.9,
+            accuracy: 0.000_1
+        )
+    }
 }

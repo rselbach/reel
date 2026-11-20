@@ -19,6 +19,13 @@ enum AudioLevelScale {
         return (clamped - floorDecibels) / -floorDecibels
     }
 
+    /// Maps all audio channels onto 0...1 using the loudest finite channel,
+    /// so a microphone on channel 2 of a stereo interface still registers.
+    static func normalized(channelDecibels: [Float]) -> Float {
+        guard let loudest = channelDecibels.filter(\.isFinite).max() else { return 0 }
+        return normalized(decibels: loudest)
+    }
+
     /// True once the input is loud enough to be obviously working, used to
     /// decide whether the meter reads as live.
     static func isAudible(level: Float) -> Bool {
@@ -49,6 +56,15 @@ final class AudioLevelMonitor: ObservableObject {
 
     /// Polls fast enough to look continuous without being a busy loop.
     private static let refreshInterval: TimeInterval = 1.0 / 20
+
+    isolated deinit {
+        startTask?.cancel()
+        timer?.invalidate()
+        let session = self.session
+        sessionQueue.async {
+            session?.stopRunning()
+        }
+    }
 
     func start(device: AVCaptureDevice?) {
         stop()
@@ -175,11 +191,11 @@ final class AudioLevelMonitor: ObservableObject {
     }
 
     private func sampleLevel() {
-        guard let channel = output?.connection(with: .audio)?.audioChannels.first else {
+        guard let channels = output?.connection(with: .audio)?.audioChannels, !channels.isEmpty else {
             level = 0
             return
         }
-        level = AudioLevelScale.normalized(decibels: channel.averagePowerLevel)
+        level = AudioLevelScale.normalized(channelDecibels: channels.map(\.averagePowerLevel))
     }
 }
 

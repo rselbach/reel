@@ -292,11 +292,12 @@ final class FrameCompositor: @unchecked Sendable {
         }
 
         if let camera {
-            guard let cameraOverlay = makeCameraOverlay(camera: camera, contentRect: contentRect) else {
-                return nil
+            if let cameraOverlay = makeCameraOverlay(camera: camera, contentRect: contentRect) {
+                composited = cameraOverlay.composited(over: composited)
+                didComposite = true
+            } else {
+                logger.warning("Could not build camera overlay; skipping camera for this frame")
             }
-            composited = cameraOverlay.composited(over: composited)
-            didComposite = true
         }
 
         if let click, let clickImage = makeClickHighlight(click, contentRect: contentRect) {

@@ -140,7 +140,9 @@ enum FileReplacement {
         to outputURL: URL,
         fileManager: FileManager = .default
     ) throws -> FileReplacementWarning? {
-        if tempURL == outputURL {
+        if tempURL.resolvingSymlinksInPath().standardizedFileURL
+            == outputURL.resolvingSymlinksInPath().standardizedFileURL
+        {
             return nil
         }
 
@@ -241,17 +243,32 @@ enum RecordingFileStore {
     }
 
     /// Free space the system is willing to give up for important user data.
-    /// Returns nil when the volume cannot be queried (a missing directory,
-    /// most often), which callers treat as "do not block".
-    static func availableCapacity(at url: URL) -> Int64? {
+    /// Walks up to the nearest existing ancestor when `url` does not exist yet.
+    /// Returns nil when the volume cannot be queried, which callers treat as
+    /// "do not block".
+    static func availableCapacity(at url: URL, fileManager: FileManager = .default) -> Int64? {
+        let targetURL = existingAncestor(for: url, fileManager: fileManager)
         do {
-            let values = try url.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
+            let values = try targetURL.resourceValues(forKeys: [.volumeAvailableCapacityForImportantUsageKey])
             return values.volumeAvailableCapacityForImportantUsage
         } catch {
             logger.warning(
-                "Could not read free space for \(url.path(percentEncoded: false)): \(error.localizedDescription)")
+                "Could not read free space for \(targetURL.path(percentEncoded: false)): \(error.localizedDescription)"
+            )
             return nil
         }
+    }
+
+    private static func existingAncestor(for url: URL, fileManager: FileManager) -> URL {
+        var candidate = url.standardizedFileURL
+        while !fileManager.fileExists(atPath: candidate.path(percentEncoded: false)) {
+            let parent = candidate.deletingLastPathComponent().standardizedFileURL
+            if parent == candidate {
+                break
+            }
+            candidate = parent
+        }
+        return candidate
     }
 
     /// Removes a temporary recording that will never reach the user.
