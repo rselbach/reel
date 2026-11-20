@@ -1077,10 +1077,17 @@ struct PostRecordingTimelineView: View {
                     origin: playheadDragOrigin ?? currentSourceTime,
                     translation: value.translation.width
                 )
-                onSeek(newTime)
+                onScrub(newTime)
             }
-            .onEnded { _ in
+            .onEnded { value in
+                let origin = playheadDragOrigin ?? currentSourceTime
                 playheadDragOrigin = nil
+                onScrub(nil)
+                let finalTime = scale.translatedSourceTime(
+                    origin: origin,
+                    translation: value.translation.width
+                )
+                onSeek(finalTime)
             }
     }
 

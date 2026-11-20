@@ -143,6 +143,30 @@ final class PostRecordingEditorTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(atPath: freshFolder.path))
     }
 
+    func testShouldDebounceSaveOnlyForContinuousZoomParameterChanges() throws {
+        var base = try XCTUnwrap(TimelineEdit(sourceDuration: 10))
+        let sceneID = try base.addZoomScene(span: TimelineSpan(start: 2, end: 4))
+
+        var focalMoved = base
+        try focalMoved.setZoomFocalPoint(try XCTUnwrap(UnitPoint2D(x: 0.25, y: 0.75)), for: sceneID)
+        XCTAssertTrue(PostRecordingLogic.shouldDebounceSave(from: base, to: focalMoved))
+
+        var settingsChanged = base
+        try settingsChanged.setZoomSettings(
+            ZoomSceneSettings(level: .init(scale: 2.0), transitionSpeed: .fast),
+            for: sceneID
+        )
+        XCTAssertTrue(PostRecordingLogic.shouldDebounceSave(from: base, to: settingsChanged))
+
+        var resized = base
+        try resized.resizeZoomScene(id: sceneID, to: TimelineSpan(start: 1, end: 5))
+        XCTAssertFalse(PostRecordingLogic.shouldDebounceSave(from: base, to: resized))
+
+        var split = base
+        _ = try XCTUnwrap(split.splitClip(at: 5))
+        XCTAssertFalse(PostRecordingLogic.shouldDebounceSave(from: base, to: split))
+    }
+
     func testGIFExporterOutputSizeFitsWithinMaxDimensionWithoutUpscaling() {
         XCTAssertEqual(
             GIFExporter.outputSize(for: CGSize(width: 1200, height: 600), maxDimension: 800),

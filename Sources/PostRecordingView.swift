@@ -190,6 +190,14 @@ enum PostRecordingLogic {
             FileManager.default.fileExists(atPath: $0.path(percentEncoded: false))
         }
     }
+
+    /// Continuous focal-point and zoom-settings drags only change parameters
+    /// of existing zoom scenes, so saving their xattr can be debounced.
+    static func shouldDebounceSave(from previous: TimelineEdit, to current: TimelineEdit) -> Bool {
+        previous.clips == current.clips
+            && previous.zoomScenes.map(\.id) == current.zoomScenes.map(\.id)
+            && previous.zoomScenes.map(\.span) == current.zoomScenes.map(\.span)
+    }
 }
 
 enum ShareTempStorage {
@@ -313,10 +321,13 @@ struct PostRecordingView: View {
 
     @State private var player: AVPlayer?
     @State private var timeObserver: Any?
+    @State private var endOfPlaybackObserver: NSObjectProtocol?
     @State private var deletedClipBoundaryObservers: [Any] = []
     @State private var durationLoadTask: Task<Void, Never>?
     @State private var frameRateLoadTask: Task<Void, Never>?
     @State private var zoomCompositionTask: Task<Void, Never>?
+    @State private var saveEditTask: Task<Void, Never>?
+    @State private var pendingSaveEdit: TimelineEdit?
     @State private var isCleanedUp = false
     @State private var edit: TimelineEdit?
     @State private var history = TimelineHistory()
@@ -487,7 +498,9 @@ struct PostRecordingView: View {
                 return
             }
             timelineSelection = timelineSelection.validated(for: changedEdit)
-            saveEdit(changedEdit)
+            if let previousEdit {
+                scheduleSaveEdit(changedEdit, from: previousEdit)
+            }
             if previousEdit?.clips != changedEdit.clips {
                 refreshDeletedClipBoundaryObservers()
             }
@@ -500,9 +513,13 @@ struct PostRecordingView: View {
                 return
             }
             guard case .zoomScene = previousSelection else { return }
-            seekPlayer(to: currentTime)
+            guard playbackIntent == .paused else { return }
+            if let edit, edit.editedTime(forSourceTime: currentTime) == nil {
+                seekPlayer(to: currentTime)
+            }
         }
         .onDisappear {
+            flushPendingSaveEdit()
             exportTask?.cancel()
             exportTask = nil
             copyTask?.cancel()
@@ -727,6 +744,10 @@ struct PostRecordingView: View {
         isCleanedUp = true
         pausePlayback()
 
+        if let endOfPlaybackObserver {
+            NotificationCenter.default.removeObserver(endOfPlaybackObserver)
+            self.endOfPlaybackObserver = nil
+        }
         if let player, let timeObserver {
             player.removeTimeObserver(timeObserver)
         }
@@ -753,6 +774,28 @@ struct PostRecordingView: View {
         let newPlayer = AVPlayer(playerItem: playerItem)
         player = newPlayer
 
+        endOfPlaybackObserver = NotificationCenter.default.addObserver(
+            forName: .AVPlayerItemDidPlayToEndTime,
+            object: playerItem,
+            queue: .main
+        ) { [weak newPlayer] _ in
+            MainActor.assumeIsolated {
+                guard !isCleanedUp, let newPlayer, newPlayer === player else { return }
+                newPlayer.pause()
+                playbackIntent = .paused
+                guard let edit else { return }
+                let end = edit.lastKeptTime ?? edit.sourceDuration
+                currentTime = end
+                if end < edit.sourceDuration {
+                    newPlayer.seek(
+                        to: CMTime(seconds: end, preferredTimescale: 600),
+                        toleranceBefore: .zero,
+                        toleranceAfter: .zero
+                    )
+                }
+            }
+        }
+
         durationLoadTask?.cancel()
         durationLoadTask = Task { @MainActor [self] in
             defer { durationLoadTask = nil }
@@ -764,7 +807,15 @@ struct PostRecordingView: View {
                 if let freshEdit = TimelineEdit(sourceDuration: seconds) {
                     let loadedEdit = SavedTimelineEdit.load(from: videoURL, sourceDuration: seconds) ?? freshEdit
                     edit = loadedEdit
-                    currentTime = loadedEdit.firstKeptTime ?? 0
+                    let startTime = loadedEdit.firstKeptTime ?? 0
+                    currentTime = startTime
+                    if startTime > 0 {
+                        _ = await newPlayer.seek(
+                            to: CMTime(seconds: startTime, preferredTimescale: 600),
+                            toleranceBefore: .zero,
+                            toleranceAfter: .zero
+                        )
+                    }
                 }
             } catch is CancellationError {
                 return
@@ -793,30 +844,43 @@ struct PostRecordingView: View {
 
         let interval = CMTime(seconds: 0.1, preferredTimescale: 600)
         timeObserver = newPlayer.addPeriodicTimeObserver(forInterval: interval, queue: .main) { [weak newPlayer] time in
-            guard newPlayer != nil else { return }
-            Task { @MainActor [self] in
-                guard !isCleanedUp, !isScrubbing else { return }
+            MainActor.assumeIsolated {
+                guard !isCleanedUp, !isScrubbing, let newPlayer else { return }
                 let seconds = CMTimeGetSeconds(time)
                 guard seconds.isFinite, let edit else { return }
-                if let rate = newPlayer?.rate, rate < 0 {
+                if newPlayer.rate < 0 {
                     followReversePlayback(at: seconds, edit: edit)
                     return
                 }
                 guard seconds < edit.sourceDuration else {
-                    newPlayer?.pause()
+                    let end = edit.lastKeptTime ?? edit.sourceDuration
+                    newPlayer.pause()
                     playbackIntent = .paused
-                    currentTime = edit.lastKeptTime ?? edit.sourceDuration
+                    currentTime = end
+                    if end < edit.sourceDuration {
+                        newPlayer.seek(
+                            to: CMTime(seconds: end, preferredTimescale: 600),
+                            toleranceBefore: .zero,
+                            toleranceAfter: .zero
+                        )
+                    }
                     return
                 }
                 guard let playableTime = edit.playableSourceTime(atOrAfter: seconds) else {
-                    newPlayer?.pause()
+                    let end = edit.lastKeptTime ?? edit.sourceDuration
+                    newPlayer.pause()
                     playbackIntent = .paused
-                    currentTime = edit.lastKeptTime ?? edit.sourceDuration
+                    currentTime = end
+                    newPlayer.seek(
+                        to: CMTime(seconds: end, preferredTimescale: 600),
+                        toleranceBefore: .zero,
+                        toleranceAfter: .zero
+                    )
                     return
                 }
                 currentTime = playableTime
                 if playableTime > seconds + 0.001 {
-                    newPlayer?.seek(
+                    newPlayer.seek(
                         to: CMTime(seconds: playableTime, preferredTimescale: 600),
                         toleranceBefore: .zero,
                         toleranceAfter: .zero
@@ -855,7 +919,7 @@ struct PostRecordingView: View {
         deletedClipBoundaryObservers = edit.deletedClips.map { clip in
             let boundary = NSValue(time: CMTime(seconds: clip.span.start, preferredTimescale: 600))
             return player.addBoundaryTimeObserver(forTimes: [boundary], queue: .main) { [weak player] in
-                Task { @MainActor [self] in
+                MainActor.assumeIsolated {
                     guard
                         !isCleanedUp,
                         let player,
@@ -873,9 +937,15 @@ struct PostRecordingView: View {
                             atOrAfter: deletedClip.span.start
                         )
                     else {
+                        let end = self.edit?.lastKeptTime ?? deletedClip.span.start
                         player.pause()
                         playbackIntent = .paused
-                        currentTime = self.edit?.lastKeptTime ?? deletedClip.span.start
+                        currentTime = end
+                        player.seek(
+                            to: CMTime(seconds: end, preferredTimescale: 600),
+                            toleranceBefore: .zero,
+                            toleranceAfter: .zero
+                        )
                         return
                     }
                     currentTime = nextTime
@@ -967,6 +1037,34 @@ struct PostRecordingView: View {
             return
         }
         applyEdit(changed)
+    }
+
+    private func scheduleSaveEdit(_ changed: TimelineEdit, from previous: TimelineEdit) {
+        guard PostRecordingLogic.shouldDebounceSave(from: previous, to: changed) else {
+            saveEditTask?.cancel()
+            saveEditTask = nil
+            pendingSaveEdit = nil
+            saveEdit(changed)
+            return
+        }
+        pendingSaveEdit = changed
+        saveEditTask?.cancel()
+        saveEditTask = Task { @MainActor in
+            do {
+                try await Task.sleep(for: .milliseconds(250))
+            } catch {
+                return
+            }
+            flushPendingSaveEdit()
+        }
+    }
+
+    private func flushPendingSaveEdit() {
+        saveEditTask?.cancel()
+        saveEditTask = nil
+        guard let editToSave = pendingSaveEdit else { return }
+        pendingSaveEdit = nil
+        saveEdit(editToSave)
     }
 
     /// Edits are kept with the recording as they are made, so closing the
