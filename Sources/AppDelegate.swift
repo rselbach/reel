@@ -9,6 +9,7 @@ private let logger = Logger(subsystem: Bundle.main.bundleIdentifier ?? "com.rsel
 enum AppMenuText {
     static let startRecording = "Start Recording..."
     static let recordingInProgress = "● Recording..."
+    static let finishingRecording = "Finishing Recording..."
     static let stopRecording = "Stop Recording"
     static let discardRecording = "Discard Recording"
     static let pauseRecording = "Pause Recording"
@@ -220,10 +221,14 @@ final class PromisedRecording: NSObject, NSFilePromiseProviderDelegate {
 
 enum StatusItemClickLogic {
     /// Left-click stops an active recording immediately (stop latency matters
-    /// at the end of a take); right-click, or any click while idle, opens the
-    /// menu.
-    static func shouldStopRecording(isRecording: Bool, isRightClick: Bool) -> Bool {
-        isRecording && !isRightClick
+    /// at the end of a take); right-click, any click while idle, or a click
+    /// while finalization is in flight opens the menu.
+    static func shouldStopRecording(
+        isRecording: Bool,
+        isRightClick: Bool,
+        isStopping: Bool = false
+    ) -> Bool {
+        isRecording && !isStopping && !isRightClick
     }
 }
 
@@ -232,13 +237,37 @@ enum RecordingToggleLogic {
         case start
         case cancelPendingStart
         case stop
+        case ignore
     }
 
-    static func action(isRecording: Bool, hasPendingStart: Bool) -> Action {
+    static func action(
+        isRecording: Bool,
+        hasPendingStart: Bool,
+        isStopping: Bool = false
+    ) -> Action {
+        if isStopping {
+            return .ignore
+        }
         if isRecording {
             return .stop
         }
         return hasPendingStart ? .cancelPendingStart : .start
+    }
+}
+
+enum RecordingMenuState: Equatable {
+    case idle
+    case recording(isPaused: Bool)
+    case stopping
+
+    init(isRecording: Bool, isPaused: Bool, isStopping: Bool) {
+        if isStopping {
+            self = .stopping
+        } else if isRecording {
+            self = .recording(isPaused: isPaused)
+        } else {
+            self = .idle
+        }
     }
 }
 
@@ -448,6 +477,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private var activeCountdown: CountdownOverlay?
     private var recordingStartTask: Task<Void, Never>?
     private var isPresentingRecordingDialog = false
+    private var activeStopCount = 0
+    private var isStoppingRecording: Bool { activeStopCount > 0 }
     private var hotkeyObserver: NSObjectProtocol?
     private var cameraOverlayController: CameraOverlayController?
     private var captureBoundsIndicator: CaptureBoundsIndicator?
@@ -474,6 +505,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
         // Finalize the in-flight recording before quitting so it isn't lost.
         Task { @MainActor in
+            activeStopCount += 1
+            defer { activeStopCount -= 1 }
             hideCameraOverlay()
             await screenRecorder.stopRecording()
             NSApp.reply(toApplicationShouldTerminate: true)
@@ -705,8 +738,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private func handleToggleRecording() {
         switch RecordingToggleLogic.action(
             isRecording: screenRecorder.isRecording,
-            hasPendingStart: recordingStartTask != nil
+            hasPendingStart: recordingStartTask != nil,
+            isStopping: isStoppingRecording
         ) {
+        case .ignore:
+            return
         case .stop:
             Task { @MainActor [weak self] in
                 guard let self else { return }
@@ -719,7 +755,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 RecordingStartGuard.canStart(
                     hasPendingStart: recordingStartTask != nil,
                     isRecording: screenRecorder.isRecording,
-                    isStarting: screenRecorder.isStarting
+                    isStarting: screenRecorder.isStarting,
+                    isStopping: isStoppingRecording
                 )
             else { return }
             recordingStartTask = Task { @MainActor [weak self] in
@@ -785,6 +822,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     private func showHotkeyDisabledAlert(message: String) {
         Task { @MainActor in
+            NSApp.activate(ignoringOtherApps: true)
             let alert = NSAlert()
             alert.messageText = AppMenuText.hotkeyError
             alert.informativeText = message
@@ -816,7 +854,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
         if StatusItemClickLogic.shouldStopRecording(
             isRecording: screenRecorder.isRecording,
-            isRightClick: isRightClick
+            isRightClick: isRightClick,
+            isStopping: isStoppingRecording
         ) {
             stopRecording()
             return
@@ -854,7 +893,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     private func addRecordingItems(to menu: NSMenu) {
-        guard screenRecorder.isRecording else {
+        switch RecordingMenuState(
+            isRecording: screenRecorder.isRecording,
+            isPaused: screenRecorder.isPaused,
+            isStopping: isStoppingRecording
+        ) {
+        case .idle:
             let startItem = NSMenuItem(
                 title: AppMenuText.startRecording, action: #selector(showRecordingDialog), keyEquivalent: "")
             menu.addItem(startItem)
@@ -868,29 +912,34 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             let quickItem = NSMenuItem(title: quickTitle, action: #selector(recordRememberedTarget), keyEquivalent: "")
             showShortcut(of: .toggleRecording, on: quickItem)
             menu.addItem(quickItem)
-            return
+        case .stopping:
+            let stoppingItem = NSMenuItem(title: AppMenuText.finishingRecording, action: nil, keyEquivalent: "")
+            stoppingItem.isEnabled = false
+            menu.addItem(stoppingItem)
+        case .recording(let isPaused):
+            let recordingItem = NSMenuItem(
+                title: isPaused ? AppMenuText.recordingPaused : AppMenuText.recordingInProgress,
+                action: nil,
+                keyEquivalent: ""
+            )
+            recordingItem.isEnabled = false
+            menu.addItem(recordingItem)
+            let pauseItem = NSMenuItem(
+                title: isPaused ? AppMenuText.resumeRecording : AppMenuText.pauseRecording,
+                action: #selector(togglePause),
+                keyEquivalent: ""
+            )
+            showShortcut(of: .pauseRecording, on: pauseItem)
+            menu.addItem(pauseItem)
+            let stopItem = NSMenuItem(
+                title: AppMenuText.stopRecording, action: #selector(stopRecording), keyEquivalent: "")
+            showShortcut(of: .toggleRecording, on: stopItem)
+            menu.addItem(stopItem)
+            let discardItem = NSMenuItem(
+                title: AppMenuText.discardRecording, action: #selector(discardRecordingFromMenu), keyEquivalent: "")
+            showShortcut(of: .discardRecording, on: discardItem)
+            menu.addItem(discardItem)
         }
-        let recordingItem = NSMenuItem(
-            title: screenRecorder.isPaused ? AppMenuText.recordingPaused : AppMenuText.recordingInProgress,
-            action: nil,
-            keyEquivalent: ""
-        )
-        recordingItem.isEnabled = false
-        menu.addItem(recordingItem)
-        let pauseItem = NSMenuItem(
-            title: screenRecorder.isPaused ? AppMenuText.resumeRecording : AppMenuText.pauseRecording,
-            action: #selector(togglePause),
-            keyEquivalent: ""
-        )
-        showShortcut(of: .pauseRecording, on: pauseItem)
-        menu.addItem(pauseItem)
-        let stopItem = NSMenuItem(title: AppMenuText.stopRecording, action: #selector(stopRecording), keyEquivalent: "")
-        showShortcut(of: .toggleRecording, on: stopItem)
-        menu.addItem(stopItem)
-        let discardItem = NSMenuItem(
-            title: AppMenuText.discardRecording, action: #selector(discardRecordingFromMenu), keyEquivalent: "")
-        showShortcut(of: .discardRecording, on: discardItem)
-        menu.addItem(discardItem)
     }
 
     private func showShortcut(of action: HotkeyAction, on item: NSMenuItem) {
@@ -1115,6 +1164,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     @objc private func checkForUpdates() {
+        NSApp.activate(ignoringOtherApps: true)
         updaterController?.checkForUpdates(nil)
     }
 
@@ -1170,14 +1220,20 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// Ends the take and deletes it. Callers that already represent an
     /// unambiguous request — the global shortcut — pass confirmed.
     private func discardRecording(confirmed: Bool) {
-        guard screenRecorder.isRecording else { return }
+        guard screenRecorder.isRecording, !isStoppingRecording else { return }
         guard confirmed || confirmDiscard() else { return }
 
         Task { @MainActor in
+            guard !isStoppingRecording else { return }
+            activeStopCount += 1
+            rebuildMenu()
+            defer {
+                activeStopCount -= 1
+                rebuildMenu()
+            }
             hideCameraOverlay()
             guard await screenRecorder.discardRecording() else { return }
             RecordingCue.stop.play()
-            rebuildMenu()
             if let message = screenRecorder.errorMessage {
                 showErrorAlert(title: AppMenuText.recordingWarning, message: message)
             }
@@ -1196,10 +1252,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     private func stopRecordingFlow() async {
+        guard !isStoppingRecording else { return }
+        activeStopCount += 1
+        rebuildMenu()
+        defer {
+            activeStopCount -= 1
+            rebuildMenu()
+        }
         hideCameraOverlay()
         guard await screenRecorder.stopRecording() else { return }
         RecordingCue.stop.play()
-        rebuildMenu()
         if AppSettings.shared.showPreviewAfterRecording,
             let url = screenRecorder.lastRecordedURL
         {
@@ -1212,9 +1274,17 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
     /// Runs the "Ask each time" save panel on the recorder's behalf.
     private func promptForSaveDestination(_ request: SaveDestinationRequest) async -> URL? {
+        activeStopCount += 1
+        rebuildMenu()
+        defer {
+            activeStopCount -= 1
+            rebuildMenu()
+        }
+
         // As a menu bar (accessory) app there is usually no key window when a
         // recording stops; without activation the save panel can open behind
-        // the frontmost app.
+        // the frontmost app. Present standalone so it never attaches as a sheet
+        // to an unrelated small window like About Reel.
         NSApp.activate(ignoringOtherApps: true)
 
         let panel = NSSavePanel()
@@ -1222,13 +1292,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         panel.nameFieldStringValue = request.suggestedName
         panel.directoryURL = request.directory
 
-        let response: NSApplication.ModalResponse
-        if let keyWindow = NSApp.keyWindow {
-            response = await panel.beginSheetModal(for: keyWindow)
-        } else {
-            response = panel.runModal()
-        }
-
+        let response = await panel.begin()
         guard response == .OK else { return nil }
         return panel.url
     }
@@ -1336,23 +1400,25 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         guard !isPresentingRecordingDialog else { return }
         isPresentingRecordingDialog = true
 
-        Task { @MainActor in
-            defer { isPresentingRecordingDialog = false }
-            await screenRecorder.refreshWindows()
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer { self.isPresentingRecordingDialog = false }
+            await self.screenRecorder.refreshWindows()
             guard
                 RecordingStartGuard.canStart(
-                    hasPendingStart: recordingStartTask != nil,
-                    isRecording: screenRecorder.isRecording,
-                    isStarting: screenRecorder.isStarting
+                    hasPendingStart: self.recordingStartTask != nil,
+                    isRecording: self.screenRecorder.isRecording,
+                    isStarting: self.screenRecorder.isStarting,
+                    isStopping: self.isStoppingRecording
                 )
             else { return }
 
             let dialogView = RecordingDialog(
-                availableDisplays: screenRecorder.availableDisplays,
-                availableWindows: screenRecorder.availableWindows,
-                excludedApplications: screenRecorder.captureExcludedApplications,
-                initialSelection: currentRecordingSelection,
-                lastRegionOutputSize: screenRecorder.selectedRegionOutputSize,
+                availableDisplays: self.screenRecorder.availableDisplays,
+                availableWindows: self.screenRecorder.availableWindows,
+                excludedApplications: self.screenRecorder.captureExcludedApplications,
+                initialSelection: self.currentRecordingSelection,
+                lastRegionOutputSize: self.screenRecorder.selectedRegionOutputSize,
                 initialOverrides: RecordingOverrides(
                     recordAudio: AppSettings.shared.recordAudio,
                     recordCamera: AppSettings.shared.recordCamera
@@ -1380,12 +1446,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 }
             )
 
-            recordingDialogWindow = makeWindow(
+            self.recordingDialogWindow = self.makeWindow(
                 title: AppMenuText.newRecordingTitle,
                 styleMask: [.titled, .closable],
                 rootView: dialogView
             )
-            presentWindow(recordingDialogWindow)
+            self.presentWindow(self.recordingDialogWindow)
         }
     }
 
@@ -1438,13 +1504,16 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             RecordingStartGuard.canStart(
                 hasPendingStart: recordingStartTask != nil,
                 isRecording: screenRecorder.isRecording,
-                isStarting: screenRecorder.isStarting
+                isStarting: screenRecorder.isStarting,
+                isStopping: isStoppingRecording
             )
         else { return }
         recordingStartTask = Task { @MainActor [weak self] in
             guard let self else { return }
             defer { self.recordingStartTask = nil }
-            guard !self.screenRecorder.isRecording, !self.screenRecorder.isStarting else { return }
+            guard !self.screenRecorder.isRecording, !self.screenRecorder.isStarting, !self.isStoppingRecording else {
+                return
+            }
 
             switch selection {
             case .display(let displayID):
@@ -1457,7 +1526,8 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 guard let region = await RegionSelector().select(),
                     !Task.isCancelled,
                     !self.screenRecorder.isRecording,
-                    !self.screenRecorder.isStarting
+                    !self.screenRecorder.isStarting,
+                    !self.isStoppingRecording
                 else { return }
                 self.screenRecorder.selectedRegion = region
                 self.screenRecorder.recordingMode = .region
@@ -1474,6 +1544,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         guard !Task.isCancelled,
             !screenRecorder.isRecording,
             !screenRecorder.isStarting,
+            !isStoppingRecording,
             await runCountdown(overrides: overrides),
             !Task.isCancelled
         else {

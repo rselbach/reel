@@ -234,6 +234,58 @@ final class AppLifecycleTests: XCTestCase {
         XCTAssertFalse(WindowPresentationLogic.shouldReassert(isTracked: true, isVisible: false))
         XCTAssertFalse(WindowPresentationLogic.shouldReassert(isTracked: false, isVisible: false))
     }
+
+    func testStatusItemClickLogicDoesNotStopWhileStopping() {
+        XCTAssertTrue(StatusItemClickLogic.shouldStopRecording(isRecording: true, isRightClick: false))
+        XCTAssertFalse(
+            StatusItemClickLogic.shouldStopRecording(isRecording: true, isRightClick: false, isStopping: true)
+        )
+        XCTAssertFalse(
+            StatusItemClickLogic.shouldStopRecording(isRecording: true, isRightClick: true, isStopping: true)
+        )
+    }
+
+    func testRecordingToggleLogicIgnoresToggleWhileStopping() {
+        XCTAssertEqual(
+            RecordingToggleLogic.action(isRecording: true, hasPendingStart: false, isStopping: true),
+            .ignore
+        )
+        XCTAssertEqual(
+            RecordingToggleLogic.action(isRecording: false, hasPendingStart: true, isStopping: true),
+            .ignore
+        )
+        XCTAssertEqual(
+            RecordingToggleLogic.action(isRecording: false, hasPendingStart: false, isStopping: true),
+            .ignore
+        )
+    }
+
+    func testRecordingMenuStateHidesActiveControlsWhileStopping() {
+        XCTAssertEqual(
+            RecordingMenuState(isRecording: false, isPaused: false, isStopping: false),
+            .idle
+        )
+        XCTAssertEqual(
+            RecordingMenuState(isRecording: true, isPaused: false, isStopping: false),
+            .recording(isPaused: false)
+        )
+        XCTAssertEqual(
+            RecordingMenuState(isRecording: true, isPaused: true, isStopping: false),
+            .recording(isPaused: true)
+        )
+        XCTAssertEqual(
+            RecordingMenuState(isRecording: true, isPaused: false, isStopping: true),
+            .stopping
+        )
+        XCTAssertEqual(
+            RecordingMenuState(isRecording: true, isPaused: true, isStopping: true),
+            .stopping
+        )
+        XCTAssertEqual(
+            RecordingMenuState(isRecording: false, isPaused: false, isStopping: true),
+            .stopping
+        )
+    }
 }
 
 private final class CopyThreadRecorder: @unchecked Sendable {
