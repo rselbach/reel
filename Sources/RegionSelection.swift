@@ -360,9 +360,9 @@ final class RegionSelector {
             await withCheckedContinuation { continuation in
                 beginSelection(continuation: continuation)
             }
-        } onCancel: { [weak self] in
+        } onCancel: {
             Task { @MainActor in
-                self?.finish(with: nil)
+                self.finish(with: nil)
             }
         }
     }
