@@ -500,6 +500,7 @@ class ScreenRecorder: NSObject, ObservableObject {
     private var microphoneAudioSettings: [String: Any]?
     private var cameraCaptureSession: AVCaptureSession?
     private var cameraOutput: AVCaptureVideoDataOutput?
+    private var hasCountdownCameraPreview = false
     private var outputURL: URL?
     /// Settings snapshot for the recording currently in flight.
     private var activeOptions: RecordingOptions?
@@ -1207,6 +1208,43 @@ class ScreenRecorder: NSObject, ObservableObject {
         }
     }
 
+    func beginCountdownCameraPreviewLayout(
+        position: AppSettings.CameraOverlayPosition,
+        sizeFraction: CGFloat
+    ) {
+        let initialPos = position.normalizedCoordinates
+        withFrameLock {
+            frameState.currentCameraX = initialPos.x
+            frameState.currentCameraY = initialPos.y
+            frameState.currentCameraSizeFraction = min(
+                max(sizeFraction, CameraOverlayResizeLogic.minFraction),
+                CameraOverlayResizeLogic.maxFraction
+            )
+        }
+        hasCountdownCameraPreview = true
+    }
+
+    func applyCameraLayoutForRecordingStart(options: RecordingOptions) {
+        let preserveCountdownLayout = hasCountdownCameraPreview && options.recordCamera
+        guard !preserveCountdownLayout else { return }
+        let initialPos = options.cameraPosition.normalizedCoordinates
+        withFrameLock {
+            frameState.currentCameraX = initialPos.x
+            frameState.currentCameraY = initialPos.y
+            frameState.currentCameraSizeFraction = options.cameraSizeFraction
+        }
+    }
+
+    var currentCameraOverlayLayout: (x: CGFloat, y: CGFloat, sizeFraction: CGFloat) {
+        withFrameLock {
+            (
+                x: frameState.currentCameraX,
+                y: frameState.currentCameraY,
+                sizeFraction: frameState.currentCameraSizeFraction
+            )
+        }
+    }
+
     /// Describes the background canvas for a framed window recording, or nil
     /// when the capture is written as-is.
     static func windowFrame(
@@ -1438,11 +1476,8 @@ class ScreenRecorder: NSObject, ObservableObject {
         windowFrame: FrameCompositor.WindowFrame?,
         pixelsPerPoint: CGFloat
     ) {
-        let initialPos = options.cameraPosition.normalizedCoordinates
+        applyCameraLayoutForRecordingStart(options: options)
         withFrameLock {
-            frameState.currentCameraX = initialPos.x
-            frameState.currentCameraY = initialPos.y
-            frameState.currentCameraSizeFraction = options.cameraSizeFraction
             frameState.frameWriter = FrameWriter(
                 adaptor: adaptor,
                 videoInput: videoInput,
@@ -1578,12 +1613,17 @@ class ScreenRecorder: NSObject, ObservableObject {
             discardCameraPreview()
             return false
         }
+        beginCountdownCameraPreviewLayout(
+            position: settings.cameraPosition,
+            sizeFraction: settings.cameraSizeFraction
+        )
         return true
     }
 
     /// Tears down a preview-only camera session, for a cancelled countdown.
     func discardCameraPreview() {
         guard !isRecording else { return }
+        hasCountdownCameraPreview = false
         disableCameraCaptureAfterStartFailure()
     }
 
@@ -1753,6 +1793,7 @@ class ScreenRecorder: NSObject, ObservableObject {
         microphoneAudioSettings = nil
         cameraCaptureSession = nil
         cameraOutput = nil
+        hasCountdownCameraPreview = false
         compositor.reset()
         withFrameLock {
             frameState.latestCameraPixelBuffer = nil
@@ -1976,6 +2017,7 @@ class ScreenRecorder: NSObject, ObservableObject {
         }
         cameraCaptureSession = nil
         cameraOutput = nil
+        hasCountdownCameraPreview = false
         withFrameLock {
             frameState.latestCameraPixelBuffer = nil
         }

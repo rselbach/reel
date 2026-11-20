@@ -105,4 +105,51 @@ final class CaptureEngineTests: XCTestCase {
             )
         )
     }
+
+    @MainActor
+    func testCountdownCameraOverlayPositionAndSizeSurviveRecordingStart() {
+        let recorder = ScreenRecorder()
+        var options = RecordingOptions(settings: AppSettings.shared)
+        options.recordCamera = true
+        options.cameraPosition = .bottomRight
+        options.cameraSizeFraction = 0.2
+
+        recorder.beginCountdownCameraPreviewLayout(
+            position: options.cameraPosition,
+            sizeFraction: options.cameraSizeFraction
+        )
+        recorder.updateCameraOverlayPosition(x: 0.25, y: 0.75)
+        recorder.updateCameraOverlaySize(fraction: 0.30)
+
+        recorder.applyCameraLayoutForRecordingStart(options: options)
+
+        let layout = recorder.currentCameraOverlayLayout
+        XCTAssertEqual(layout.x, 0.25, accuracy: 0.000_1)
+        XCTAssertEqual(layout.y, 0.75, accuracy: 0.000_1)
+        XCTAssertEqual(layout.sizeFraction, 0.30, accuracy: 0.000_1)
+    }
+
+    @MainActor
+    func testFreshRecordingStartUsesOptionsCameraOverlayLayout() {
+        let recorder = ScreenRecorder()
+        var options = RecordingOptions(settings: AppSettings.shared)
+        options.recordCamera = true
+        options.cameraPosition = .topLeft
+        options.cameraSizeFraction = 0.25
+
+        // Even if a previous countdown was dragged and then discarded, a fresh
+        // recording without countdown preview resets to options.
+        recorder.beginCountdownCameraPreviewLayout(position: .bottomRight, sizeFraction: 0.2)
+        recorder.updateCameraOverlayPosition(x: 0.6, y: 0.4)
+        recorder.updateCameraOverlaySize(fraction: 0.32)
+        recorder.discardCameraPreview()
+
+        recorder.applyCameraLayoutForRecordingStart(options: options)
+
+        let expected = AppSettings.CameraOverlayPosition.topLeft.normalizedCoordinates
+        let layout = recorder.currentCameraOverlayLayout
+        XCTAssertEqual(layout.x, expected.x, accuracy: 0.000_1)
+        XCTAssertEqual(layout.y, expected.y, accuracy: 0.000_1)
+        XCTAssertEqual(layout.sizeFraction, 0.25, accuracy: 0.000_1)
+    }
 }
