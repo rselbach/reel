@@ -604,12 +604,18 @@ struct TimelineHistory: Sendable {
         guard previous != current else { return }
         redoStack.removeAll()
         let adjustment = Adjustment(from: previous, to: current)
-        defer { lastAdjustment = adjustment.map { ($0, date) } }
         if let adjustment, let lastAdjustment, lastAdjustment.adjustment == adjustment,
             date.timeIntervalSince(lastAdjustment.date) < Self.coalescingInterval
         {
+            if undoStack.last == current {
+                undoStack.removeLast()
+                self.lastAdjustment = nil
+            } else {
+                self.lastAdjustment = (adjustment, date)
+            }
             return
         }
+        lastAdjustment = adjustment.map { ($0, date) }
         undoStack.append(previous)
     }
 

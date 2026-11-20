@@ -160,7 +160,6 @@ struct ZoomFocusEditor: View {
     }
 
     private func loadFrame() async {
-        frame = nil
         loadFailed = false
         let asset = AVURLAsset(url: videoURL)
         let generator = AVAssetImageGenerator(asset: asset)
@@ -178,6 +177,7 @@ struct ZoomFocusEditor: View {
             return
         } catch {
             guard !Task.isCancelled else { return }
+            frame = nil
             loadFailed = true
             zoomFocusLogger.error(
                 "Could not load source frame at \(sourceTime, privacy: .public): \(error.localizedDescription, privacy: .public)"

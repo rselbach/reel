@@ -317,6 +317,21 @@ struct PostRecordingTimelineView: View {
         .onDeleteCommand {
             deleteSelection()
         }
+        .onChange(of: selection) { _, newSelection in
+            if let popoverID = zoomSettingsPopoverSceneID, newSelection != .zoomScene(popoverID) {
+                zoomSettingsPopoverSceneID = nil
+            }
+        }
+        .onChange(of: edit) { _, _ in
+            let hadActiveDraft = trimDrag != nil || zoomResizeState != nil || zoomDraftSpan != nil
+            trimDrag = nil
+            zoomResizeState = nil
+            zoomDraftStart = nil
+            zoomDraftSpan = nil
+            if hadActiveDraft {
+                onScrub(nil)
+            }
+        }
     }
 
     private var selectionControls: some View {
@@ -449,10 +464,14 @@ struct PostRecordingTimelineView: View {
                 DragGesture(minimumDistance: 0)
                     .onChanged { value in
                         guard abs(value.translation.width) >= 3 else { return }
-                        seekAndSelect(at: value.location.x, scale: scale)
+                        seekAndSelect(at: value.location.x, scale: scale, isDrag: true)
                     }
                     .onEnded { value in
-                        seekAndSelect(at: value.location.x, scale: scale)
+                        seekAndSelect(
+                            at: value.location.x,
+                            scale: scale,
+                            isDrag: abs(value.translation.width) >= 3
+                        )
                     }
             )
             .accessibilityElement()
@@ -811,18 +830,16 @@ struct PostRecordingTimelineView: View {
                 onScrub(min(max(gap.start, time), gap.end))
             }
             .onEnded { value in
-                defer {
-                    zoomDraftStart = nil
-                    zoomDraftSpan = nil
-                    onScrub(nil)
-                }
-                guard let span = zoomDraftSpan else { return }
+                let span = zoomDraftSpan
+                zoomDraftStart = nil
+                zoomDraftSpan = nil
+                onScrub(nil)
+                guard let span else { return }
                 if span.duration < TimelineEdit.minimumZoomSceneDuration {
                     onSeek(scale.sourceTime(at: value.location.x))
                     return
                 }
                 addZoomScene(span: span)
-                onScrub(min(max(span.start, scale.sourceTime(at: value.location.x)), span.end))
             }
     }
 
@@ -1091,11 +1108,14 @@ struct PostRecordingTimelineView: View {
             }
     }
 
-    private func seekAndSelect(at position: CGFloat, scale: TimelineScale) {
+    private func seekAndSelect(at position: CGFloat, scale: TimelineScale, isDrag: Bool) {
         let time = scale.sourceTime(at: position)
         if let id = edit.clipID(at: time) {
             selection = .clip(id)
             focusedClipID = id
+            if !isDrag, edit.clip(id: id)?.isDeleted == true {
+                return
+            }
         }
         onSeek(time)
     }

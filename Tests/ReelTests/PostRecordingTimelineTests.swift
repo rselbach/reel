@@ -287,6 +287,37 @@ final class PostRecordingTimelineTests: XCTestCase {
         XCTAssertFalse(history.canUndo)
     }
 
+    func testHistoryPopsRedundantEntryWhenCoalescedAdjustmentReturnsToOrigin() throws {
+        let original = try XCTUnwrap(TimelineEdit(sourceDuration: 10))
+        var zoomed = original
+        let sceneID = try zoomed.addZoomScene(span: TimelineSpan(start: 1, end: 3))
+        let start = Date(timeIntervalSinceReferenceDate: 0)
+
+        var history = TimelineHistory()
+        history.record(from: original, to: zoomed, at: start)
+
+        var moved = zoomed
+        try moved.setZoomFocalPoint(try XCTUnwrap(UnitPoint2D(x: 0.8, y: 0.5)), for: sceneID)
+        history.record(from: zoomed, to: moved, at: start.addingTimeInterval(0.2))
+
+        var returned = moved
+        try returned.setZoomFocalPoint(.center, for: sceneID)
+        history.record(from: moved, to: returned, at: start.addingTimeInterval(0.4))
+
+        XCTAssertEqual(returned, zoomed)
+        XCTAssertEqual(history.undo(from: returned), original)
+        XCTAssertFalse(history.canUndo)
+
+        // A subsequent drag after returning to origin starts a fresh undo step.
+        var freshHistory = TimelineHistory()
+        freshHistory.record(from: zoomed, to: moved, at: start)
+        freshHistory.record(from: moved, to: returned, at: start.addingTimeInterval(0.2))
+        XCTAssertFalse(freshHistory.canUndo)
+        freshHistory.record(from: returned, to: moved, at: start.addingTimeInterval(0.4))
+        XCTAssertTrue(freshHistory.canUndo)
+        XCTAssertEqual(freshHistory.undo(from: moved), zoomed)
+    }
+
     func testMappingsCrossDeletedClipBoundaries() throws {
         let initialID = UUID()
         var edit = try XCTUnwrap(TimelineEdit(sourceDuration: 10, initialClipID: initialID))

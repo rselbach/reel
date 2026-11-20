@@ -371,6 +371,7 @@ struct PostRecordingView: View {
                 )
                 .frame(minWidth: 700, minHeight: 300, maxHeight: .infinity)
                 .layoutPriority(1)
+                .disabled(isExporting)
             } else if let player {
                 VideoPlayerView(player: player)
                     .frame(minWidth: 700, minHeight: 300, maxHeight: .infinity)
