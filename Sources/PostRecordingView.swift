@@ -1,6 +1,5 @@
 import AVKit
 import AppKit
-import CoreImage
 import SwiftUI
 import UniformTypeIdentifiers
 import os.log
@@ -1073,68 +1072,14 @@ struct PostRecordingView: View {
             removeTemporaryExport(at: tempURL, kind: "GIF")
         }
 
-        try await writeGIF(to: tempURL, edit: edit)
+        try await GIFExporter.export(
+            sourceURL: videoURL,
+            outputURL: tempURL,
+            edit: edit,
+            onProgress: { exportProgress = $0 }
+        )
         try Task.checkCancellation()
         return try FileReplacement.commit(tempURL: tempURL, to: outputURL)
-    }
-
-    private func writeGIF(to outputURL: URL, edit: TimelineEdit) async throws {
-        let asset = AVURLAsset(url: videoURL)
-        let generator = AVAssetImageGenerator(asset: asset)
-        generator.appliesPreferredTrackTransform = true
-        generator.requestedTimeToleranceBefore = .zero
-        generator.requestedTimeToleranceAfter = .zero
-        generator.maximumSize = CGSize(width: GIFExport.maxWidth, height: GIFExport.maxWidth)
-
-        let sampling = GIFExport.frames(edit: edit)
-        let imageContext = CIContext(options: [.cacheIntermediates: false])
-
-        // Built in memory: a file destination writes through a hidden file of
-        // its own that a cancelled export would leave behind.
-        let gifData = NSMutableData()
-        guard
-            let destination = CGImageDestinationCreateWithData(
-                gifData as CFMutableData,
-                UTType.gif.identifier as CFString,
-                sampling.times.count,
-                nil
-            )
-        else {
-            throw ExportError.gifDestinationUnavailable
-        }
-
-        CGImageDestinationSetProperties(
-            destination,
-            [
-                kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFLoopCount: 0]
-            ] as CFDictionary)
-
-        let frameProperties =
-            [
-                kCGImagePropertyGIFDictionary: [kCGImagePropertyGIFDelayTime: sampling.delay]
-            ] as CFDictionary
-
-        for (index, seconds) in sampling.times.enumerated() {
-            try Task.checkCancellation()
-            let time = CMTime(seconds: seconds, preferredTimescale: 600)
-            let frame = try await generator.image(at: time)
-            try Task.checkCancellation()
-            let rendered = ZoomImageRenderer.render(
-                CIImage(cgImage: frame.image),
-                sourceTime: seconds,
-                scenes: edit.zoomScenes
-            )
-            guard let renderedFrame = imageContext.createCGImage(rendered, from: rendered.extent) else {
-                throw ExportError.gifFrameRenderFailed
-            }
-            CGImageDestinationAddImage(destination, renderedFrame, frameProperties)
-            exportProgress = Double(index + 1) / Double(sampling.times.count)
-        }
-
-        guard CGImageDestinationFinalize(destination) else {
-            throw ExportError.gifWriteFailed
-        }
-        try gifData.write(to: outputURL)
     }
 
     private func selectExportURL(for format: ExportFormat) async -> URL? {
@@ -1216,23 +1161,6 @@ private enum ExportFormat {
             return "mp4"
         case .gif:
             return "gif"
-        }
-    }
-}
-
-enum ExportError: LocalizedError {
-    case gifDestinationUnavailable
-    case gifFrameRenderFailed
-    case gifWriteFailed
-
-    var errorDescription: String? {
-        switch self {
-        case .gifDestinationUnavailable:
-            return "Could not create the GIF file."
-        case .gifFrameRenderFailed:
-            return "A GIF frame could not be rendered."
-        case .gifWriteFailed:
-            return "The GIF could not be written."
         }
     }
 }
