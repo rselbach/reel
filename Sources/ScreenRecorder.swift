@@ -93,6 +93,32 @@ struct PauseTimeline: Equatable {
     }
 }
 
+enum AudioSampleTiming {
+    /// Checks whether a retimed audio sample can be appended without preceding
+    /// the writer session start or overlapping the track's previous output.
+    /// Returns the track's updated output end time when valid, or nil to drop.
+    static func nextOutputEndTime(
+        presentationTime: CMTime,
+        duration: CMTime,
+        sessionStartTime: CMTime,
+        lastPresentationTime: CMTime?,
+        lastOutputEndTime: CMTime?
+    ) -> CMTime? {
+        guard presentationTime.isValid, presentationTime.isNumeric else { return nil }
+        guard presentationTime >= sessionStartTime else { return nil }
+        if let lastPresentationTime, presentationTime <= lastPresentationTime {
+            return nil
+        }
+        if let lastOutputEndTime, presentationTime < lastOutputEndTime {
+            return nil
+        }
+        if duration.isValid, duration.isNumeric, duration > .zero {
+            return CMTimeAdd(presentationTime, duration)
+        }
+        return presentationTime
+    }
+}
+
 enum CaptureExclusionLogic {
     static func isCurrentApplication(
         bundleID: String?,
@@ -293,6 +319,10 @@ private struct FrameWriter {
     /// resume would then land before it, and AVAssetWriter fails the whole
     /// file on a frame that does not move forward.
     var lastVideoOutputTime: CMTime?
+    var lastMicrophoneOutputTime: CMTime?
+    var lastMicrophoneOutputEndTime: CMTime?
+    var lastSystemAudioOutputTime: CMTime?
+    var lastSystemAudioOutputEndTime: CMTime?
 }
 
 private final class FrameCaptureState {
@@ -1024,16 +1054,18 @@ class ScreenRecorder: NSObject, ObservableObject {
     /// resuming is instant; the gap is removed from the output timeline.
     func pauseRecording() {
         guard isRecording, !isStopping, !isPaused else { return }
-        let now = CMClockGetTime(CMClockGetHostTimeClock())
-        withFrameLock { frameState.frameWriter?.pauses.pause(at: now) }
+        withFrameLock {
+            let now = CMClockGetTime(CMClockGetHostTimeClock())
+            frameState.frameWriter?.pauses.pause(at: now)
+        }
         isPaused = true
     }
 
     func resumeRecording() {
-        guard isRecording, isPaused else { return }
+        guard isRecording, !isStopping, isPaused else { return }
         let resumedCursorState = currentCursorState()
-        let now = CMClockGetTime(CMClockGetHostTimeClock())
         withFrameLock {
+            let now = CMClockGetTime(CMClockGetHostTimeClock())
             frameState.cursorState = resumedCursorState
             frameState.frameWriter?.pauses.resume(at: now)
         }
@@ -2331,28 +2363,56 @@ extension ScreenRecorder: AVCaptureVideoDataOutputSampleBufferDelegate, AVCaptur
         withFrameLock {
             guard var writer = frameState.frameWriter else { return }
             guard !frameState.isCaptureStopped,
-                writer.startTime != nil,
-                writer.pauses.outputTime(
+                !writer.hasWriteFailure,
+                let startTime = writer.startTime,
+                let outputTime = writer.pauses.outputTime(
                     forCaptureTime: CMSampleBufferGetPresentationTimeStamp(sampleBuffer)
-                ) != nil,
+                ),
                 let audio = source == .microphone ? writer.microphoneInput : writer.systemAudioInput,
                 audio.isReadyForMoreMediaData
             else {
                 return
             }
 
+            let lastPresentationTime =
+                source == .microphone ? writer.lastMicrophoneOutputTime : writer.lastSystemAudioOutputTime
+            let lastOutputEndTime =
+                source == .microphone ? writer.lastMicrophoneOutputEndTime : writer.lastSystemAudioOutputEndTime
+
+            guard
+                let nextOutputEndTime = AudioSampleTiming.nextOutputEndTime(
+                    presentationTime: outputTime,
+                    duration: CMSampleBufferGetDuration(sampleBuffer),
+                    sessionStartTime: startTime,
+                    lastPresentationTime: lastPresentationTime,
+                    lastOutputEndTime: lastOutputEndTime
+                )
+            else {
+                return
+            }
+
             // Audio carries its own timestamps, so the pause offset has to be
             // applied to the buffer rather than passed alongside it.
-            guard let sampleBuffer = retimed(sampleBuffer, by: writer.pauses.pausedDuration) else {
+            guard let retimedBuffer = retimed(sampleBuffer, by: writer.pauses.pausedDuration) else {
                 logger.warning("Could not retime audio sample for pause offset; dropping it")
                 return
             }
 
-            if !audio.append(sampleBuffer) {
+            guard audio.append(retimedBuffer) else {
                 handleAppendFailure(&writer, context: "Failed to append audio sample")
                 frameState.frameWriter = writer
                 frameState.isCaptureStopped = true
+                return
             }
+
+            if source == .microphone {
+                writer.lastMicrophoneOutputTime = outputTime
+                writer.lastMicrophoneOutputEndTime = nextOutputEndTime
+            } else {
+                writer.lastSystemAudioOutputTime = outputTime
+                writer.lastSystemAudioOutputEndTime = nextOutputEndTime
+            }
+            frameState.frameWriter = writer
         }
     }
 }
