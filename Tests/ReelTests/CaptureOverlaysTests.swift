@@ -137,4 +137,79 @@ final class CaptureOverlaysTests: XCTestCase {
             XCTAssertNil(RegionAdjustment.handle(at: CGPoint(x: rect.maxX + 20, y: rect.maxY + 20), in: rect))
         }
     }
+
+    @MainActor
+    func testCameraOverlaySideBoundsClampsMinSideForWideShortBounds() {
+        let wideShort = CGRect(x: 0, y: 0, width: 2000, height: 100)
+        let limits = CameraOverlayResizeLogic.sideBounds(for: wideShort)
+        XCTAssertEqual(limits.maxSide, 100)
+        XCTAssertLessThanOrEqual(limits.minSide, limits.maxSide)
+        XCTAssertEqual(limits.minSide, 100)
+
+        let resized = CameraOverlayResizeLogic.resizedFrame(
+            corner: .topRight,
+            initialFrame: CGRect(x: 0, y: 0, width: 100, height: 100),
+            deltaX: 50,
+            deltaY: 50,
+            minSide: limits.minSide,
+            maxSide: limits.maxSide
+        )
+        XCTAssertEqual(resized.width, 100)
+        XCTAssertEqual(resized.height, 100)
+
+        let standard = CGRect(x: 0, y: 0, width: 1000, height: 600)
+        let standardLimits = CameraOverlayResizeLogic.sideBounds(for: standard)
+        XCTAssertEqual(standardLimits.minSide, 80)
+        XCTAssertEqual(standardLimits.maxSide, 500)
+
+        let empty = CameraOverlayResizeLogic.sideBounds(for: .zero)
+        XCTAssertEqual(empty.minSide, 0)
+        XCTAssertEqual(empty.maxSide, 0)
+    }
+
+    @MainActor
+    func testCameraOverlayStationaryCornerClickDoesNotFireSizeChangeEnded() throws {
+        let dragBounds = CGRect(x: 0, y: 0, width: 1000, height: 600)
+        let window = CameraOverlayWindow(
+            contentRect: CGRect(x: 100, y: 100, width: 200, height: 200),
+            dragBounds: dragBounds,
+            overlaySize: 200
+        )
+        var endedCalls = 0
+        window.onSizeChangeEnded = { _ in
+            endedCalls += 1
+        }
+
+        let downEvent = try XCTUnwrap(
+            NSEvent.mouseEvent(
+                with: .leftMouseDown,
+                location: NSPoint(x: 5, y: 5),
+                modifierFlags: [],
+                timestamp: 0,
+                windowNumber: window.windowNumber,
+                context: nil,
+                eventNumber: 1,
+                clickCount: 1,
+                pressure: 1
+            )
+        )
+        let upEvent = try XCTUnwrap(
+            NSEvent.mouseEvent(
+                with: .leftMouseUp,
+                location: NSPoint(x: 5, y: 5),
+                modifierFlags: [],
+                timestamp: 0.05,
+                windowNumber: window.windowNumber,
+                context: nil,
+                eventNumber: 2,
+                clickCount: 1,
+                pressure: 0
+            )
+        )
+
+        window.mouseDown(with: downEvent)
+        window.mouseUp(with: upEvent)
+
+        XCTAssertEqual(endedCalls, 0)
+    }
 }

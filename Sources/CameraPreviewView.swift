@@ -28,10 +28,13 @@ final class CameraPreviewNSView: NSView {
 
     private func setupLayer() {
         wantsLayer = true
-        let layer = AVCaptureVideoPreviewLayer()
-        layer.videoGravity = .resizeAspectFill
-        self.layer = layer
-        self.previewLayer = layer
+        let hostLayer = CALayer()
+        let previewLayer = AVCaptureVideoPreviewLayer()
+        previewLayer.videoGravity = .resizeAspectFill
+        hostLayer.addSublayer(previewLayer)
+        layer = hostLayer
+        self.previewLayer = previewLayer
+        layoutPreviewLayer()
     }
 
     /// Mirrors the preview horizontally only for a front-facing camera
@@ -42,14 +45,30 @@ final class CameraPreviewNSView: NSView {
             session?.inputs
             .compactMap { $0 as? AVCaptureDeviceInput }
             .contains { $0.device.position == .front } ?? false
-        previewLayer?.setAffineTransform(
-            isFrontFacing ? CGAffineTransform(scaleX: -1, y: 1) : .identity
-        )
+        guard let previewLayer else { return }
+
+        if let connection = previewLayer.connection, connection.isVideoMirroringSupported {
+            connection.automaticallyAdjustsVideoMirroring = false
+            connection.isVideoMirrored = isFrontFacing
+            previewLayer.transform = CATransform3DIdentity
+        } else {
+            previewLayer.transform =
+                isFrontFacing ? CATransform3DMakeScale(-1, 1, 1) : CATransform3DIdentity
+        }
     }
 
     override func layout() {
         super.layout()
-        previewLayer?.frame = bounds
+        layoutPreviewLayer()
+    }
+
+    private func layoutPreviewLayer() {
+        guard let previewLayer else { return }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        previewLayer.bounds = CGRect(origin: .zero, size: bounds.size)
+        previewLayer.position = CGPoint(x: bounds.midX, y: bounds.midY)
+        CATransaction.commit()
     }
 
     /// Completely disconnects and removes the preview layer.
@@ -117,8 +136,8 @@ struct CameraPreviewLayerView: NSViewRepresentable {
             nsView.tearDown()
             return
         }
-        // Only update if session is still running to avoid reconnecting to stopped session
-        if let session = sessionHolder.session, session.isRunning {
+        // Only update if session is still running and changed to avoid reconfiguring every frame.
+        if let session = sessionHolder.session, session.isRunning, nsView.session !== session {
             nsView.session = session
         }
     }

@@ -34,6 +34,18 @@ enum CameraOverlayResizeLogic {
         }
     }
 
+    /// Effective min/max overlay side lengths for a given drag area. Clamping
+    /// `minSide` to `maxSide` prevents wide, short bounds from inverting the
+    /// range and locking corner resizing.
+    static func sideBounds(for dragBounds: CGRect) -> (minSide: CGFloat, maxSide: CGFloat) {
+        let maxSide = CameraOverlayLayout.overlaySize(
+            sizeFraction: maxFraction,
+            bounds: dragBounds
+        )
+        let minSide = min(dragBounds.width * minFraction, maxSide)
+        return (minSide: minSide, maxSide: maxSide)
+    }
+
     /// New square frame for a corner drag: the dominant axis of the drag
     /// drives the size, and the corner opposite the dragged one stays fixed.
     static func resizedFrame(
@@ -61,12 +73,13 @@ enum CameraOverlayResizeLogic {
             outwardDy = -deltaY
         }
 
+        let effectiveMin = min(minSide, maxSide)
         let initialSide = initialFrame.width
         let candidate =
             abs(outwardDx) >= abs(outwardDy)
             ? initialSide + outwardDx
             : initialSide + outwardDy
-        let side = min(max(candidate, minSide), maxSide)
+        let side = min(max(candidate, effectiveMin), maxSide)
 
         switch corner {
         case .topRight:
@@ -139,6 +152,7 @@ final class CameraOverlayWindow: NSWindow {
     private var initialWindowOrigin: NSPoint = .zero
     private var initialWindowFrame: NSRect = .zero
     private var resizingCorner: CameraOverlayResizeLogic.Corner?
+    private var didResizeDrag = false
     var dragBounds: CGRect = .zero
     var overlaySize: CGFloat = 0
     var onPositionChanged: ((CGFloat, CGFloat) -> Void)?
@@ -178,6 +192,7 @@ final class CameraOverlayWindow: NSWindow {
         initialMouseLocation = NSEvent.mouseLocation
         initialWindowOrigin = frame.origin
         initialWindowFrame = frame
+        didResizeDrag = false
         // A press near a corner starts a resize; anywhere else moves.
         resizingCorner = CameraOverlayResizeLogic.corner(
             at: event.locationInWindow,
@@ -186,10 +201,11 @@ final class CameraOverlayWindow: NSWindow {
     }
 
     override func mouseUp(with event: NSEvent) {
-        if resizingCorner != nil, dragBounds.width > 0 {
+        if resizingCorner != nil, didResizeDrag, dragBounds.width > 0 {
             onSizeChangeEnded?(overlaySize / dragBounds.width)
         }
         resizingCorner = nil
+        didResizeDrag = false
     }
 
     override func mouseDragged(with event: NSEvent) {
@@ -216,19 +232,18 @@ final class CameraOverlayWindow: NSWindow {
     }
 
     private func resizeDrag(corner: CameraOverlayResizeLogic.Corner, deltaX: CGFloat, deltaY: CGFloat) {
-        let minSide = dragBounds.width * CameraOverlayResizeLogic.minFraction
-        let maxSide = CameraOverlayLayout.overlaySize(
-            sizeFraction: CameraOverlayResizeLogic.maxFraction,
-            bounds: dragBounds
-        )
+        if deltaX != 0 || deltaY != 0 {
+            didResizeDrag = true
+        }
+        let limits = CameraOverlayResizeLogic.sideBounds(for: dragBounds)
 
         var newFrame = CameraOverlayResizeLogic.resizedFrame(
             corner: corner,
             initialFrame: initialWindowFrame,
             deltaX: deltaX,
             deltaY: deltaY,
-            minSide: minSide,
-            maxSide: maxSide
+            minSide: limits.minSide,
+            maxSide: limits.maxSide
         )
         newFrame.origin.x = max(dragBounds.minX, min(newFrame.origin.x, dragBounds.maxX - newFrame.width))
         newFrame.origin.y = max(dragBounds.minY, min(newFrame.origin.y, dragBounds.maxY - newFrame.height))
@@ -280,13 +295,46 @@ final class CameraOverlayWindow: NSWindow {
     }
 }
 
+/// Manages pushed diagonal resize cursors so leaving the overlay or closing it
+/// restores the prior cursor without clobbering other apps' cursors.
+@MainActor
+final class ResizeCursorManager {
+    private var activePosition: NSCursor.FrameResizePosition?
+
+    func update(position: NSCursor.FrameResizePosition?) {
+        guard position != activePosition else { return }
+        if activePosition != nil {
+            NSCursor.pop()
+        }
+        if let position {
+            NSCursor.frameResize(position: position, directions: .all).push()
+        }
+        activePosition = position
+    }
+
+    func reset() {
+        update(position: nil)
+    }
+}
+
 /// Camera preview content (moving and resizing are handled by the window).
 /// Fills the window, so it tracks live resizes. The hover chrome never
 /// appears in recordings: the whole window is excluded from capture.
 struct CameraOverlayContent: View {
     let sessionHolder: SessionHolder
     let shape: AppSettings.CameraOverlayShape
+    let cursorManager: ResizeCursorManager
     @State private var isHovering = false
+
+    init(
+        sessionHolder: SessionHolder,
+        shape: AppSettings.CameraOverlayShape,
+        cursorManager: ResizeCursorManager = ResizeCursorManager()
+    ) {
+        self.sessionHolder = sessionHolder
+        self.shape = shape
+        self.cursorManager = cursorManager
+    }
 
     var body: some View {
         GeometryReader { geometry in
@@ -304,8 +352,11 @@ struct CameraOverlayContent: View {
                     case .active(let point):
                         updateCursor(at: point, size: geometry.size)
                     case .ended:
-                        NSCursor.arrow.set()
+                        cursorManager.reset()
                     }
+                }
+                .onDisappear {
+                    cursorManager.reset()
                 }
         }
         // No SwiftUI shadow: it filled the window's corners around the
@@ -314,28 +365,24 @@ struct CameraOverlayContent: View {
 
     /// Shows a diagonal resize cursor over the corner hit regions.
     /// SwiftUI local coordinates have a top-left origin, unlike the window's
-    /// bottom-left hit test, so corners are computed visually here.
+    /// bottom-left hit test, so the Y coordinate is flipped before hit testing.
     private func updateCursor(at point: CGPoint, size: CGSize) {
-        let hit = CameraOverlayResizeLogic.cornerHitSize
-        let nearLeft = point.x <= hit
-        let nearRight = point.x >= size.width - hit
-        let nearTop = point.y <= hit
-        let nearBottom = point.y >= size.height - hit
+        let flippedPoint = CGPoint(x: point.x, y: size.height - point.y)
+        let corner = CameraOverlayResizeLogic.corner(
+            at: flippedPoint,
+            in: CGRect(origin: .zero, size: size)
+        )
 
         let position: NSCursor.FrameResizePosition?
-        switch (nearLeft, nearRight, nearTop, nearBottom) {
-        case (true, false, true, false): position = .topLeft
-        case (false, true, true, false): position = .topRight
-        case (true, false, false, true): position = .bottomLeft
-        case (false, true, false, true): position = .bottomRight
-        default: position = nil
+        switch corner {
+        case .topLeft: position = .topLeft
+        case .topRight: position = .topRight
+        case .bottomLeft: position = .bottomLeft
+        case .bottomRight: position = .bottomRight
+        case .none: position = nil
         }
 
-        if let position {
-            NSCursor.frameResize(position: position, directions: .all).set()
-        } else {
-            NSCursor.arrow.set()
-        }
+        cursorManager.update(position: position)
     }
 }
 
@@ -374,6 +421,7 @@ private struct ResizeChrome: View {
 final class CameraOverlayController {
     private var window: CameraOverlayWindow?
     private var sessionHolder: SessionHolder?
+    private let cursorManager = ResizeCursorManager()
 
     /// Shows the camera overlay window.
     func show(
@@ -386,6 +434,10 @@ final class CameraOverlayController {
         onSizeChanged: @escaping (CGFloat) -> Void,
         onSizeChangeEnded: @escaping (CGFloat) -> Void
     ) {
+        if window != nil || sessionHolder != nil {
+            hide()
+        }
+
         let overlaySize = CameraOverlayLayout.overlaySize(
             sizeFraction: sizeFraction,
             bounds: bounds
@@ -409,7 +461,11 @@ final class CameraOverlayController {
         let holder = SessionHolder(session: session)
         self.sessionHolder = holder
 
-        let content = CameraOverlayContent(sessionHolder: holder, shape: shape)
+        let content = CameraOverlayContent(
+            sessionHolder: holder,
+            shape: shape,
+            cursorManager: cursorManager
+        )
         window.contentView = NSHostingView(rootView: content)
         window.orderFrontRegardless()
 
@@ -417,6 +473,7 @@ final class CameraOverlayController {
     }
 
     func hide() {
+        cursorManager.reset()
         sessionHolder?.invalidate()
         sessionHolder = nil
 
