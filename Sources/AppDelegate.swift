@@ -79,16 +79,29 @@ enum PreviewPlacement {
 final class PreviewWindow: NSWindow {
     var undoCommands = PreviewUndoCommands()
     var shareSource = PreviewShareSource()
-    /// Kept while a drag is in flight; a file promise holds its delegate
+    /// Kept while drags are in flight; each file promise holds its delegate
     /// weakly.
-    private var promisedRecording: PromisedRecording?
+    private var promisedRecordings: [UUID: PromisedRecording] = [:]
+    private var draggingSessionPromises: [ObjectIdentifier: UUID] = [:]
+
+    var activePromisedRecordingCount: Int { promisedRecordings.count }
+
+    func registerPromisedRecording(
+        copyFile: @escaping PromisedRecording.FileCopier = PromisedRecording.replaceAndCopyItem
+    ) -> (id: UUID, promise: PromisedRecording) {
+        let id = UUID()
+        let promise = PromisedRecording(source: shareSource, copyFile: copyFile) { [weak self] in
+            self?.promisedRecordings.removeValue(forKey: id)
+        }
+        promisedRecordings[id] = promise
+        return (id, promise)
+    }
 
     /// Drags edits that are not rendered yet as a file promise, which
     /// Finder and Mail fill in once the render finishes.
     func beginPromisedFileDrag(with event: NSEvent) {
         guard let view = contentView else { return }
-        let promise = PromisedRecording(source: shareSource)
-        promisedRecording = promise
+        let (id, promise) = registerPromisedRecording()
         let provider = NSFilePromiseProvider(fileType: UTType.mpeg4Movie.identifier, delegate: promise)
         let item = NSDraggingItem(pasteboardWriter: provider)
         let point = view.convert(event.locationInWindow, from: nil)
@@ -96,7 +109,8 @@ final class PreviewWindow: NSWindow {
             NSRect(x: point.x - 16, y: point.y - 16, width: 32, height: 32),
             contents: NSWorkspace.shared.icon(for: .mpeg4Movie)
         )
-        view.beginDraggingSession(with: [item], event: event, source: self)
+        let session = view.beginDraggingSession(with: [item], event: event, source: self)
+        draggingSessionPromises[ObjectIdentifier(session)] = id
     }
 
     @objc func undo(_ sender: Any?) {
@@ -126,17 +140,54 @@ extension PreviewWindow: NSDraggingSource {
     ) -> NSDragOperation {
         .copy
     }
+
+    func draggingSession(
+        _ session: NSDraggingSession,
+        endedAt screenPoint: NSPoint,
+        operation: NSDragOperation
+    ) {
+        let sessionKey = ObjectIdentifier(session)
+        guard let promiseID = draggingSessionPromises.removeValue(forKey: sessionKey) else { return }
+        if operation.isEmpty {
+            promisedRecordings.removeValue(forKey: promiseID)
+        }
+    }
 }
 
 /// Writes the preview's shareable file where a promised drag was dropped.
 final class PromisedRecording: NSObject, NSFilePromiseProviderDelegate {
+    typealias FileCopier = @Sendable (URL, URL) throws -> Void
+
     private let source: PreviewShareSource
     private let fileName: String
+    private let copyFile: FileCopier
+    private let onFinish: (@MainActor () -> Void)?
 
     @MainActor
-    init(source: PreviewShareSource) {
+    init(
+        source: PreviewShareSource,
+        copyFile: @escaping FileCopier = PromisedRecording.replaceAndCopyItem,
+        onFinish: (@MainActor () -> Void)? = nil
+    ) {
         self.source = source
         fileName = source.fileName()
+        self.copyFile = copyFile
+        self.onFinish = onFinish
+    }
+
+    static func replaceAndCopyItem(from sourceURL: URL, to destinationURL: URL) throws {
+        let normalizedSource = sourceURL.standardizedFileURL.resolvingSymlinksInPath()
+        let normalizedDestination = destinationURL.standardizedFileURL.resolvingSymlinksInPath()
+        guard normalizedSource != normalizedDestination else { return }
+
+        let fileManager = FileManager.default
+        let destinationPath = destinationURL.path(percentEncoded: false)
+        if fileManager.fileExists(atPath: destinationPath)
+            || ((try? fileManager.attributesOfItem(atPath: destinationPath)) != nil)
+        {
+            try fileManager.removeItem(at: destinationURL)
+        }
+        try fileManager.copyItem(at: sourceURL, to: destinationURL)
     }
 
     func filePromiseProvider(_ filePromiseProvider: NSFilePromiseProvider, fileNameForType fileType: String) -> String {
@@ -150,10 +201,15 @@ final class PromisedRecording: NSObject, NSFilePromiseProviderDelegate {
     ) {
         nonisolated(unsafe) let completion = completionHandler
         let source = source
+        let copyFile = copyFile
+        let onFinish = onFinish
         Task { @MainActor in
+            defer { onFinish?() }
             do {
                 let file = try await source.shareableFile()
-                try FileManager.default.copyItem(at: file, to: url)
+                try await Task.detached(priority: .userInitiated) {
+                    try copyFile(file, url)
+                }.value
                 completion(nil)
             } catch {
                 completion(error)
@@ -410,6 +466,10 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        Task.detached(priority: .utility) {
+            ShareTempStorage.cleanupStaleShareFolders()
+        }
+
         screenRecorder = ScreenRecorder()
         screenRecorder.onUnexpectedStop = { [weak self] in
             self?.handleUnexpectedStop()
@@ -947,6 +1007,11 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     func windowWillClose(_ notification: Notification) {
         guard let window = notification.object as? NSWindow else { return }
 
+        if let previewWindow = window as? PreviewWindow {
+            previewWindow.undoCommands.reset()
+            previewWindow.shareSource.reset()
+        }
+
         if window === settingsWindow {
             settingsWindow = nil
         } else if window === recordingDialogWindow {
@@ -962,7 +1027,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
 
         if openWindows.isEmpty {
-            NSApp.setActivationPolicy(.accessory)
+            NSApp?.setActivationPolicy(.accessory)
         }
     }
 
