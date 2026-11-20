@@ -1462,7 +1462,7 @@ final class AppSettingsTests: XCTestCase {
 
         XCTAssertEqual(entitlements["com.apple.security.device.audio-input"] as? Bool, true)
         XCTAssertEqual(entitlements["com.apple.security.device.camera"] as? Bool, true)
-        XCTAssertEqual(entitlements["com.apple.security.hardened-runtime"] as? Bool, true)
+        XCTAssertNil(entitlements["com.apple.security.hardened-runtime"])
     }
 
     func testPackageManifestPinsMacOSPlatformAndSparkleDependency() throws {
