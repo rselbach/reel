@@ -21,9 +21,6 @@
       "XCTAssertNoThrow"
     ]
   },
-  "orderedImports": {
-    "includeConditionalImports": false
-  },
   "prioritizeKeepingFunctionOutputTogether": false,
   "reflowMultilineStringLiterals": "never",
   "respectsExistingLineBreaks": true,
