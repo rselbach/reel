@@ -50,8 +50,8 @@ enum RegionSelectionLabel {
         return "\(dimensions.width) × \(dimensions.height) px"
     }
 
-    /// Puts the readout just above the selection, flipping to just below when
-    /// the selection is close enough to the top that it would be clipped.
+    /// Puts the readout just above the selection, tucking it inside the top edge
+    /// when the selection is close enough to the top that it would be clipped.
     static func origin(for rect: CGRect, labelSize: CGSize, in bounds: CGRect) -> CGPoint {
         let above = rect.maxY + margin
         let fitsAbove = above + labelSize.height <= bounds.maxY
@@ -148,12 +148,13 @@ enum RegionAdjustment {
     }
 
     static func handle(at point: CGPoint, in rect: CGRect, hitSize: CGFloat = handleHitSize) -> Handle? {
-        guard rect.insetBy(dx: -hitSize, dy: -hitSize).contains(point) else { return nil }
+        let effectiveHitSize = max(0, min(hitSize, rect.width / 3, rect.height / 3))
+        guard rect.insetBy(dx: -effectiveHitSize, dy: -effectiveHitSize).contains(point) else { return nil }
 
-        let nearLeft = abs(point.x - rect.minX) <= hitSize
-        let nearRight = abs(point.x - rect.maxX) <= hitSize
-        let nearBottom = abs(point.y - rect.minY) <= hitSize
-        let nearTop = abs(point.y - rect.maxY) <= hitSize
+        let nearLeft = abs(point.x - rect.minX) <= effectiveHitSize
+        let nearRight = abs(point.x - rect.maxX) <= effectiveHitSize
+        let nearBottom = abs(point.y - rect.minY) <= effectiveHitSize
+        let nearTop = abs(point.y - rect.maxY) <= effectiveHitSize
 
         switch (nearLeft, nearRight, nearBottom, nearTop) {
         case (true, _, true, _): return .bottomLeft
@@ -185,48 +186,38 @@ enum RegionAdjustment {
             )
         }
 
-        var result: CGRect
-        switch handle {
-        case .move:
-            result = rect.offsetBy(dx: delta.x, dy: delta.y)
-        case .bottomLeft:
-            result = CGRect(
-                x: rect.minX + delta.x,
-                y: rect.minY + delta.y,
-                width: rect.width - delta.x,
-                height: rect.height - delta.y
-            )
-        case .bottomRight:
-            result = CGRect(
-                x: rect.minX,
-                y: rect.minY + delta.y,
-                width: rect.width + delta.x,
-                height: rect.height - delta.y
-            )
-        case .topLeft:
-            result = CGRect(
-                x: rect.minX + delta.x,
-                y: rect.minY,
-                width: rect.width - delta.x,
-                height: rect.height + delta.y
-            )
-        case .topRight:
-            result = CGRect(
-                x: rect.minX,
-                y: rect.minY,
-                width: rect.width + delta.x,
-                height: rect.height + delta.y
-            )
+        if handle == .move {
+            var result = rect.offsetBy(dx: delta.x, dy: delta.y).standardized
+            result.size.width = min(max(minimumSize, result.width), bounds.width)
+            result.size.height = min(max(minimumSize, result.height), bounds.height)
+            result.origin.x = min(max(bounds.minX, result.minX), bounds.maxX - result.width)
+            result.origin.y = min(max(bounds.minY, result.minY), bounds.maxY - result.height)
+            return result
         }
 
-        // A drag past the opposite edge flips the rect; standardizing keeps
-        // the result well formed instead of negative.
-        result = result.standardized
-        result.size.width = min(max(minimumSize, result.width), bounds.width)
-        result.size.height = min(max(minimumSize, result.height), bounds.height)
-        result.origin.x = min(max(bounds.minX, result.minX), bounds.maxX - result.width)
-        result.origin.y = min(max(bounds.minY, result.minY), bounds.maxY - result.height)
-        return result
+        var minX = rect.minX
+        var maxX = rect.maxX
+        var minY = rect.minY
+        var maxY = rect.maxY
+
+        switch handle {
+        case .bottomLeft:
+            minX = max(bounds.minX, min(rect.minX + delta.x, max(bounds.minX, maxX - minimumSize)))
+            minY = max(bounds.minY, min(rect.minY + delta.y, max(bounds.minY, maxY - minimumSize)))
+        case .bottomRight:
+            maxX = min(bounds.maxX, max(rect.maxX + delta.x, min(bounds.maxX, minX + minimumSize)))
+            minY = max(bounds.minY, min(rect.minY + delta.y, max(bounds.minY, maxY - minimumSize)))
+        case .topLeft:
+            minX = max(bounds.minX, min(rect.minX + delta.x, max(bounds.minX, maxX - minimumSize)))
+            maxY = min(bounds.maxY, max(rect.maxY + delta.y, min(bounds.maxY, minY + minimumSize)))
+        case .topRight:
+            maxX = min(bounds.maxX, max(rect.maxX + delta.x, min(bounds.maxX, minX + minimumSize)))
+            maxY = min(bounds.maxY, max(rect.maxY + delta.y, min(bounds.maxY, minY + minimumSize)))
+        case .move:
+            break
+        }
+
+        return CGRect(x: minX, y: minY, width: maxX - minX, height: maxY - minY)
     }
 
     private static func ratioLockedAdjustment(
@@ -256,16 +247,30 @@ enum RegionAdjustment {
             return rect
         }
 
-        var current = CGPoint(
+        let minimumHeight = max(minimumSize, minimumSize / ratio)
+        let minimumWidth = minimumHeight * ratio
+        let rawCurrent = CGPoint(
             x: originalCorner.x + delta.x,
             y: originalCorner.y + delta.y
         )
-        if current.x == anchor.x {
-            current.x += originalCorner.x < anchor.x ? -1 : 1
-        }
-        if current.y == anchor.y {
-            current.y += originalCorner.y < anchor.y ? -1 : 1
-        }
+        let current = CGPoint(
+            x: constrainedCoordinate(
+                desired: rawCurrent.x,
+                anchor: anchor.x,
+                original: originalCorner.x,
+                minBound: bounds.minX,
+                maxBound: bounds.maxX,
+                minimumExtent: minimumWidth
+            ),
+            y: constrainedCoordinate(
+                desired: rawCurrent.y,
+                anchor: anchor.y,
+                original: originalCorner.y,
+                minBound: bounds.minY,
+                maxBound: bounds.maxY,
+                minimumExtent: minimumHeight
+            )
+        )
 
         return RegionAspectConstraint.rect(
             anchor: anchor,
@@ -274,6 +279,41 @@ enum RegionAdjustment {
             ratio: ratio,
             minimumSize: minimumSize
         )
+    }
+
+    private static func constrainedCoordinate(
+        desired: CGFloat,
+        anchor: CGFloat,
+        original: CGFloat,
+        minBound: CGFloat,
+        maxBound: CGFloat,
+        minimumExtent: CGFloat
+    ) -> CGFloat {
+        let lowSpace = max(0, anchor - minBound)
+        let highSpace = max(0, maxBound - anchor)
+        let originalLow = original < anchor
+        let wantsLow = desired == anchor ? originalLow : desired < anchor
+        let lowHasRoom = minimumExtent > 0 ? lowSpace >= minimumExtent : lowSpace > 0
+        let highHasRoom = minimumExtent > 0 ? highSpace >= minimumExtent : highSpace > 0
+        let fallbackStep = max(minimumExtent, 1)
+
+        if wantsLow {
+            if lowHasRoom {
+                return desired < anchor ? desired : anchor - fallbackStep
+            }
+            if highSpace > lowSpace {
+                return anchor + fallbackStep
+            }
+            return desired < anchor ? desired : anchor - fallbackStep
+        } else {
+            if highHasRoom {
+                return desired > anchor ? desired : anchor + fallbackStep
+            }
+            if lowSpace > highSpace {
+                return anchor - fallbackStep
+            }
+            return desired > anchor ? desired : anchor + fallbackStep
+        }
     }
 }
 
@@ -461,6 +501,10 @@ final class RegionSelectionWindow: NSWindow {
             return
         }
     }
+
+    override func flagsChanged(with event: NSEvent) {
+        selectionView?.handleFlagsChanged(event)
+    }
 }
 
 final class RegionSelectionView: NSView {
@@ -482,6 +526,7 @@ final class RegionSelectionView: NSView {
     private var activeHandle: RegionAdjustment.Handle?
     private var handleDragOrigin: CGPoint?
     private var rectAtHandleDragStart: CGRect?
+    private var lastDragPoint: CGPoint?
     private var isRatioLocked = false
     private let backingScaleFactor: CGFloat
     private let hintLabel: NSTextField
@@ -535,6 +580,7 @@ final class RegionSelectionView: NSView {
         activeHandle = nil
         handleDragOrigin = nil
         rectAtHandleDragStart = nil
+        lastDragPoint = nil
         isRatioLocked = false
         showHint(Hint.draw)
         needsDisplay = true
@@ -548,6 +594,7 @@ final class RegionSelectionView: NSView {
 
     override func mouseDown(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
+        isRatioLocked = false
 
         // A double-click inside a drawn selection is the fast path to record.
         if phase == .adjusting, event.clickCount >= 2, let rect = currentRect, rect.contains(point) {
@@ -564,12 +611,14 @@ final class RegionSelectionView: NSView {
             activeHandle = handle
             handleDragOrigin = point
             rectAtHandleDragStart = rect
+            lastDragPoint = point
             return
         }
 
         onSelectionStart?()
         phase = .drawing
         startPoint = point
+        lastDragPoint = point
         currentRect = nil
         activeHandle = nil
         hintLabel.isHidden = true
@@ -578,12 +627,24 @@ final class RegionSelectionView: NSView {
 
     override func mouseDragged(with event: NSEvent) {
         let point = convert(event.locationInWindow, from: nil)
+        lastDragPoint = point
+        applyDrag(to: point, shiftPressed: event.modifierFlags.contains(.shift))
+    }
 
-        let lockedRatio =
-            event.modifierFlags.contains(.shift)
-            ? RegionAspectConstraint.ratio
-            : nil
-        isRatioLocked = lockedRatio != nil
+    override func flagsChanged(with event: NSEvent) {
+        handleFlagsChanged(event)
+    }
+
+    func handleFlagsChanged(_ event: NSEvent) {
+        guard let point = lastDragPoint else { return }
+        if activeHandle != nil || (startPoint != nil && currentRect != nil) {
+            applyDrag(to: point, shiftPressed: event.modifierFlags.contains(.shift))
+        }
+    }
+
+    private func applyDrag(to point: CGPoint, shiftPressed: Bool) {
+        let lockedRatio = shiftPressed ? RegionAspectConstraint.ratio : nil
+        isRatioLocked = lockedRatio != nil && activeHandle != .move
 
         if let handle = activeHandle,
             let origin = handleDragOrigin,
@@ -620,10 +681,14 @@ final class RegionSelectionView: NSView {
     }
 
     override func mouseUp(with event: NSEvent) {
+        isRatioLocked = false
+        lastDragPoint = nil
+
         if activeHandle != nil {
             activeHandle = nil
             handleDragOrigin = nil
             rectAtHandleDragStart = nil
+            needsDisplay = true
             return
         }
 
@@ -664,7 +729,12 @@ final class RegionSelectionView: NSView {
     }
 
     private func commit() {
-        guard let rect = currentRect else { return }
+        guard let rect = currentRect,
+            rect.width >= RegionMath.minimumSelectionSize,
+            rect.height >= RegionMath.minimumSelectionSize
+        else {
+            return
+        }
         onSelection?(rect)
     }
 
