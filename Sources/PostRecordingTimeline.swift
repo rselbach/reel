@@ -560,8 +560,12 @@ struct TimelineEdit: Equatable, Sendable {
         var cursor = 0.0
         for (index, range) in keptRanges.enumerated() {
             let next = cursor + range.duration
-            if time < next || index == keptRanges.count - 1 {
-                return min(range.end, range.start + time - cursor)
+            if time < next - 1e-12 || index == keptRanges.count - 1 {
+                let candidate = min(range.end, max(range.start, range.start + time - cursor))
+                if index < keptRanges.count - 1 && candidate >= range.end {
+                    return keptRanges[index + 1].start
+                }
+                return candidate
             }
             cursor = next
         }

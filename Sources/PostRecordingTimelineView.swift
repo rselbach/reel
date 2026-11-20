@@ -1053,7 +1053,14 @@ struct PostRecordingTimelineView: View {
         .accessibilityValue(formattedEditedTime(currentSourceTime))
         .accessibilityHint(PostRecordingText.playheadHint)
         .accessibilityAdjustableAction { direction in
-            onSeek(currentSourceTime + adjustment(for: direction, amount: 1))
+            let delta = adjustment(for: direction, amount: 1)
+            if let target = PostRecordingTimelineMath.sourceTimeBySkipping(
+                fromSourceTime: currentSourceTime,
+                seconds: delta,
+                edit: edit
+            ) {
+                onSeek(target)
+            }
         }
         .accessibilityAction(named: Text(PostRecordingText.splitClipAtPlayhead)) {
             splitClipAtPlayhead()

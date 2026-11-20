@@ -430,6 +430,65 @@ final class PostRecordingTimelineTests: XCTestCase {
         )
     }
 
+    func testBackwardSteppingCrossesDeletedMiddleClipsWithoutSnappingBack() throws {
+        var edit = try XCTUnwrap(TimelineEdit(sourceDuration: 10))
+        let deletedID = try XCTUnwrap(edit.splitClip(at: 2))
+        _ = try XCTUnwrap(edit.splitClip(at: 5))
+        XCTAssertTrue(edit.deleteClip(id: deletedID))
+
+        let frame = 1.0 / 30.0
+        let fromRightEdge = try XCTUnwrap(
+            PostRecordingTimelineMath.sourceTimeBySkipping(
+                fromSourceTime: 5.0,
+                seconds: -frame,
+                edit: edit
+            )
+        )
+        XCTAssertEqual(fromRightEdge, 2.0 - frame, accuracy: 1e-9)
+        XCTAssertEqual(edit.playableSourceTime(atOrAfter: fromRightEdge), fromRightEdge)
+
+        let fromLeftEdge = try XCTUnwrap(
+            PostRecordingTimelineMath.sourceTimeBySkipping(
+                fromSourceTime: 2.0,
+                seconds: -frame,
+                edit: edit
+            )
+        )
+        XCTAssertEqual(fromLeftEdge, 2.0 - frame, accuracy: 1e-9)
+        XCTAssertEqual(edit.playableSourceTime(atOrAfter: fromLeftEdge), fromLeftEdge)
+
+        let voiceOverFromRightEdge = try XCTUnwrap(
+            PostRecordingTimelineMath.sourceTimeBySkipping(
+                fromSourceTime: 5.0,
+                seconds: -1.0,
+                edit: edit
+            )
+        )
+        XCTAssertEqual(voiceOverFromRightEdge, 1.0, accuracy: 1e-9)
+        XCTAssertEqual(edit.playableSourceTime(atOrAfter: voiceOverFromRightEdge), voiceOverFromRightEdge)
+
+        let voiceOverFromHalfSecondPast = try XCTUnwrap(
+            PostRecordingTimelineMath.sourceTimeBySkipping(
+                fromSourceTime: 5.5,
+                seconds: -1.0,
+                edit: edit
+            )
+        )
+        XCTAssertEqual(voiceOverFromHalfSecondPast, 1.5, accuracy: 1e-9)
+        XCTAssertEqual(edit.playableSourceTime(atOrAfter: voiceOverFromHalfSecondPast), voiceOverFromHalfSecondPast)
+
+        var cursor = 5.0 + frame
+        cursor = try XCTUnwrap(
+            PostRecordingTimelineMath.sourceTimeBySkipping(fromSourceTime: cursor, seconds: -frame, edit: edit)
+        )
+        XCTAssertEqual(cursor, 5.0, accuracy: 1e-9)
+        cursor = try XCTUnwrap(
+            PostRecordingTimelineMath.sourceTimeBySkipping(fromSourceTime: cursor, seconds: -frame, edit: edit)
+        )
+        XCTAssertEqual(cursor, 2.0 - frame, accuracy: 1e-9)
+        XCTAssertEqual(edit.playableSourceTime(atOrAfter: cursor), cursor)
+    }
+
     func testTimelineSelectionTracksExistingClips() throws {
         var edit = try XCTUnwrap(TimelineEdit(sourceDuration: 10))
         let clipID = try XCTUnwrap(edit.splitClip(at: 4))

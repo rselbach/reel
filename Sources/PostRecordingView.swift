@@ -962,12 +962,15 @@ struct PostRecordingView: View {
         if isEditingZoomFocus {
             timelineSelection = .none
         }
-        let target = currentTime + Double(count) * frameDuration
-        guard count < 0, let edit else {
-            seekPlayer(to: target)
-            return
-        }
-        seekPlayer(to: edit.playableSourceTime(atOrBefore: target) ?? edit.firstKeptTime ?? 0)
+        guard
+            let edit,
+            let target = PostRecordingTimelineMath.sourceTimeBySkipping(
+                fromSourceTime: currentTime,
+                seconds: Double(count) * frameDuration,
+                edit: edit
+            )
+        else { return }
+        seekPlayer(to: target)
     }
 
     private func trimToPlayhead(_ edge: TrimEdge) {
