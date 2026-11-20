@@ -91,6 +91,10 @@ enum CursorMetadataTrack {
         static let outside = CapturedState(contentPosition: nil, pressedButtons: 0)
     }
 
+    private struct VersionEnvelope: Decodable {
+        let version: Int
+    }
+
     private struct Payload: Decodable {
         let version: Int
         let position: CursorTimeline.Position?
@@ -101,15 +105,14 @@ enum CursorMetadataTrack {
         let input: AVAssetWriterInput
 
         private let adaptor: AVAssetWriterInputMetadataAdaptor
-        private let sampleDuration: CMTime
+        private var lastTimestamp: CMTime?
 
         init(assetWriter: AVAssetWriter, frameRate: Int) throws {
-            sampleDuration = CMTime(value: 1, timescale: CMTimeScale(max(1, frameRate)))
             let prototype = CursorMetadataTrack.group(
                 position: nil,
                 pressedButtons: 0,
                 time: .zero,
-                duration: sampleDuration
+                duration: .invalid
             )
             guard let formatDescription = prototype.copyFormatDescription() else {
                 throw CursorMetadataError.cannotCreateFormatDescription
@@ -137,20 +140,27 @@ enum CursorMetadataTrack {
             pressedButtons: UInt64,
             at time: CMTime
         ) -> Bool {
+            guard time.isValid, time.isNumeric else { return true }
+            if let lastTimestamp, time <= lastTimestamp {
+                return true
+            }
             guard input.isReadyForMoreMediaData else { return true }
             let group = CursorMetadataTrack.group(
                 position: position,
                 pressedButtons: pressedButtons,
                 time: time,
-                duration: sampleDuration
+                duration: .invalid
             )
-            return adaptor.append(group)
+            guard adaptor.append(group) else { return false }
+            lastTimestamp = time
+            return true
         }
     }
 
     static func load(from url: URL) async throws -> CursorTimeline {
         let asset = AVURLAsset(url: url)
         let tracks = try await asset.loadTracks(withMediaType: .metadata)
+        let decoder = JSONDecoder()
         var samples: [CursorTimeline.Sample] = []
 
         for track in tracks {
@@ -172,8 +182,11 @@ enum CursorMetadataTrack {
                 else { continue }
 
                 let data = try JSONSerialization.data(withJSONObject: value)
-                let payload = try JSONDecoder().decode(Payload.self, from: data as Data)
-                guard payload.version == 1 else { continue }
+                guard
+                    let envelope = try? decoder.decode(VersionEnvelope.self, from: data),
+                    envelope.version == 1
+                else { continue }
+                let payload = try decoder.decode(Payload.self, from: data)
 
                 let seconds = CMTimeGetSeconds(group.timeRange.start)
                 guard seconds.isFinite else { continue }
