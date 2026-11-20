@@ -5,7 +5,10 @@ from collections import Counter
 from feature_docs import AUTOMATION_ONLY_STATUS, clean, read_tracker, split_steps
 
 
-PENDING_MARKER = "manual ui validation still pending"
+PENDING_MARKERS = (
+    "still pending",
+    "remains pending",
+)
 
 
 def status_bucket(status):
@@ -18,7 +21,7 @@ def status_bucket(status):
         return "failed"
     if lowered.startswith("manual validation blocked"):
         return "blocked"
-    if PENDING_MARKER in lowered:
+    if any(marker in lowered for marker in PENDING_MARKERS):
         return "pending"
     return "other"
 

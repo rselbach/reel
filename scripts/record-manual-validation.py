@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 import argparse
 from datetime import date
+import sys
 
 from feature_docs import (
     CHECKLIST_PATH,
-    EXPECTED_COLUMNS,
     TRACKER_PATH,
     read_tracker,
     render_checklist,
@@ -142,24 +142,28 @@ def update_row(row, args):
 
 def main():
     args = parse_args()
-    rows = read_tracker()
-    matches = [row for row in rows if row["ID"] == args.id]
-    if not matches:
-        raise SystemExit(f"unknown story ID: {args.id}")
+    try:
+        rows = read_tracker()
+        matches = [row for row in rows if row["ID"] == args.id]
+        if not matches:
+            raise ValueError(f"unknown story ID: {args.id}")
 
-    update_row(matches[0], args)
+        update_row(matches[0], args)
 
-    validate_tracker(rows)
-    rendered_checklist = render_checklist(rows)
-    if args.dry_run:
-        print(f"validated dry-run update for {args.id}")
-        print(f"would update {TRACKER_PATH}")
-        print(f"would regenerate {CHECKLIST_PATH}")
-        return 0
+        validate_tracker(rows)
+        rendered_checklist = render_checklist(rows)
+        if args.dry_run:
+            print(f"validated dry-run update for {args.id}")
+            print(f"would update {TRACKER_PATH}")
+            print(f"would regenerate {CHECKLIST_PATH}")
+            return 0
 
-    write_tracker(rows)
-    CHECKLIST_PATH.write_text(rendered_checklist)
-    validate_checklist(rows)
+        write_tracker(rows)
+        CHECKLIST_PATH.write_text(rendered_checklist)
+        validate_checklist(rows)
+    except ValueError as error:
+        print(f"error: {error}", file=sys.stderr)
+        return 1
 
     print(f"updated {args.id} in {TRACKER_PATH}")
     print(f"regenerated {CHECKLIST_PATH}")

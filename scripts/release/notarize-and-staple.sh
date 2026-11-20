@@ -1,60 +1,82 @@
 #!/usr/bin/env bash
+# Submits an archive or DMG to Apple notarization and staples the ticket.
 
 set -euo pipefail
 
-APP_PATH="${1:-}"
-ZIP_PATH="${2:-}"
-PROFILE="${NOTARIZE_PROFILE:-NOTARIZE_PROFILE}"
-
-if [[ -z "$APP_PATH" || -z "$ZIP_PATH" ]]; then
-    echo "Usage: $0 <app-path> <zip-path>"
-    exit 1
-fi
-
-if [[ ! -e "$APP_PATH" ]]; then
-    echo "App path not found: $APP_PATH"
-    exit 1
-fi
-
-if [[ ! -f "$ZIP_PATH" ]]; then
-    echo "Zip path not found: $ZIP_PATH"
-    exit 1
-fi
-
-SUBMIT_OUTPUT=$(xcrun notarytool submit "$ZIP_PATH" \
-    --keychain-profile "$PROFILE" \
-    --wait \
-    --output-format json)
-
-echo "$SUBMIT_OUTPUT"
-
 parse_notary_json_value() {
-    local key="$1"
-    local value
+  local key="$1"
+  local value
 
-    if ! value=$(printf '%s' "$SUBMIT_OUTPUT" | /usr/bin/python3 -c \
-        "import json,sys; data=json.load(sys.stdin); print(data.get('$key', ''))" 2>/dev/null); then
-        echo "Failed to parse notarytool JSON output."
-        echo "$SUBMIT_OUTPUT"
-        exit 1
-    fi
+  if ! value=$(printf '%s' "${SUBMIT_OUTPUT}" | /usr/bin/python3 -c \
+    'import json, sys; data = json.load(sys.stdin); print(data.get(sys.argv[1], ""))' \
+    "${key}" 2>/dev/null); then
+    echo "Failed to parse notarytool JSON output." >&2
+    echo "${SUBMIT_OUTPUT}" >&2
+    exit 1
+  fi
 
-    printf '%s' "$value"
+  printf '%s' "${value}"
 }
 
-SUBMISSION_ID="$(parse_notary_json_value id)"
-SUBMISSION_STATUS="$(parse_notary_json_value status)"
+main() {
+  local target_path="${1:-}"
+  local submission_path="${2:-}"
+  local profile="${NOTARIZE_PROFILE:-NOTARIZE_PROFILE}"
+  local keychain="${NOTARIZE_KEYCHAIN:-${KEYCHAIN_PATH:-}}"
+  local submit_status=0
+  local submission_id
+  local submission_status
+  local -a notary_args
 
-if [[ -z "$SUBMISSION_ID" || -z "$SUBMISSION_STATUS" ]]; then
-    echo "Missing notarization metadata in output."
-    echo "$SUBMIT_OUTPUT"
+  if [[ -z "${target_path}" || -z "${submission_path}" ]]; then
+    echo "Usage: $0 <target-path> <submission-path>" >&2
     exit 1
-fi
+  fi
 
-if [[ "$SUBMISSION_STATUS" != "Accepted" ]]; then
-    echo "Notarization failed (status=$SUBMISSION_STATUS, id=$SUBMISSION_ID)."
-    xcrun notarytool log "$SUBMISSION_ID" --keychain-profile "$PROFILE"
+  if [[ ! -e "${target_path}" ]]; then
+    echo "Target path not found: ${target_path}" >&2
     exit 1
-fi
+  fi
 
-xcrun stapler staple "$APP_PATH"
+  if [[ ! -f "${submission_path}" ]]; then
+    echo "Submission path not found: ${submission_path}" >&2
+    exit 1
+  fi
+
+  notary_args=(--keychain-profile "${profile}")
+  if [[ -n "${keychain}" ]]; then
+    notary_args+=(--keychain "${keychain}")
+  fi
+
+  SUBMIT_OUTPUT="$(xcrun notarytool submit "${submission_path}" \
+    "${notary_args[@]}" \
+    --wait \
+    --output-format json 2>&1)" || submit_status=$?
+
+  if (( submit_status != 0 )); then
+    echo "${SUBMIT_OUTPUT}" >&2
+    echo "Notarization submission failed (exit=${submit_status})." >&2
+    exit "${submit_status}"
+  fi
+
+  echo "${SUBMIT_OUTPUT}"
+
+  submission_id="$(parse_notary_json_value id)"
+  submission_status="$(parse_notary_json_value status)"
+
+  if [[ -z "${submission_id}" || -z "${submission_status}" ]]; then
+    echo "Missing notarization metadata in output." >&2
+    echo "${SUBMIT_OUTPUT}" >&2
+    exit 1
+  fi
+
+  if [[ "${submission_status}" != "Accepted" ]]; then
+    echo "Notarization failed (status=${submission_status}, id=${submission_id})." >&2
+    xcrun notarytool log "${submission_id}" "${notary_args[@]}" >&2 || true
+    exit 1
+  fi
+
+  xcrun stapler staple "${target_path}"
+}
+
+main "$@"

@@ -5,6 +5,7 @@ from feature_docs import (
     EXPECTED_COLUMNS,
     ROOT,
     automation_only_rows,
+    clean,
     manual_required_rows,
     render_checklist,
 )
@@ -16,10 +17,6 @@ def validate_tracker(rows):
     if ids != expected_ids:
         raise ValueError("story IDs must be contiguous and ordered from US-001")
 
-    duplicates = sorted({story_id for story_id in ids if ids.count(story_id) > 1})
-    if duplicates:
-        raise ValueError(f"duplicate story IDs: {', '.join(duplicates)}")
-
     missing_required = []
     for row in rows:
         for column in EXPECTED_COLUMNS:
@@ -28,22 +25,23 @@ def validate_tracker(rows):
     if missing_required:
         raise ValueError("blank required fields: " + ", ".join(missing_required))
 
-    missing_manual_steps = [
-        row["ID"] for row in rows if not row["Manual validation steps"].strip()
-    ]
-    if missing_manual_steps:
-        raise ValueError(
-            "stories missing manual validation steps: "
-            + ", ".join(missing_manual_steps)
-        )
-
+    empty_evidence_entries = []
     missing_evidence_paths = []
     for row in rows:
         for evidence in row["Code evidence"].split(";"):
-            path_text = evidence.strip().split(maxsplit=1)[0]
+            parts = evidence.strip().split(maxsplit=1)
+            if not parts:
+                empty_evidence_entries.append(row["ID"])
+                continue
+            path_text = parts[0]
             matches = list(ROOT.glob(path_text))
             if not matches:
                 missing_evidence_paths.append(f"{row['ID']}:{path_text}")
+    if empty_evidence_entries:
+        raise ValueError(
+            "code evidence contains empty entries: "
+            + ", ".join(sorted(set(empty_evidence_entries)))
+        )
     if missing_evidence_paths:
         raise ValueError(
             "code evidence references missing paths: "
@@ -69,10 +67,6 @@ def validate_checklist(rows):
         raise ValueError("checklist has unknown story IDs: " + ", ".join(extra))
     if duplicates:
         raise ValueError("checklist has duplicate story IDs: " + ", ".join(duplicates))
-    if len(ids) != len(rows):
-        raise ValueError(
-            f"checklist story count {len(ids)} does not match tracker count {len(rows)}"
-        )
 
     manual_required = manual_required_rows(rows)
     automation_only = automation_only_rows(rows)
@@ -87,7 +81,7 @@ def validate_checklist(rows):
         raise ValueError("checklist automation-only count is stale")
 
     for row in rows:
-        heading = f"## {row['ID']} - {row['Feature']}"
+        heading = f"## {row['ID']} - {clean(row['Feature'])}"
         if heading not in checklist:
             raise ValueError(f"checklist missing heading: {heading}")
 
