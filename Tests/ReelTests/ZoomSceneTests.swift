@@ -611,6 +611,123 @@ final class ZoomSceneTests: XCTestCase {
         }
     }
 
+    @MainActor
+    func testExportPlanFallsBackToPassthroughWhenZoomScenesLieInDeletedClips() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("Reel-Britta-Passthrough-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let sourceURL = directory.appendingPathComponent("Greendale-zoom-deleted.mp4")
+        try await Self.writeStripedFixture(to: sourceURL)
+
+        var edit = try XCTUnwrap(TimelineEdit(sourceDuration: 3))
+        let deletedID = try XCTUnwrap(edit.splitClip(at: 1))
+        _ = try XCTUnwrap(edit.splitClip(at: 2))
+        XCTAssertTrue(edit.deleteClip(id: deletedID))
+        try edit.addZoomScene(span: TimelineSpan(start: 1.1, end: 1.9))
+
+        XCTAssertTrue(ZoomVideoComposition.compactedSchedule(edit: edit).isEmpty)
+        let plan = try await ZoomVideoComposition.exportPlan(asset: AVURLAsset(url: sourceURL), edit: edit)
+        XCTAssertNil(plan.videoComposition)
+    }
+
+    @MainActor
+    func testMultiCutZoomExportAlignsScheduleWithInsertedCMTimes() async throws {
+        let directory = FileManager.default.temporaryDirectory
+            .appendingPathComponent("Reel-Annie-MultiCut-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+
+        let sourceURL = directory.appendingPathComponent("Greendale-multicut-source.mp4")
+        try await Self.writeStripedFixture(to: sourceURL)
+
+        var edit = try XCTUnwrap(TimelineEdit(sourceDuration: 3))
+        let cutOne = try XCTUnwrap(edit.splitClip(at: 0.334))
+        _ = try XCTUnwrap(edit.splitClip(at: 0.667))
+        let cutTwo = try XCTUnwrap(edit.splitClip(at: 1.334))
+        _ = try XCTUnwrap(edit.splitClip(at: 1.667))
+        XCTAssertTrue(edit.deleteClip(id: cutOne))
+        XCTAssertTrue(edit.deleteClip(id: cutTwo))
+        try edit.addZoomScene(
+            span: TimelineSpan(start: 1.7, end: 2.9),
+            focalPoint: try XCTUnwrap(UnitPoint2D(x: 0, y: 0.5))
+        )
+
+        let schedule = ZoomVideoComposition.compactedSchedule(edit: edit)
+        let expectedOffset =
+            CMTimeGetSeconds(
+                CMTimeAdd(
+                    CMTimeRange(
+                        start: CMTime(seconds: 0, preferredTimescale: 600),
+                        end: CMTime(seconds: 0.334, preferredTimescale: 600)
+                    ).duration,
+                    CMTimeRange(
+                        start: CMTime(seconds: 0.667, preferredTimescale: 600),
+                        end: CMTime(seconds: 1.334, preferredTimescale: 600)
+                    ).duration
+                )
+            )
+        let expectedThirdStart = CMTimeGetSeconds(CMTime(seconds: 1.667, preferredTimescale: 600))
+        XCTAssertEqual(schedule.count, 1)
+        XCTAssertEqual(schedule[0].span.start, expectedOffset + 1.7 - expectedThirdStart, accuracy: 1e-9)
+
+        let outputURL = directory.appendingPathComponent("Greendale-multicut-zoom.mp4")
+        try await VideoEditExporter.export(
+            sourceURL: sourceURL,
+            outputURL: outputURL,
+            quality: .source,
+            edit: edit
+        )
+
+        let generator = AVAssetImageGenerator(asset: AVURLAsset(url: outputURL))
+        generator.requestedTimeToleranceBefore = .zero
+        generator.requestedTimeToleranceAfter = .zero
+        let beforeZoom = try await Self.sampledColor(from: generator, at: 0.2, normalizedX: 0.8)
+        let insideZoom = try await Self.sampledColor(
+            from: generator,
+            at: schedule[0].span.start + 0.5,
+            normalizedX: 0.8
+        )
+        XCTAssertTrue(beforeZoom.isBlue, "before zoom: \(beforeZoom)")
+        XCTAssertTrue(insideZoom.isGreen, "inside zoom: \(insideZoom)")
+    }
+
+    func testZoomImageRendererAvoidsTransparentBorderBleedAtFractionalScale() throws {
+        let width = 300
+        let height = 180
+        let solidRed = CIImage(color: CIColor(red: 1, green: 0, blue: 0, alpha: 1))
+            .cropped(to: CGRect(x: 0, y: 0, width: width, height: height))
+
+        let scales = [1.35, 1.75, 2.3]
+        let focals = [
+            UnitPoint2D.center,
+            try XCTUnwrap(UnitPoint2D(x: 0, y: 0)),
+            try XCTUnwrap(UnitPoint2D(x: 1, y: 1)),
+        ]
+        for scale in scales {
+            for focal in focals {
+                let rendered = ZoomImageRenderer.render(
+                    solidRed,
+                    state: ZoomFrameState(focalPoint: focal, scale: scale)
+                )
+                let borderPoints = [
+                    CGPoint(x: 0, y: 0),
+                    CGPoint(x: width - 1, y: 0),
+                    CGPoint(x: 0, y: height - 1),
+                    CGPoint(x: width - 1, y: height - 1),
+                    CGPoint(x: width / 2, y: 0),
+                    CGPoint(x: width / 2, y: height - 1),
+                ]
+                for point in borderPoints {
+                    let rgba = try Self.sampledRGBA(from: rendered, at: point)
+                    XCTAssertEqual(rgba.alpha, 255, "alpha at \(point) scale \(scale) focal \(focal)")
+                    XCTAssertGreaterThanOrEqual(rgba.red, 250, "red at \(point) scale \(scale) focal \(focal)")
+                }
+            }
+        }
+    }
+
     private static func stripedImage(width: Int, height: Int) -> CIImage {
         let third = CGFloat(width) / 3
         let extent = CGRect(x: 0, y: 0, width: width, height: height)
@@ -771,6 +888,35 @@ final class ZoomSceneTests: XCTestCase {
             context.draw(pixel, in: CGRect(x: 0, y: 0, width: 1, height: 1))
         }
         return ZoomFixtureColor(red: bytes[0], green: bytes[1], blue: bytes[2])
+    }
+
+    private static func sampledRGBA(
+        from image: CIImage,
+        at point: CGPoint
+    ) throws -> (red: UInt8, green: UInt8, blue: UInt8, alpha: UInt8) {
+        let context = CIContext(options: [.cacheIntermediates: false])
+        let rect = CGRect(x: floor(point.x), y: floor(point.y), width: 1, height: 1)
+        guard let pixel = context.createCGImage(image, from: rect) else {
+            throw ZoomFixtureError.failed("Cannot render fixture RGBA pixel")
+        }
+        var bytes = [UInt8](repeating: 0, count: 4)
+        try bytes.withUnsafeMutableBytes { buffer in
+            guard
+                let context = CGContext(
+                    data: buffer.baseAddress,
+                    width: 1,
+                    height: 1,
+                    bitsPerComponent: 8,
+                    bytesPerRow: 4,
+                    space: CGColorSpaceCreateDeviceRGB(),
+                    bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+                )
+            else {
+                throw ZoomFixtureError.failed("Cannot create fixture RGBA context")
+            }
+            context.draw(pixel, in: CGRect(x: 0, y: 0, width: 1, height: 1))
+        }
+        return (bytes[0], bytes[1], bytes[2], bytes[3])
     }
 }
 

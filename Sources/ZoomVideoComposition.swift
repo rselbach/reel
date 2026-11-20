@@ -50,14 +50,15 @@ enum ZoomImageRenderer {
     static func render(
         _ image: CIImage,
         sourceTime: Double,
-        scenes: [ZoomScene]
+        scenes: [ZoomScene],
+        outputSize: CGSize? = nil
     ) -> CIImage {
         guard
             let scene = scenes.first(where: {
                 sourceTime >= $0.span.start && sourceTime < $0.span.end
             })
         else {
-            return render(image, state: nil)
+            return render(image, state: nil, outputSize: outputSize)
         }
         let state = ZoomTransition.state(
             at: sourceTime,
@@ -65,7 +66,7 @@ enum ZoomImageRenderer {
             focalPoint: scene.focalPoint,
             settings: scene.settings
         )
-        return render(image, state: state)
+        return render(image, state: state, outputSize: outputSize)
     }
 
     static func render(
@@ -90,9 +91,14 @@ enum ZoomImageRenderer {
         return render(image, state: state)
     }
 
-    static func render(_ image: CIImage, state: ZoomFrameState?) -> CIImage {
+    static func render(
+        _ image: CIImage,
+        state: ZoomFrameState?,
+        outputSize: CGSize? = nil
+    ) -> CIImage {
         let sourceExtent = image.extent
-        let outputExtent = CGRect(origin: .zero, size: sourceExtent.size)
+        let targetSize = outputSize ?? sourceExtent.size
+        let outputExtent = CGRect(origin: .zero, size: targetSize)
         let normalized = image.transformed(
             by: CGAffineTransform(
                 translationX: -sourceExtent.minX,
@@ -102,18 +108,30 @@ enum ZoomImageRenderer {
         guard
             let state,
             let layout = ZoomLayout.resolve(
-                sourceSize: outputExtent.size,
+                sourceSize: sourceExtent.size,
                 focalPoint: state.focalPoint,
                 scale: state.scale
             ),
-            let transform = layout.sourceToOutputTransform(outputSize: outputExtent.size)
+            let transform = layout.sourceToOutputTransform(outputSize: targetSize)
         else {
-            return normalized.cropped(to: outputExtent)
+            guard sourceExtent.width > 0, sourceExtent.height > 0 else {
+                return normalized.cropped(to: outputExtent)
+            }
+            let scaleX = targetSize.width / sourceExtent.width
+            let scaleY = targetSize.height / sourceExtent.height
+            if abs(scaleX - 1) < 1e-6 && abs(scaleY - 1) < 1e-6 {
+                return normalized.cropped(to: outputExtent)
+            }
+            return
+                normalized
+                .clampedToExtent()
+                .transformed(by: CGAffineTransform(scaleX: scaleX, y: scaleY))
+                .cropped(to: outputExtent)
         }
 
         return
             normalized
-            .cropped(to: layout.sourceCropRect)
+            .clampedToExtent()
             .transformed(by: transform)
             .cropped(to: outputExtent)
     }
@@ -140,25 +158,24 @@ enum ZoomVideoComposition {
     }
 
     static func exportPlan(asset: AVAsset, edit: TimelineEdit) async throws -> ZoomExportPlan {
-        guard !edit.zoomScenes.isEmpty else {
-            return try await planWithoutZoom(asset: asset, keptRanges: edit.keptRanges)
+        let keptRanges = edit.keptRanges
+        let insertedRanges = insertedTimeRanges(for: keptRanges)
+        let schedule = compactedSchedule(edit: edit, insertedRanges: insertedRanges)
+        guard !schedule.isEmpty else {
+            return try await planWithoutZoom(asset: asset, keptRanges: keptRanges)
         }
 
         let composition = AVMutableComposition()
-        var outputCursor = 0.0
-        for range in edit.keptRanges {
+        for entry in insertedRanges {
             try Task.checkCancellation()
-            let timeRange = cmTimeRange(for: range)
             try await composition.insertTimeRange(
-                timeRange,
+                entry.sourceTimeRange,
                 of: asset,
-                at: CMTime(seconds: outputCursor, preferredTimescale: 600),
+                at: entry.outputStart,
                 isolation: nil
             )
-            outputCursor += range.duration
         }
 
-        let schedule = compactedSchedule(edit: edit)
         let videoComposition = try await AVVideoComposition(applyingFiltersTo: composition) { request in
             let seconds = CMTimeGetSeconds(request.compositionTime)
             let output = ZoomImageRenderer.render(
@@ -176,19 +193,48 @@ enum ZoomVideoComposition {
     }
 
     static func compactedSchedule(edit: TimelineEdit) -> [ZoomRenderScene] {
-        var schedule: [ZoomRenderScene] = []
-        var outputCursor = 0.0
+        compactedSchedule(edit: edit, insertedRanges: insertedTimeRanges(for: edit.keptRanges))
+    }
 
-        for keptRange in edit.keptRanges {
+    private struct InsertedRange {
+        let sourceTimeRange: CMTimeRange
+        let outputStart: CMTime
+    }
+
+    private static func insertedTimeRanges(for keptRanges: [TimelineSpan]) -> [InsertedRange] {
+        var result: [InsertedRange] = []
+        var cursor = CMTime.zero
+        for range in keptRanges {
+            let timeRange = cmTimeRange(for: range)
+            result.append(
+                InsertedRange(
+                    sourceTimeRange: timeRange,
+                    outputStart: cursor
+                )
+            )
+            cursor = CMTimeAdd(cursor, timeRange.duration)
+        }
+        return result
+    }
+
+    private static func compactedSchedule(
+        edit: TimelineEdit,
+        insertedRanges: [InsertedRange]
+    ) -> [ZoomRenderScene] {
+        var schedule: [ZoomRenderScene] = []
+        for entry in insertedRanges {
+            let outputStart = CMTimeGetSeconds(entry.outputStart)
+            let sourceStart = CMTimeGetSeconds(entry.sourceTimeRange.start)
+            let sourceEnd = CMTimeGetSeconds(entry.sourceTimeRange.end)
             for scene in edit.zoomScenes {
-                let start = max(keptRange.start, scene.span.start)
-                let end = min(keptRange.end, scene.span.end)
+                let start = max(sourceStart, scene.span.start)
+                let end = min(sourceEnd, scene.span.end)
                 guard start < end else { continue }
                 schedule.append(
                     ZoomRenderScene(
                         span: TimelineSpan(
-                            start: outputCursor + start - keptRange.start,
-                            end: outputCursor + end - keptRange.start
+                            start: outputStart + start - sourceStart,
+                            end: outputStart + end - sourceStart
                         ),
                         sourceSceneSpan: scene.span,
                         sourceTimeAtStart: start,
@@ -197,7 +243,6 @@ enum ZoomVideoComposition {
                     )
                 )
             }
-            outputCursor += keptRange.duration
         }
         return schedule
     }
