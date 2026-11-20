@@ -221,6 +221,19 @@ final class AppLifecycleTests: XCTestCase {
             )
         )
     }
+
+    func testLaunchLogicRequestsPermissionWheneverPreflightPasses() {
+        XCTAssertTrue(LaunchLogic.showsWelcome(hasShownWelcome: false, hasScreenRecordingAccess: true))
+        XCTAssertTrue(LaunchLogic.shouldRequestPermissionOnLaunch(hasScreenRecordingAccess: true))
+        XCTAssertFalse(LaunchLogic.shouldRequestPermissionOnLaunch(hasScreenRecordingAccess: false))
+    }
+
+    func testWindowPresentationLogicOnlyReassertsTrackedVisibleWindows() {
+        XCTAssertTrue(WindowPresentationLogic.shouldReassert(isTracked: true, isVisible: true))
+        XCTAssertFalse(WindowPresentationLogic.shouldReassert(isTracked: false, isVisible: true))
+        XCTAssertFalse(WindowPresentationLogic.shouldReassert(isTracked: true, isVisible: false))
+        XCTAssertFalse(WindowPresentationLogic.shouldReassert(isTracked: false, isVisible: false))
+    }
 }
 
 private final class CopyThreadRecorder: @unchecked Sendable {

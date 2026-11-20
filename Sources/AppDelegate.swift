@@ -407,6 +407,18 @@ enum LaunchLogic {
     static func showsWelcome(hasShownWelcome: Bool, hasScreenRecordingAccess: Bool) -> Bool {
         !hasShownWelcome || !hasScreenRecordingAccess
     }
+
+    static func shouldRequestPermissionOnLaunch(hasScreenRecordingAccess: Bool) -> Bool {
+        hasScreenRecordingAccess
+    }
+}
+
+enum WindowPresentationLogic {
+    /// Reasserting focus on the next runloop tick must skip windows that
+    /// were already closed or hidden so they are never resurrected.
+    static func shouldReassert(isTracked: Bool, isVisible: Bool) -> Bool {
+        isTracked && isVisible
+    }
 }
 
 enum AppTerminationLogic {
@@ -536,13 +548,15 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
 
         // Checked without prompting: asking ScreenCaptureKit for content
         // would show the bare system prompt on every launch.
+        let hasScreenRecordingAccess = CGPreflightScreenCaptureAccess()
         if LaunchLogic.showsWelcome(
             hasShownWelcome: AppSettings.shared.hasShownWelcome,
-            hasScreenRecordingAccess: CGPreflightScreenCaptureAccess()
+            hasScreenRecordingAccess: hasScreenRecordingAccess
         ) {
             rebuildMenu()
             showWelcome()
-        } else {
+        }
+        if LaunchLogic.shouldRequestPermissionOnLaunch(hasScreenRecordingAccess: hasScreenRecordingAccess) {
             Task { @MainActor in
                 await screenRecorder.requestPermission()
                 screenRecorder.restoreRememberedTarget()
@@ -612,7 +626,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         NSApp.windowsMenu = windowMenu
     }
 
-    private func showWelcome() {
+    private func showWelcome(activate: Bool = true) {
         if welcomeWindow == nil {
             let welcomeView = WelcomeView(
                 permissions: permissionCenter,
@@ -630,7 +644,7 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
             )
         }
 
-        presentWindow(welcomeWindow)
+        presentWindow(welcomeWindow, activate: activate)
         permissionCenter.startMonitoring()
     }
 
@@ -652,8 +666,17 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     /// here, where the welcome window guides the user through System
     /// Settings.
     @objc private func grantScreenRecordingAccess() {
-        showWelcome()
-        grant(.screenRecording)
+        showWelcome(activate: false)
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.permissionCenter.refresh()
+            guard self.welcomeWindow != nil else { return }
+            if self.permissionCenter.state(of: .screenRecording) == .granted {
+                self.presentWindow(self.welcomeWindow, activate: true)
+                return
+            }
+            self.grant(.screenRecording)
+        }
     }
 
     private func setupHotkey() {
@@ -1052,16 +1075,27 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
     }
 
-    private func presentWindow(_ window: NSWindow?) {
+    private func presentWindow(_ window: NSWindow?, activate: Bool = true) {
         guard let window else { return }
 
         NSApp.setActivationPolicy(.regular)
+        guard activate else {
+            window.orderFrontRegardless()
+            return
+        }
+
         NSApp.activate(ignoringOtherApps: true)
         window.orderFrontRegardless()
         window.makeKeyAndOrderFront(nil)
         window.makeMain()
 
-        DispatchQueue.main.async {
+        DispatchQueue.main.async { [weak self, weak window] in
+            guard let self, let window,
+                WindowPresentationLogic.shouldReassert(
+                    isTracked: self.openWindows.contains(where: { $0 === window }),
+                    isVisible: window.isVisible
+                )
+            else { return }
             NSApp.activate(ignoringOtherApps: true)
             window.makeKeyAndOrderFront(nil)
             window.makeMain()
