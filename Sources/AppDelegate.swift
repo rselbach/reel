@@ -242,6 +242,17 @@ enum RecordingToggleLogic {
     }
 }
 
+enum RecordingStartGuard {
+    static func canStart(
+        hasPendingStart: Bool,
+        isRecording: Bool,
+        isStarting: Bool,
+        isStopping: Bool = false
+    ) -> Bool {
+        !hasPendingStart && !isRecording && !isStarting && !isStopping
+    }
+}
+
 /// A global shortcut as a menu key equivalent, so the status menu shows the
 /// combination that works from anywhere instead of one that works only
 /// while the menu is open.
@@ -681,6 +692,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         case .cancelPendingStart:
             cancelPendingRecordingStart()
         case .start:
+            guard
+                RecordingStartGuard.canStart(
+                    hasPendingStart: recordingStartTask != nil,
+                    isRecording: screenRecorder.isRecording,
+                    isStarting: screenRecorder.isStarting
+                )
+            else { return }
             recordingStartTask = Task { @MainActor [weak self] in
                 guard let self else { return }
                 defer { self.recordingStartTask = nil }
@@ -703,14 +721,17 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                     return
                 }
 
+                self.dismissRecordingDialog()
                 await self.startCurrentTarget(overrides: .none)
             }
         }
     }
 
     private func cancelPendingRecordingStart() {
-        recordingStartTask?.cancel()
+        // Mark the countdown cancelled before cancelling the parent task so
+        // the HUD always shows its brief cancel feedback instead of vanishing.
         activeCountdown?.cancel()
+        recordingStartTask?.cancel()
         hideCameraOverlay()
         screenRecorder.discardCameraPreview()
     }
@@ -1267,6 +1288,12 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         then()
     }
 
+    private func dismissRecordingDialog() {
+        guard let window = recordingDialogWindow else { return }
+        recordingDialogWindow = nil
+        window.close()
+    }
+
     @objc private func showRecordingDialog() {
         if let recordingDialogWindow {
             presentWindow(recordingDialogWindow)
@@ -1278,6 +1305,13 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         Task { @MainActor in
             defer { isPresentingRecordingDialog = false }
             await screenRecorder.refreshWindows()
+            guard
+                RecordingStartGuard.canStart(
+                    hasPendingStart: recordingStartTask != nil,
+                    isRecording: screenRecorder.isRecording,
+                    isStarting: screenRecorder.isStarting
+                )
+            else { return }
 
             let dialogView = RecordingDialog(
                 availableDisplays: screenRecorder.availableDisplays,
@@ -1291,17 +1325,14 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 ),
                 onStart: { [weak self] selection, overrides in
                     guard let self else { return }
-                    self.recordingDialogWindow?.close()
-                    self.recordingDialogWindow = nil
+                    self.dismissRecordingDialog()
                     self.startRecording(selection: selection, overrides: overrides)
                 },
                 onCancel: { [weak self] in
-                    self?.recordingDialogWindow?.close()
-                    self?.recordingDialogWindow = nil
+                    self?.dismissRecordingDialog()
                 },
                 onGrantAccess: { [weak self] in
-                    self?.recordingDialogWindow?.close()
-                    self?.recordingDialogWindow = nil
+                    self?.dismissRecordingDialog()
                     self?.grantScreenRecordingAccess()
                 },
                 onRefresh: { [weak self] in
@@ -1369,10 +1400,17 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         selection: RecordingSelection,
         overrides: RecordingOverrides
     ) {
-        guard recordingStartTask == nil else { return }
+        guard
+            RecordingStartGuard.canStart(
+                hasPendingStart: recordingStartTask != nil,
+                isRecording: screenRecorder.isRecording,
+                isStarting: screenRecorder.isStarting
+            )
+        else { return }
         recordingStartTask = Task { @MainActor [weak self] in
             guard let self else { return }
             defer { self.recordingStartTask = nil }
+            guard !self.screenRecorder.isRecording, !self.screenRecorder.isStarting else { return }
 
             switch selection {
             case .display(let displayID):
@@ -1383,7 +1421,9 @@ class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 self.screenRecorder.recordingMode = .window
             case .region:
                 guard let region = await RegionSelector().select(),
-                    !Task.isCancelled
+                    !Task.isCancelled,
+                    !self.screenRecorder.isRecording,
+                    !self.screenRecorder.isStarting
                 else { return }
                 self.screenRecorder.selectedRegion = region
                 self.screenRecorder.recordingMode = .region

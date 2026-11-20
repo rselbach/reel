@@ -178,6 +178,49 @@ final class AppLifecycleTests: XCTestCase {
             XCTFail("Unexpected error type: \(error)")
         }
     }
+
+    func testRecordingStartGuardBlocksActivePendingStartingAndStoppingStates() {
+        XCTAssertTrue(
+            RecordingStartGuard.canStart(
+                hasPendingStart: false,
+                isRecording: false,
+                isStarting: false,
+                isStopping: false
+            )
+        )
+        XCTAssertFalse(
+            RecordingStartGuard.canStart(
+                hasPendingStart: true,
+                isRecording: false,
+                isStarting: false,
+                isStopping: false
+            )
+        )
+        XCTAssertFalse(
+            RecordingStartGuard.canStart(
+                hasPendingStart: false,
+                isRecording: true,
+                isStarting: false,
+                isStopping: false
+            )
+        )
+        XCTAssertFalse(
+            RecordingStartGuard.canStart(
+                hasPendingStart: false,
+                isRecording: false,
+                isStarting: true,
+                isStopping: false
+            )
+        )
+        XCTAssertFalse(
+            RecordingStartGuard.canStart(
+                hasPendingStart: false,
+                isRecording: false,
+                isStarting: false,
+                isStopping: true
+            )
+        )
+    }
 }
 
 private final class CopyThreadRecorder: @unchecked Sendable {
