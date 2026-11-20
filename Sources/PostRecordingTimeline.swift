@@ -120,6 +120,7 @@ struct TimelineEdit: Equatable, Sendable {
     static let minimumDuration: Double = 0.5
     static let minimumClipDuration: Double = 0.05
     static let minimumZoomSceneDuration: Double = 0.25
+    private static let durationEpsilon: Double = 1e-9
 
     let sourceDuration: Double
     private(set) var clips: [TimelineClip]
@@ -332,7 +333,8 @@ struct TimelineEdit: Equatable, Sendable {
     func canDeleteClip(id: TimelineClip.ID) -> Bool {
         guard let clip = clip(id: id), !clip.isDeleted else { return false }
         let minimum = min(Self.minimumDuration, sourceDuration)
-        return editedDuration - clip.span.duration >= minimum
+        let remainingKeptDuration = Self.keptDuration(of: clips.lazy.filter { $0.id != id })
+        return remainingKeptDuration + Self.durationEpsilon >= minimum
     }
 
     @discardableResult
@@ -407,11 +409,28 @@ struct TimelineEdit: Equatable, Sendable {
                 // the cut; move the cut to the clip's edge instead.
                 if cut - clip.span.start < Self.minimumClipDuration {
                     cut = clip.span.start
-                } else if clip.span.end - cut < Self.minimumClipDuration,
-                    Self.keptDuration(of: remaining.dropFirst()) >= min(Self.minimumDuration, sourceDuration)
-                {
-                    cut = clip.span.end
-                    remaining.removeFirst()
+                } else if clip.span.end - cut < Self.minimumClipDuration {
+                    if Self.keptDuration(of: remaining.dropFirst()) + Self.durationEpsilon
+                        >= min(Self.minimumDuration, sourceDuration)
+                    {
+                        cut = clip.span.end
+                        remaining.removeFirst()
+                    } else {
+                        var clampedCut = clip.span.end - Self.minimumClipDuration
+                        if clip.span.end - clampedCut < Self.minimumClipDuration {
+                            clampedCut = clampedCut.nextDown
+                        }
+                        if clampedCut < Self.minimumClipDuration || clampedCut <= clip.span.start {
+                            cut = clip.span.start
+                        } else {
+                            cut = clampedCut
+                            remaining[0] = TimelineClip(
+                                id: clip.id,
+                                span: TimelineSpan(start: cut, end: clip.span.end),
+                                isDeleted: false
+                            )
+                        }
+                    }
                 } else {
                     remaining[0] = TimelineClip(
                         id: clip.id,
@@ -453,11 +472,28 @@ struct TimelineEdit: Equatable, Sendable {
             if let clip = remaining.last, !clip.isDeleted, clip.span.end > cut {
                 if clip.span.end - cut < Self.minimumClipDuration {
                     cut = clip.span.end
-                } else if cut - clip.span.start < Self.minimumClipDuration,
-                    Self.keptDuration(of: remaining.dropLast()) >= min(Self.minimumDuration, sourceDuration)
-                {
-                    cut = clip.span.start
-                    remaining.removeLast()
+                } else if cut - clip.span.start < Self.minimumClipDuration {
+                    if Self.keptDuration(of: remaining.dropLast()) + Self.durationEpsilon
+                        >= min(Self.minimumDuration, sourceDuration)
+                    {
+                        cut = clip.span.start
+                        remaining.removeLast()
+                    } else {
+                        var clampedCut = clip.span.start + Self.minimumClipDuration
+                        if clampedCut - clip.span.start < Self.minimumClipDuration {
+                            clampedCut = clampedCut.nextUp
+                        }
+                        if sourceDuration - clampedCut < Self.minimumClipDuration || clampedCut >= clip.span.end {
+                            cut = clip.span.end
+                        } else {
+                            cut = clampedCut
+                            remaining[remaining.count - 1] = TimelineClip(
+                                id: clip.id,
+                                span: TimelineSpan(start: clip.span.start, end: cut),
+                                isDeleted: false
+                            )
+                        }
+                    }
                 } else {
                     remaining[remaining.count - 1] = TimelineClip(
                         id: clip.id,
@@ -667,22 +703,34 @@ enum SavedTimelineEdit {
         guard
             let stored = try? JSONDecoder().decode(Stored.self, from: data),
             stored.version == 1,
+            stored.sourceDuration.isFinite,
+            stored.sourceDuration > 0,
             abs(stored.sourceDuration - sourceDuration) <= 0.05,
+            isValidStoredClips(stored.clips, sourceDuration: stored.sourceDuration),
             var edit = TimelineEdit(sourceDuration: sourceDuration)
         else { return nil }
 
         for clip in stored.clips.dropFirst() {
-            guard edit.splitClip(at: clip.start) != nil else { return nil }
+            let splitTime = min(clip.start, sourceDuration)
+            guard edit.splitClip(at: splitTime) != nil else { return nil }
         }
         for clip in stored.clips where clip.isDeleted {
-            guard let id = edit.clipID(at: clip.start), edit.deleteClip(id: id) else { return nil }
+            let start = min(clip.start, sourceDuration)
+            guard let id = edit.clipID(at: start), edit.deleteClip(id: id) else { return nil }
         }
         for zoom in stored.zoomScenes {
+            guard
+                zoom.start.isFinite,
+                zoom.end.isFinite,
+                zoom.start >= 0,
+                zoom.end <= stored.sourceDuration
+            else { return nil }
+            let clampedEnd = min(zoom.end, sourceDuration)
             guard
                 let focalPoint = UnitPoint2D(x: zoom.focalX, y: zoom.focalY),
                 let speed = ZoomSceneSettings.TransitionSpeed(rawValue: zoom.transition),
                 (try? edit.addZoomScene(
-                    span: TimelineSpan(start: zoom.start, end: zoom.end),
+                    span: TimelineSpan(start: zoom.start, end: clampedEnd),
                     focalPoint: focalPoint,
                     settings: ZoomSceneSettings(level: .init(scale: zoom.scale), transitionSpeed: speed)
                 )) != nil
@@ -691,27 +739,52 @@ enum SavedTimelineEdit {
         return edit
     }
 
+    private static func isValidStoredClips(_ clips: [Stored.Clip], sourceDuration: Double) -> Bool {
+        guard let first = clips.first, let last = clips.last else { return false }
+        guard first.start == 0, abs(last.end - sourceDuration) <= 1e-9 else { return false }
+        var expectedStart = 0.0
+        for clip in clips {
+            guard
+                clip.start.isFinite,
+                clip.end.isFinite,
+                clip.start < clip.end,
+                abs(clip.start - expectedStart) <= 1e-9
+            else { return false }
+            expectedStart = clip.end
+        }
+        return true
+    }
+
     static func load(from url: URL, sourceDuration: Double) -> TimelineEdit? {
-        let size = getxattr(url.path, attributeName, nil, 0, 0, 0)
-        guard size > 0 else { return nil }
-        var data = Data(count: size)
-        let read = data.withUnsafeMutableBytes { getxattr(url.path, attributeName, $0.baseAddress, size, 0, 0) }
-        guard read == size else { return nil }
-        return decode(data, sourceDuration: sourceDuration)
+        url.withUnsafeFileSystemRepresentation { path in
+            guard let path else { return nil }
+            let size = getxattr(path, attributeName, nil, 0, 0, 0)
+            guard size > 0 else { return nil }
+            var data = Data(count: size)
+            let read = data.withUnsafeMutableBytes { getxattr(path, attributeName, $0.baseAddress, size, 0, 0) }
+            guard read == size else { return nil }
+            return decode(data, sourceDuration: sourceDuration)
+        }
     }
 
     /// Saves the edit, or removes the saved one once nothing is edited.
     static func save(_ edit: TimelineEdit, to url: URL) throws {
         guard edit.hasMeaningfulChanges else {
-            guard removexattr(url.path, attributeName, 0) == 0 || errno == ENOATTR else {
-                throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+            try url.withUnsafeFileSystemRepresentation { path in
+                guard let path else { throw POSIXError(.EINVAL) }
+                guard removexattr(path, attributeName, 0) == 0 || errno == ENOATTR || errno == ENOTSUP else {
+                    throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+                }
             }
             return
         }
         let data = try encode(edit)
-        let result = data.withUnsafeBytes { setxattr(url.path, attributeName, $0.baseAddress, data.count, 0, 0) }
-        guard result == 0 else {
-            throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+        try url.withUnsafeFileSystemRepresentation { path in
+            guard let path else { throw POSIXError(.EINVAL) }
+            let result = data.withUnsafeBytes { setxattr(path, attributeName, $0.baseAddress, data.count, 0, 0) }
+            guard result == 0 else {
+                throw POSIXError(POSIXErrorCode(rawValue: errno) ?? .EIO)
+            }
         }
     }
 }

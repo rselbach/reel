@@ -451,6 +451,74 @@ final class PostRecordingTimelineTests: XCTestCase {
         XCTAssertFalse(edit.hasMeaningfulChanges)
     }
 
+    func testTrimmingNearMinimumDurationNeverCreatesUndecodableSlivers() throws {
+        var startTrim = try XCTUnwrap(TimelineEdit(sourceDuration: 10))
+        _ = try XCTUnwrap(startTrim.splitClip(at: 0.52))
+        let tailID = try XCTUnwrap(startTrim.splitClip(at: 0.99))
+        XCTAssertTrue(startTrim.deleteClip(id: tailID))
+
+        startTrim.trim(.start, to: 0.49)
+        for clip in startTrim.clips {
+            XCTAssertGreaterThanOrEqual(clip.span.duration, TimelineEdit.minimumClipDuration)
+        }
+        let encodedStart = try SavedTimelineEdit.encode(startTrim)
+        let decodedStart = try XCTUnwrap(SavedTimelineEdit.decode(encodedStart, sourceDuration: 10))
+        XCTAssertEqual(decodedStart.keptRanges, startTrim.keptRanges)
+
+        let headID = UUID()
+        var endTrim = try XCTUnwrap(TimelineEdit(sourceDuration: 10, initialClipID: headID))
+        _ = try XCTUnwrap(endTrim.splitClip(at: 9.01))
+        _ = try XCTUnwrap(endTrim.splitClip(at: 9.48))
+        XCTAssertTrue(endTrim.deleteClip(id: headID))
+
+        endTrim.trim(.end, to: 9.51)
+        for clip in endTrim.clips {
+            XCTAssertGreaterThanOrEqual(clip.span.duration, TimelineEdit.minimumClipDuration)
+        }
+        let encodedEnd = try SavedTimelineEdit.encode(endTrim)
+        let decodedEnd = try XCTUnwrap(SavedTimelineEdit.decode(encodedEnd, sourceDuration: 10))
+        XCTAssertEqual(decodedEnd.keptRanges, endTrim.keptRanges)
+    }
+
+    func testSavedTimelineEditRoundTripsMinimumDurationCutWithoutFloatDrift() throws {
+        var edit = try XCTUnwrap(TimelineEdit(sourceDuration: 5.0))
+        let cutID = try XCTUnwrap(edit.splitClip(at: 0.1))
+        _ = try XCTUnwrap(edit.splitClip(at: 0.4))
+        XCTAssertTrue(edit.deleteClip(id: cutID))
+        edit.trim(.end, to: 0)
+
+        let data = try SavedTimelineEdit.encode(edit)
+        let decoded = try XCTUnwrap(SavedTimelineEdit.decode(data, sourceDuration: 5.0))
+        XCTAssertEqual(decoded.keptRanges.count, edit.keptRanges.count)
+        XCTAssertEqual(decoded.editedDuration, TimelineEdit.minimumDuration, accuracy: 1e-6)
+    }
+
+    func testSavedTimelineEditClampsEdgeTouchingZoomAndRejectsMalformedClips() throws {
+        var edit = try XCTUnwrap(TimelineEdit(sourceDuration: 10.0))
+        try edit.addZoomScene(span: TimelineSpan(start: 8.0, end: 10.0))
+        let data = try SavedTimelineEdit.encode(edit)
+
+        let restored = try XCTUnwrap(SavedTimelineEdit.decode(data, sourceDuration: 9.98))
+        XCTAssertEqual(restored.zoomScenes.count, 1)
+        XCTAssertEqual(restored.zoomScenes[0].span.start, 8.0, accuracy: 1e-9)
+        XCTAssertEqual(restored.zoomScenes[0].span.end, 9.98, accuracy: 1e-9)
+
+        let malformedPayloads = [
+            "empty clips": #"{"version":1,"sourceDuration":10,"clips":[],"zoomScenes":[]}"#,
+            "non-zero start":
+                #"{"version":1,"sourceDuration":10,"clips":[{"start":1,"end":10,"isDeleted":false}],"zoomScenes":[]}"#,
+            "short end":
+                #"{"version":1,"sourceDuration":10,"clips":[{"start":0,"end":9,"isDeleted":false}],"zoomScenes":[]}"#,
+            "gap between clips":
+                #"{"version":1,"sourceDuration":10,"#
+                + #""clips":[{"start":0,"end":4,"isDeleted":false},{"start":5,"end":10,"isDeleted":false}],"#
+                + #""zoomScenes":[]}"#,
+        ]
+        for (name, json) in malformedPayloads {
+            XCTAssertNil(SavedTimelineEdit.decode(Data(json.utf8), sourceDuration: 10), name)
+        }
+    }
+
     @MainActor
     func testVideoExporterJoinsKeptRangesInOrderForBothPresets() async throws {
         let directory = FileManager.default.temporaryDirectory
